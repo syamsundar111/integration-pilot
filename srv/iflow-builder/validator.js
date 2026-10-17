@@ -19,6 +19,9 @@ const SUPPORTED_ENDS = ['httpReceiver', 'none']
 const NOT_IN_V1 = /router|gateway|split|mapping|multicast|join|gather|aggregat|filter|sequential|parallel|loop|localprocess|xslt/i
 // Error handling is supported, but as the top-level exceptionSubprocess field, not as a step
 const EXCEPTION_STEP = /exception|error|subprocess|catch/i
+// Start and end events are not steps: the trigger and the end are top-level fields
+const END_STEP = /^(none|end|endEvent|messageEnd|httpReceiver)$/i
+const TRIGGER_STEP = /^(start|startEvent|timer|httpsSender|sender)$/i
 
 const DEFAULT_STEP_NAMES = {
   contentModifier: 'Content Modifier',
@@ -146,7 +149,11 @@ function validate(spec, { attachments = [] } = {}) {
     const type = s?.type
     if (!type || SUPPORTED_STEPS.includes(type)) return
     skip.push(`/steps/${i}`)
-    if (EXCEPTION_STEP.test(type))
+    if (END_STEP.test(type))
+      err('END_AS_STEP', `steps[${i}]: '${type}' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end', e.g. { "type": "none" }`)
+    else if (TRIGGER_STEP.test(type))
+      err('TRIGGER_AS_STEP', `steps[${i}]: '${type}' is the trigger, not a step — remove it from steps; the trigger is the top-level 'trigger', e.g. { "type": "timer", "mode": "once" }`)
+    else if (EXCEPTION_STEP.test(type))
       err('EXCEPTION_AS_STEP', `steps[${i}]: error handling is not a step — remove '${type}' from steps and put the error handling steps into the top-level 'exceptionSubprocess': { "steps": [...] }`)
     else if (NOT_IN_V1.test(type))
       err(

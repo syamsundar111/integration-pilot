@@ -786,3 +786,12 @@ describe('history trimming and the latest spec as session state', () => {
     expect(stored.filter((m) => m.role === 'tool')).toHaveLength(4)
   })
 })
+
+describe('a spec sent as a broken JSON string', () => {
+  test('gets SPEC_NOT_JSON with the parser position', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('validateSpec', { spec: '{"id": "X", "code": "\\$bad"}' })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Build it' })
+    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result).toMatchObject({ valid: false, errors: [expect.stringMatching(/^SPEC_NOT_JSON spec: sent as a string that is not valid JSON \(.*position/)] })
+  })
+})

@@ -126,4 +126,10 @@ describe('validator', () => {
     expect(issues.map((i) => i.message)).toEqual(errors)
     expect(new Set(issues.map((i) => i.code))).toEqual(new Set(['STEP_NOT_IN_V1', 'AUTH_UNSUPPORTED', 'BAD_VALUE', 'TOO_MANY', 'DUPLICATE_STEP_NAME', 'PARAM_UNDEFINED']))
   })
+
+  test('start and end events listed as steps point to the top-level fields', () => {
+    const { issues } = validate(baseSpec({ steps: [{ type: 'timer' }, { type: 'jsonToXml' }, { type: 'none' }] }))
+    expect(issues.map((i) => i.code)).toEqual(['TRIGGER_AS_STEP', 'END_AS_STEP'])
+    expect(issues[1].message).toMatch(/steps\[2\]: 'none' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end'/)
+  })
 })

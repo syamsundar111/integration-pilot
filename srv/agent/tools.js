@@ -90,6 +90,22 @@ function compactInvalid(issues, instruction) {
   return { valid: false, errors, ...(instruction && { instruction }) }
 }
 
+/** A spec sent as a JSON string that does not parse: say where, instead of "must be a JSON object" */
+function unparsableSpec(spec) {
+  if (typeof spec !== 'string') return null
+  try {
+    JSON.parse(spec)
+    return null
+  } catch (e) {
+    return compactInvalid([
+      {
+        code: 'SPEC_NOT_JSON',
+        message: `spec: sent as a string that is not valid JSON (${e.message}) — send spec as a JSON object, not a string. Long Groovy code breaks easily: keep scripts short, or ask the user to attach them.`
+      }
+    ])
+  }
+}
+
 /**
  * The spec to propose: the one passed, or the one the last validateSpec call accepted (in this
  * turn, or kept as the conversation's draft spec from an earlier one)
@@ -280,6 +296,8 @@ const handlers = {
     const draft = !spec && useDraftSpec ? await draftOf(ctx) : null
     if (draft) spec = draft.spec
     if (!spec) return compactInvalid([{ code: 'NO_SPEC', message: useDraftSpec ? 'spec: this conversation has no draft spec' : 'spec: missing — send the complete spec' }])
+    const notJson = unparsableSpec(spec)
+    if (notJson) return notJson
     const source = draft ? draft.source : 'your latest validateSpec'
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
@@ -314,6 +332,8 @@ const handlers = {
   async proposeIflow(args, ctx) {
     const { spec, error } = await specToPropose(args, ctx)
     if (error) return error
+    const notJson = unparsableSpec(spec)
+    if (notJson) return notJson
     if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
@@ -372,6 +392,8 @@ const handlers = {
   async proposeIflowUpdate(args, ctx) {
     const { spec, error } = await specToPropose(args, ctx)
     if (error) return error
+    const notJson = unparsableSpec(spec)
+    if (notJson) return notJson
     if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflowUpdate' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
