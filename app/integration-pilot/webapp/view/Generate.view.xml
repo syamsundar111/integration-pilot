@@ -42,14 +42,17 @@
         <!-- ================= chat ================= -->
         <VBox renderType="Bare" class="ipPane ipCard">
           <ScrollContainer id="chatScroll" vertical="true" horizontal="false" height="100%" class="ipPaneBody ipChatScroll" busy="{chat>/loadingSession}" busyIndicatorDelay="0">
-            <!-- empty state with starter prompts -->
+            <!-- empty state with the request template -->
             <VBox class="ipEmpty" alignItems="Center" visible="{= !${chat>/messages}.length &amp;&amp; !${chat>/turn} &amp;&amp; !${chat>/loadingSession} }">
               <core:Icon src="sap-icon://lightbulb" size="2.5rem" color="Default" class="sapUiSmallMarginBottom" />
               <Title text="What should we integrate?" level="H3" />
               <Text text="The assistant asks for missing details, then proposes an iFlow. Nothing is created until you approve." textAlign="Center" class="sapUiTinyMarginTop sapUiMediumMarginBottom" />
-              <VBox items="{chat>/starters}" width="100%" class="ipGapS" renderType="Bare">
-                <Button text="{chat>}" press=".onStarter" class="ipStarter" />
-              </VBox>
+              <Button text="Start from the request template" icon="sap-icon://form" press=".onUseTemplate" class="ipStarter" />
+              <Text
+                text="Trigger · steps · receivers · authentication · package · error handling. Requests that give these up front skip the clarifying questions; requests are checked before sending."
+                textAlign="Center"
+                class="ipSubtle sapUiSmallMarginTop"
+              />
             </VBox>
 
             <!-- messages -->

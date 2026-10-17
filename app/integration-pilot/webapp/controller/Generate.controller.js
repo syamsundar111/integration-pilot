@@ -7,21 +7,17 @@ sap.ui.define(
     'sap/m/TextArea',
     'sap/m/Label',
     'sap/m/VBox',
+    'sap/m/MessageStrip',
     'integration/pilot/util/api',
     'integration/pilot/util/markdown',
-    'integration/pilot/util/flowDiagram'
+    'integration/pilot/util/flowDiagram',
+    'integration/pilot/util/promptLint'
   ],
-  (BaseController, JSONModel, Dialog, Button, TextArea, Label, VBox, api, markdown, flowDiagram) => {
+  (BaseController, JSONModel, Dialog, Button, TextArea, Label, VBox, MessageStrip, api, markdown, flowDiagram, promptLint) => {
     'use strict'
 
     const POLL_MS = 2000
     const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
-    const STARTERS = [
-      'Build an iFlow that receives JSON orders via HTTPS, converts them to XML and posts them to a backend URL.',
-      'Which iFlows are in error right now, and why?',
-      'Explain the iFlow Pilot_Test_1.',
-      'Create a timer flow that calls an HTTP endpoint once after deployment and logs the response in a Groovy script.'
-    ]
     const STEP_TYPES = {
       contentModifier: 'Content Modifier',
       groovyScript: 'Groovy Script',
@@ -66,7 +62,6 @@ sap.ui.define(
             sessions: [],
             sessionId: '',
             messages: [],
-            starters: STARTERS,
             input: '',
             turn: null,
             starting: false,
@@ -231,18 +226,57 @@ sap.ui.define(
         }, 60)
       },
 
-      onStarter(e) {
-        this.send(e.getSource().getText())
+      /** Fills the composer with the request template (trigger / steps / receivers / auth / package / error handling) */
+      onUseTemplate() {
+        this.chat().setProperty('/input', promptLint.TEMPLATE)
+        setTimeout(() => this.byId('input').focus(), 50)
       },
 
       onSend() {
         this.send(this.chat().getProperty('/input'))
       },
 
+      /**
+       * Shows the prompt linter's warnings; resolves true for "Send anyway", false for "Edit"
+       * @param {{ key: string, message: string }[]} warnings
+       */
+      confirmWarnings(warnings) {
+        return new Promise((resolve) => {
+          let choice = false
+          const close = (send) => {
+            choice = send
+            dialog.close()
+          }
+          const dialog = new Dialog({
+            title: 'Check your request',
+            type: 'Message',
+            state: 'Warning',
+            contentWidth: '32rem',
+            content: new VBox({
+              renderType: 'Bare',
+              items: warnings.map((w) => new MessageStrip({ text: w.message, type: 'Warning', showIcon: true }))
+            }).addStyleClass('ipGapS'),
+            beginButton: new Button({ text: 'Send anyway', type: 'Emphasized', press: () => close(true) }),
+            endButton: new Button({ text: 'Edit', press: () => close(false) }),
+            afterClose: () => {
+              dialog.destroy()
+              resolve(choice)
+            }
+          })
+          this.getView().addDependent(dialog)
+          dialog.open()
+        })
+      },
+
       async send(text) {
         const c = this.chat()
         const message = (text || '').trim()
         if (!message || c.getProperty('/turn') || c.getProperty('/starting')) return
+        const warnings = promptLint.lint(message)
+        if (warnings.length && !(await this.confirmWarnings(warnings))) {
+          setTimeout(() => this.byId('input').focus(), 50)
+          return
+        }
         c.setProperty('/input', '')
         this.addMessage(this.toMessage('user', message))
         c.setProperty('/starting', true)
