@@ -1,0 +1,111 @@
+# Integration Pilot
+
+AI assistant & **SAPUI5** dashboard for SAP Cloud Integration (CPI): manage packages and iFlows,
+and generate iFlows from natural-language requirements.
+
+Integration Pilot is the SAPUI5 counterpart of `iflow-pilot` (React). It has the same CAP Node.js
+backend and the same features, but runs as a separate app with its own database, port and XSUAA app.
+It shares the CPI tenant, the destinations and the AI model with `iflow-pilot`.
+
+- **Backend:** CAP Node.js (`srv/`, `db/`), REST API at `/api`. Same services as iflow-pilot.
+- **Frontend:** a freestyle **SAPUI5 1.136** app (long-term maintenance) in `app/integration-pilot/`.
+  It uses the Horizon theme and XML views with JavaScript controllers, and loads UI5 from the SAP CDN.
+
+## Screens
+
+| Page | UI5 building blocks |
+|---|---|
+| Shell | `sap.tnt.ToolPage`: ToolHeader (tenant, live connection status, user) and SideNavigation (Overview / Build / History) |
+| Dashboard | `sap.f.DynamicPage`, `GenericTile` KPIs, `sap.f.Card` lists (failed messages, recent proposals, quick actions) |
+| Packages | `sap.m.Table` with search, create/edit Dialog (CPI id rules), delete with type-to-confirm and a warning about deployed iFlows |
+| iFlows | `sap.f.FlexibleColumnLayout` list-detail; IconTabBar Overview (flow diagram, adapters) / Parameters (editable) / Scripts (`sap.ui.codeeditor` Groovy) / Runtime; Download, Deploy, Undeploy, Explain with AI, Delete; Explain from ZIP (`FileUploader`) |
+| Generate | Chat (Markdown replies, starter prompts, history, live agent steps with Cancel) and the proposal panel (target package check, flow diagram, steps, parameters, Groovy, approve / deploy / reject / retry with live progress) |
+| Monitor | Runtime artifacts with a status filter and error details, a "waiting for the runtime" notice, message logs with status/time filters |
+| Activity | Audit log with search, action and result filters, and a details dialog |
+
+## Project structure
+
+```
+db/schema.cds                       data model (namespace iflowpilot, shared with iflow-pilot's code)
+srv/                                CAP service, CPI client, LLM adapter, agent, iFlow builder (same as iflow-pilot)
+app/integration-pilot/              SAPUI5 app (UI5 Tooling project)
+  webapp/index.html                 bootstrap: SAPUI5 1.136 from ui5.sap.com, Horizon theme
+  webapp/manifest.json              app descriptor: routes (hash based), libraries
+  webapp/Component.js
+  webapp/view/*.view.xml            App (shell), Dashboard, Packages, Iflows, Generate, Monitor, Activity
+  webapp/controller/*.controller.js
+  webapp/fragment/                  dialogs
+  webapp/util/                      api (REST client), formatter, markdown, flowDiagram, ExplainDialog
+  webapp/css/style.css              small additions using Horizon theme parameters
+app/router/                         standalone approuter (XSUAA login, serves the UI5 build, forwards /api)
+server.js                           local: serves the UI5 app at "/"; CF/SQLite: deploys the in-memory schema
+mta.yaml, mta-sqlite.yaml           Cloud Foundry deployment (HANA Cloud default, SQLite alternative)
+xs-security.json                    XSUAA: scope Admin, role collection IntegrationPilot_Admin
+```
+
+## Setup
+
+```bash
+npm install
+npm run ui:install       # UI5 Tooling and linter (only needed for build/lint)
+npm run db:deploy        # creates db.sqlite (git-ignored) for the local profiles
+```
+
+`.env` holds `LLM_MODEL` and `LLM_FALLBACK_MODEL`, plus optional `LLM_TIMEOUT_MS` (per model call,
+default 120000) and `LLM_MAX_TOKENS` (default 8192); large iFlow specs with Groovy scripts need more of
+both. `.cdsrc-private.json` binds the hybrid profile
+to the destination service `iflowpilot-dest`. Both files were copied from iflow-pilot and are
+git-ignored. See iflow-pilot's README for setting up the destinations `CPI_API` and `NVIDIA_LLM`.
+
+## Run locally
+
+Integration Pilot runs on **port 4005**, so it can run next to iflow-pilot (4004).
+
+```bash
+cf login -a https://api.cf.us10-001.hana.ondemand.com && cf target -o <org> -s <space>
+npm run watch:hybrid     # CAP + UI5 app on http://localhost:4005
+```
+
+Open `http://localhost:4005/`. The UI5 app is served directly from `webapp/`: no build step,
+and changes appear after a browser reload. If `app/integration-pilot/dist` exists (after
+`npm run ui:build`), CAP serves the build instead; delete `dist` to go back to the sources.
+
+**In SAP Business Application Studio:** when the port-4005 notification appears, choose *Open in a New
+Tab*, or use the Command Palette → *Ports: Preview* → 4005.
+
+Locally every request runs as `local-dev` with the `Admin` role (`srv/lib/dev-auth.js`).
+
+## Checks
+
+```bash
+npm test                 # backend: 108 jest tests (validator, builder, parser, fidelity, LLM, agent, proposals, stats)
+npm run ui:lint          # UI5 linter (deprecated APIs, manifest, best practices)
+npm run ui:build         # UI5 build: Component-preload.js, minified sources in app/integration-pilot/dist
+scripts/test-chat.sh     # live agent conversation via curl (default http://localhost:4005/api)
+```
+
+## Deploy to Cloud Foundry
+
+The same setup as iflow-pilot, with Integration Pilot's own names:
+
+- **`integration-pilot`:** the approuter. Users open this URL. It serves the UI5 build.
+- **`integration-pilot-srv`:** the CAP backend. It uses the HANA Cloud HDI container
+  `integration-pilot-db`, deployed by `integration-pilot-db-deployer`.
+- **Shared:** the existing destination service `iflowpilot-dest`.
+
+```bash
+npm run build:mta && npm run deploy                  # HANA Cloud (instance must be running and mapped to the space)
+# or
+npm run build:mta:sqlite && npm run deploy:sqlite    # in-memory SQLite, demo only
+```
+
+After the first deployment, assign the role collection **`IntegrationPilot_Admin`** (BTP cockpit →
+Security → Role Collections → `IntegrationPilot_Admin` → Edit → Users). Then log out and in again.
+
+**Local hybrid run against HANA:**
+
+```bash
+cds bind -2 integration-pilot-db --for hybrid-hana
+cds bind -2 iflowpilot-dest --for hybrid-hana
+npm run watch:hana
+```

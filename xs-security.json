@@ -1,0 +1,28 @@
+{
+  "xsappname": "integration-pilot",
+  "tenant-mode": "dedicated",
+  "description": "Integration Pilot — AI assistant & dashboard for SAP Cloud Integration",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.Admin",
+      "description": "Use Integration Pilot: read and change CPI content, chat with the agent, approve proposals"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "Admin",
+      "description": "Integration Pilot administrator",
+      "scope-references": ["$XSAPPNAME.Admin"]
+    }
+  ],
+  "role-collections": [
+    {
+      "name": "IntegrationPilot_Admin",
+      "description": "Full access to Integration Pilot",
+      "role-template-references": ["$XSAPPNAME.Admin"]
+    }
+  ],
+  "oauth2-configuration": {
+    "redirect-uris": ["https://*.hana.ondemand.com/**", "http://localhost:5000/**"]
+  }
+}

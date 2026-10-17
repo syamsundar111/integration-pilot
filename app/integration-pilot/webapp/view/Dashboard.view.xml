@@ -1,0 +1,89 @@
+<mvc:View controllerName="integration.pilot.controller.Dashboard" xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m" xmlns:f="sap.f" xmlns:core="sap.ui.core">
+  <f:DynamicPage id="page" toggleHeaderOnTitleClick="false">
+    <f:title>
+      <f:DynamicPageTitle>
+        <f:heading><Title text="Dashboard" level="H2" /></f:heading>
+        <f:expandedContent><Text text="Your Cloud Integration tenant at a glance." /></f:expandedContent>
+        <f:actions>
+          <Button text="Refresh" icon="sap-icon://refresh" press=".onRefresh" />
+          <Button text="Create package" icon="sap-icon://add" press=".onCreatePackage" />
+          <Button text="New iFlow with AI" icon="sap-icon://lightbulb" type="Emphasized" press=".onNewIflow" />
+        </f:actions>
+      </f:DynamicPageTitle>
+    </f:title>
+    <f:content>
+      <VBox>
+        <MessageStrip text="{view>/statsError/message}" type="Error" showIcon="true" visible="{= !!${view>/statsError} }" class="sapUiSmallMarginBottom" />
+
+        <!-- KPI tiles -->
+        <HBox class="ipKpiRow" renderType="Bare">
+          <GenericTile header="Packages" subheader="Integration packages" press=".onNav" state="{= ${view>/stats} ? 'Loaded' : 'Loading' }" app:route="packages" xmlns:app="http://schemas.sap.com/sapui5/extension/sap.ui.core.CustomData/1">
+            <TileContent><NumericContent value="{view>/stats/packages}" icon="sap-icon://product" withMargin="false" truncateValueTo="9" /></TileContent>
+          </GenericTile>
+          <GenericTile header="iFlows" subheader="{= ${view>/stats/packagesNotReadable} ? ${view>/stats/packagesNotReadable} + ' package(s) not readable' : 'Across all packages' }" press=".onNav" state="{= ${view>/stats} ? 'Loaded' : 'Loading' }" app:route="iflows" xmlns:app="http://schemas.sap.com/sapui5/extension/sap.ui.core.CustomData/1">
+            <TileContent><NumericContent value="{view>/stats/iflows}" icon="sap-icon://process" withMargin="false" truncateValueTo="9" /></TileContent>
+          </GenericTile>
+          <GenericTile header="Deployed / started" subheader="{= ${view>/stats/starting} ? ${view>/stats/starting} + ' starting' : 'Runtime artifacts' }" press=".onNav" state="{= ${view>/stats} ? 'Loaded' : 'Loading' }" app:route="monitor" xmlns:app="http://schemas.sap.com/sapui5/extension/sap.ui.core.CustomData/1">
+            <TileContent><NumericContent value="{= ${view>/stats} ? ${view>/stats/deployed} + ' / ' + ${view>/stats/started} : '' }" icon="sap-icon://sys-enter-2" valueColor="Good" withMargin="false" truncateValueTo="9" /></TileContent>
+          </GenericTile>
+          <GenericTile header="In error" subheader="{= ${view>/stats/error} ? 'Needs attention' : 'All good' }" press=".onNavErrors" state="{= ${view>/stats} ? 'Loaded' : 'Loading' }">
+            <TileContent><NumericContent value="{view>/stats/error}" icon="sap-icon://alert" valueColor="{= ${view>/stats/error} ? 'Error' : 'Neutral' }" withMargin="false" truncateValueTo="9" /></TileContent>
+          </GenericTile>
+        </HBox>
+        <Text text="{= ${view>/stats} ? 'Updated ' + ${path: 'view>/stats/computedAt', formatter: '.formatter.relativeTime'} : '' }" class="ipSubtle ipUpdated" width="100%" textAlign="End" />
+
+        <HBox renderType="Bare" class="ipDashGrid sapUiSmallMarginTop">
+          <!-- failed messages -->
+          <f:Card>
+            <f:header>
+              <card:Header xmlns:card="sap.f.cards" title="Failed messages · last 24h" subtitle="{= ${view>/stats/failedMessages24h} !== undefined &amp;&amp; ${view>/stats/failedMessages24h} !== null ? ${view>/stats/failedMessages24h} + (${view>/stats/failedMessages24hCapped} ? '+' : '') + ' failed' : '' }" iconSrc="sap-icon://message-error" press=".onMonitorFailed" />
+            </f:header>
+            <f:content>
+              <List items="{view>/failed}" busy="{view>/failedBusy}" busyIndicatorDelay="0" showSeparators="Inner" noData="Nothing failed in the last 24 hours." width="100%">
+                <noData>
+                  <IllustratedMessage illustrationType="sapIllus-NoActivities" illustrationSize="ExtraSmall" title="No failed messages" description="Nothing failed in the last 24 hours." enableVerticalResponsiveness="true" />
+                </noData>
+                <StandardListItem title="{view>integrationFlowName}" description="{view>messageGuid}" info="{path: 'view>logEnd', formatter: '.formatter.relativeTime'}" infoState="Error" icon="sap-icon://message-error" />
+              </List>
+            </f:content>
+          </f:Card>
+
+          <VBox class="ipGapM" renderType="Bare">
+            <!-- recent proposals -->
+            <f:Card>
+              <f:header>
+                <card:Header xmlns:card="sap.f.cards" title="Recent proposals" iconSrc="sap-icon://lightbulb" press=".onNewIflow" />
+              </f:header>
+              <f:content>
+                <List items="{view>/proposals}" busy="{view>/proposalsBusy}" busyIndicatorDelay="0" showSeparators="Inner" width="100%">
+                  <noData>
+                    <IllustratedMessage illustrationType="sapIllus-NoData" illustrationSize="ExtraSmall" title="No proposals yet" description="Describe an integration in Generate and the AI proposes an iFlow for you to approve." enableVerticalResponsiveness="true" />
+                  </noData>
+                  <StandardListItem
+                    title="{= ${view>kind} === 'IFLOW' ? ${view>iflowId} : ${view>packageId} }"
+                    description="{= (${view>kind} === 'IFLOW' ? 'iFlow' : 'Package') + ' · ' + ${path: 'view>createdAt', formatter: '.formatter.relativeTime'} }"
+                    info="{view>status}"
+                    infoState="{path: 'view>status', formatter: '.formatter.statusState'}"
+                    type="Navigation"
+                    press=".onProposal"
+                  />
+                </List>
+              </f:content>
+            </f:Card>
+            <!-- quick actions -->
+            <f:Card>
+              <f:header><card:Header xmlns:card="sap.f.cards" title="Quick actions" /></f:header>
+              <f:content>
+                <List showSeparators="Inner" width="100%">
+                  <StandardListItem title="New iFlow with AI" description="Describe it, review the proposal, approve." icon="sap-icon://lightbulb" type="Navigation" press=".onNewIflow" />
+                  <StandardListItem title="Create package" description="A home for new integration flows." icon="sap-icon://product" type="Navigation" press=".onCreatePackage" />
+                </List>
+              </f:content>
+            </f:Card>
+          </VBox>
+        </HBox>
+        <MessageStrip text="Message logs unavailable — the API key may lack the MonitoringDataRead role." type="Warning" showIcon="true" visible="{= !!${view>/stats} &amp;&amp; ${view>/stats/failedMessages24h} === null }" class="sapUiSmallMarginTop" />
+      </VBox>
+    </f:content>
+  </f:DynamicPage>
+</mvc:View>

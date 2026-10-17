@@ -1,0 +1,56 @@
+<mvc:View controllerName="integration.pilot.controller.Activity" xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m" xmlns:f="sap.f" xmlns:core="sap.ui.core">
+  <f:DynamicPage id="page" toggleHeaderOnTitleClick="false">
+    <f:title>
+      <f:DynamicPageTitle>
+        <f:heading><Title text="Activity" level="H2" /></f:heading>
+        <f:expandedContent><Text text="Every write — from the UI and from approved proposals — successful or not." /></f:expandedContent>
+        <f:actions>
+          <Button text="Refresh" icon="sap-icon://refresh" press=".load" />
+        </f:actions>
+      </f:DynamicPageTitle>
+    </f:title>
+    <f:content>
+      <Table items="{view>/filtered}" busy="{view>/busy}" busyIndicatorDelay="0" growing="true" growingThreshold="50" class="ipCard" sticky="ColumnHeaders,HeaderToolbar">
+        <headerToolbar>
+          <OverflowToolbar>
+            <SearchField width="16rem" placeholder="Search target or user" liveChange=".onSearch" />
+            <Select selectedKey="{view>/action}" items="{view>/actions}" change=".applyFilter" width="13rem" tooltip="Action">
+              <core:Item key="{view>key}" text="{view>text}" />
+            </Select>
+            <Select selectedKey="{view>/status}" change=".applyFilter" width="9rem" tooltip="Result">
+              <core:Item key="" text="All results" />
+              <core:Item key="SUCCESS" text="Success" />
+              <core:Item key="FAILED" text="Failed" />
+            </Select>
+            <Text text="{= ${view>/filtered}.length + ' entries' }" class="ipSubtle" />
+          </OverflowToolbar>
+        </headerToolbar>
+        <noData>
+          <IllustratedMessage
+            illustrationType="{= ${view>/entries}.length ? 'sapIllus-NoFilterResults' : 'sapIllus-NoActivities' }"
+            title="{= ${view>/entries}.length ? 'No matching entries' : 'No activity yet' }"
+            description="{= ${view>/entries}.length ? 'Adjust the filters.' : 'Create a package, deploy an iFlow or approve a proposal — it will be recorded here.' }"
+          />
+        </noData>
+        <columns>
+          <Column width="9rem"><Text text="When" /></Column>
+          <Column><Text text="Action" /></Column>
+          <Column><Text text="Target" /></Column>
+          <Column minScreenWidth="Tablet" demandPopin="true"><Text text="User" /></Column>
+          <Column width="8rem"><Text text="Result" /></Column>
+        </columns>
+        <items>
+          <ColumnListItem type="{= ${view>details} ? 'Navigation' : 'Inactive' }" press=".onDetails">
+            <cells>
+              <Text text="{path: 'view>createdAt', formatter: '.formatter.relativeTime'}" tooltip="{path: 'view>createdAt', formatter: '.formatter.dateTime'}" />
+              <Text text="{path: 'view>action', formatter: '.formatter.humanize'}" class="sapMTextBold" />
+              <ObjectIdentifier title="{view>targetId}" text="{view>targetType}" />
+              <Text text="{view>user}" />
+              <ObjectStatus text="{view>status}" state="{path: 'view>status', formatter: '.formatter.statusState'}" inverted="true" class="ipNoWrap" />
+            </cells>
+          </ColumnListItem>
+        </items>
+      </Table>
+    </f:content>
+  </f:DynamicPage>
+</mvc:View>

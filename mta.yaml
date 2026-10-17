@@ -1,0 +1,107 @@
+# Integration Pilot — Cloud Foundry deployment with SAP HANA Cloud (default; persistent data).
+# Needs a running HANA Cloud instance mapped to the CF org/space for "SAP HANA Schemas & HDI Containers"
+# (HANA Cloud Central → instance → Manage Configuration → Instance Mapping). Trial/free-tier instances
+# stop every night and must be started again before use.
+# Build: npm run build:mta (mbt build). SQLite alternative without HANA: mta-sqlite.yaml.
+# Keep this file and mta-sqlite.yaml in sync; they differ only in the database parts (marked "DB:").
+_schema-version: '3.1'
+ID: integration-pilot
+version: 1.0.0
+description: Integration Pilot — AI assistant & dashboard for SAP Cloud Integration
+
+parameters:
+  enable-parallel-deployments: true
+
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npm ci --prefix app/integration-pilot
+        - npm run build --prefix app/integration-pilot
+        - node scripts/copy-ui-build.js
+        - npx cds build --production
+
+modules:
+  # CAP backend (REST API /api, agent, iFlow builder)
+  - name: integration-pilot-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      buildpack: nodejs_buildpack
+      memory: 512M
+      disk-quota: 1024M
+    build-parameters:
+      # ship sources only; the Node.js buildpack installs production dependencies from
+      # package-lock.json at staging (keeps node_modules/.bin links intact, smaller mtar)
+      builder: custom
+      commands: []
+    properties:
+      CDS_ENV: hana # DB: HANA Cloud HDI container
+      LLM_MODEL: nvidia/nemotron-3-super-120b-a12b
+      LLM_FALLBACK_MODEL: z-ai/glm-5.3
+      LLM_TIMEOUT_MS: 300000
+      LLM_MAX_TOKENS: 16000
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    requires:
+      - name: integration-pilot-auth
+      - name: iflowpilot-dest
+      - name: integration-pilot-db # DB
+
+  # DB: deploys the schema (gen/db) into the HDI container
+  - name: integration-pilot-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+      memory: 256M
+    requires:
+      - name: integration-pilot-db
+
+  # Standalone approuter: XSUAA login, serves the SAPUI5 app build, forwards /api
+  - name: integration-pilot
+    type: approuter.nodejs
+    path: app/router
+    parameters:
+      memory: 256M
+      disk-quota: 512M
+      keep-existing-routes: true
+    build-parameters:
+      builder: npm-ci
+    requires:
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{srv-url}
+          forwardAuthToken: true
+          timeout: 180000 # AI explain/approve calls can take longer than the default 30s
+      - name: integration-pilot-auth
+
+resources:
+  - name: integration-pilot-auth
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: integration-pilot-${org}-${space}
+        tenant-mode: dedicated
+
+  # Existing destination service instance; subaccount destinations CPI_API and NVIDIA_LLM
+  - name: iflowpilot-dest
+    type: org.cloudfoundry.existing-service
+    parameters:
+      service-name: iflowpilot-dest
+
+  # DB: HDI container on HANA Cloud (same instance name is used for local hybrid runs: cds bind -2 integration-pilot-db)
+  - name: integration-pilot-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+      service-name: integration-pilot-db

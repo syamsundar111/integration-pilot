@@ -1,0 +1,14 @@
+{
+  "name": "integration-pilot-ui",
+  "version": "1.0.0",
+  "description": "Integration Pilot — SAPUI5 (freestyle) dashboard for SAP Cloud Integration",
+  "private": true,
+  "scripts": {
+    "build": "ui5 build --clean-dest --dest dist",
+    "lint": "ui5lint"
+  },
+  "devDependencies": {
+    "@ui5/cli": "^4.0.71",
+    "@ui5/linter": "^1.23.7"
+  }
+}

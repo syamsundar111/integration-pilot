@@ -1,0 +1,9 @@
+<parameter>
+    <key/>
+    <name>{{NAME}}</name>
+    <type>xsd:string</type>
+    <isRequired>false</isRequired>
+    <constraint/>
+    <description/>
+    <additionalMetadata/>
+  </parameter>

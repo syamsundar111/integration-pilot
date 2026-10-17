@@ -1,0 +1,467 @@
+/* Integration Pilot — small additions to the Horizon theme. Colours come from theme
+   parameters (CSS variables), so light/dark Horizon variants keep working. */
+
+/* --- shell ------------------------------------------------------------------ */
+.ipLogo {
+  font-size: 1.25rem;
+  color: var(--sapBrandColor);
+}
+.ipAppTitle.sapMTitle {
+  font-weight: 700;
+}
+.ipSubtle,
+.ipSubtle.sapMText {
+  color: var(--sapContent_LabelColor);
+  font-size: var(--sapFontSmallSize);
+}
+.ipMono,
+.ipMono.sapMText {
+  font-family: var(--sapFontFamily), monospace;
+  font-family: '72Mono', monospace;
+  font-size: var(--sapFontSmallSize);
+}
+.ipTenant .ipTenantLabel {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ipUser {
+  text-align: right;
+  line-height: 1.1;
+}
+
+/* --- generic layout helpers -------------------------------------------------- */
+.ipGapS {
+  gap: 0.5rem;
+}
+.ipGapM {
+  gap: 1rem;
+}
+.ipSectionTitle.sapMTitle {
+  margin: 1.25rem 0 0.5rem;
+}
+.ipCard {
+  background: var(--sapTile_Background, var(--sapGroup_ContentBackground));
+  border-radius: var(--sapTile_BorderCornerRadius, 1rem);
+  box-shadow: var(--sapContent_Shadow0);
+  overflow: hidden;
+}
+.ipCardHeader {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--sapList_BorderColor);
+}
+.ipKpiRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+@media (max-width: 1100px) {
+  .ipKpiRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ipDashGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .ipDashGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.ipKpiRow .sapMGT {
+  width: 100%;
+  margin: 0;
+}
+.ipUpdated {
+  text-align: right;
+  margin-top: 0.25rem;
+}
+
+/* --- flow diagram -------------------------------------------------------------- */
+.ipFlow {
+  overflow-x: auto;
+  padding: 0.5rem 0.25rem;
+}
+.ipFlowRow {
+  display: flex;
+  align-items: flex-start;
+  min-width: max-content;
+}
+.ipFlowIcon {
+  speak: none;
+  line-height: 1;
+}
+.ipFlowEvent {
+  width: 6rem;
+  flex-shrink: 0;
+  text-align: center;
+}
+.ipFlowCircle {
+  width: 3.25rem;
+  height: 3.25rem;
+  margin: 0 auto;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+}
+.ipFlowStart .ipFlowCircle {
+  background: var(--sapInformationBackgroundColor);
+  color: var(--sapInformativeColor);
+  border: 2px solid var(--sapInformationBorderColor);
+}
+.ipFlowEnd .ipFlowCircle {
+  background: var(--sapNeutralBackgroundColor);
+  color: var(--sapNeutralColor);
+  border: 2px solid var(--sapNeutralBorderColor);
+}
+.ipFlowEventLabel {
+  margin-top: 0.4rem;
+  font-size: var(--sapFontSmallSize);
+  font-weight: 600;
+  color: var(--sapTextColor);
+}
+.ipFlowMono {
+  font-family: '72Mono', monospace;
+  font-size: 0.6875rem;
+  color: var(--sapContent_LabelColor);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 10rem;
+  margin: 0.15rem auto 0;
+}
+.ipFlowArrow {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.625rem;
+  position: relative;
+}
+.ipFlowArrow::before {
+  content: '';
+  position: absolute;
+  left: 0.15rem;
+  right: 0.35rem;
+  bottom: 0;
+  border-bottom: 1px solid var(--sapContent_ForegroundBorderColor);
+}
+.ipFlowArrow::after {
+  content: '';
+  position: absolute;
+  right: 0.15rem;
+  bottom: -0.25rem;
+  border: 0.25rem solid transparent;
+  border-left: 0.35rem solid var(--sapContent_ForegroundBorderColor);
+}
+.ipFlowStepCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.ipFlowStep {
+  width: 10rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.75rem;
+  background: var(--sapTile_Background);
+  border: 1px solid var(--sapTile_BorderColor, var(--sapList_BorderColor));
+  box-shadow: var(--sapContent_Shadow0);
+}
+.ipFlowUnknown {
+  border-color: var(--sapCriticalColor);
+}
+.ipFlowStepHead {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ipFlowStepIcon {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sapInformationBackgroundColor);
+  color: var(--sapInformativeColor);
+}
+.ipFlowStepText {
+  min-width: 0;
+}
+.ipFlowStepName {
+  font-size: var(--sapFontSmallSize);
+  font-weight: 700;
+  color: var(--sapTextColor);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ipFlowStepType {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--sapContent_LabelColor);
+}
+.ipFlowStep .ipFlowMono {
+  margin: 0.35rem 0 0;
+  max-width: 100%;
+}
+.ipFlowDash {
+  width: 0;
+  height: 0.75rem;
+  border-left: 1px dashed var(--sapContent_ForegroundBorderColor);
+}
+.ipFlowReceiver {
+  width: 10rem;
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+  padding: 0.4rem 0.6rem;
+  border: 1px dashed var(--sapContent_ForegroundBorderColor);
+  border-radius: 0.5rem;
+  background: var(--sapNeutralBackgroundColor);
+  color: var(--sapContent_LabelColor);
+  box-sizing: border-box;
+}
+.ipFlowReceiver > div {
+  min-width: 0;
+}
+.ipFlowReceiver .ipFlowMono {
+  margin: 0.1rem 0 0;
+  max-width: 7.5rem;
+}
+.ipFlowReceiverName {
+  font-size: var(--sapFontSmallSize);
+  font-weight: 600;
+  color: var(--sapTextColor);
+}
+.ipFlowEndReceiver {
+  padding-top: 0.25rem;
+}
+.ipFlowNote {
+  margin-top: 0.5rem;
+  color: var(--sapCriticalTextColor);
+  font-size: var(--sapFontSmallSize);
+}
+.ipFlowBox {
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: var(--sapBackgroundColor);
+  border: 1px solid var(--sapList_BorderColor);
+}
+
+/* --- chat ------------------------------------------------------------------------ */
+.ipTwoPane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr); /* panes never outgrow the page; each scrolls itself */
+  gap: 1rem;
+  height: 100%;
+}
+@media (max-width: 1024px) {
+  .ipTwoPane {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    height: auto;
+  }
+  .ipTwoPane > .ipPane {
+    min-height: 32rem;
+  }
+}
+.ipPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.ipPaneBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ipChatScroll {
+  background: var(--sapBackgroundColor);
+  padding: 1rem;
+}
+.ipMsg {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+.ipMsg[data-kind="user"] {
+  flex-direction: row-reverse;
+}
+.ipBubble {
+  max-width: 85%;
+  padding: 0.6rem 0.9rem;
+  border-radius: 1rem;
+  box-shadow: var(--sapContent_Shadow0);
+  background: var(--sapTile_Background);
+  border: 1px solid var(--sapList_BorderColor);
+  overflow-wrap: anywhere;
+}
+.ipMsg[data-kind="user"] .ipBubble {
+  background: var(--sapButton_Emphasized_Background);
+  border-color: transparent;
+  border-top-right-radius: 0.25rem;
+}
+.ipMsg[data-kind="user"] .ipBubble .sapMFT,
+.ipMsg[data-kind="user"] .ipBubble .sapMText {
+  color: var(--sapButton_Emphasized_TextColor);
+}
+.ipMsg[data-kind="assistant"] .ipBubble {
+  border-top-left-radius: 0.25rem;
+}
+.ipMsg[data-kind="error"] .ipBubble {
+  background: var(--sapErrorBackground);
+  border-color: var(--sapErrorBorderColor);
+}
+.ipMsg[data-kind="muted"] .ipBubble {
+  background: var(--sapNeutralBackgroundColor);
+  font-style: italic;
+}
+.ipBubble .sapMFT p {
+  margin: 0 0 0.5rem;
+}
+.ipBubble .sapMFT p:last-child {
+  margin-bottom: 0;
+}
+.ipBubble .sapMFT ul,
+.ipBubble .sapMFT ol {
+  margin: 0.25rem 0 0.5rem;
+  padding-left: 1.25rem;
+}
+.ipBubble .sapMFT code {
+  font-family: '72Mono', monospace;
+  font-size: 0.8125rem;
+  background: var(--sapNeutralBackgroundColor);
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+}
+.ipBubble .sapMFT pre {
+  font-family: '72Mono', monospace;
+  font-size: 0.75rem;
+  background: var(--sapShell_Background, #1d2d3e);
+  color: var(--sapShell_TextColor, #fff);
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+.ipStarter.sapMBtn {
+  width: 100%;
+  height: auto;
+}
+.ipStarter.sapMBtn .sapMBtnInner {
+  height: auto;
+  white-space: normal;
+  text-align: left;
+  padding: 0.6rem 0.9rem;
+  line-height: 1.35;
+}
+.ipStarter.sapMBtn .sapMBtnContent {
+  white-space: normal;
+}
+.ipEmpty {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+.ipComposer {
+  padding: 0.5rem;
+  border-top: 1px solid var(--sapList_BorderColor);
+  align-items: flex-end;
+}
+.ipProgress .sapMLIB {
+  padding-left: 0;
+}
+
+/* --- proposal panel ---------------------------------------------------------------- */
+.ipPanelHeader {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--sapList_BorderColor);
+}
+.ipEyebrow,
+.ipEyebrow.sapMText {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sapContent_LabelColor);
+}
+.ipPanelBody {
+  padding: 1rem;
+}
+.ipPackageBox {
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--sapList_BorderColor);
+}
+.ipPackageBox[data-warn="true"] {
+  border-color: var(--sapWarningBorderColor);
+  background: var(--sapWarningBackground);
+}
+.ipPanelFooter {
+  border-top: 1px solid var(--sapList_BorderColor);
+}
+.ipStepCard {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--sapList_BorderColor);
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.ipCode .sapMTextArea,
+.ipCode {
+  border-radius: 0.5rem;
+}
+
+/* --- tables --------------------------------------------------------------------------- */
+.ipTableCard .sapMListTblHeader {
+  background: transparent;
+}
+.ipPre {
+  font-family: '72Mono', monospace;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ipPreError {
+  background: var(--sapErrorBackground);
+  border: 1px solid var(--sapErrorBorderColor);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+/* status badges stay on one line ("Not deployed") */
+.ipNoWrap.sapMObjStatus,
+.ipNoWrap .sapMObjStatusText {
+  white-space: nowrap;
+}
+
+.ipWarnText.sapMText {
+  color: var(--sapCriticalTextColor);
+  font-size: var(--sapFontSmallSize);
+}
+.ipBubble .sapMList,
+.ipBubble .sapMLIB {
+  background: transparent;
+}
+.ipProgress .sapMLIB {
+  min-height: 1.75rem;
+  padding: 0;
+}
+.ipProgress .sapMCLI {
+  padding: 0.1rem 0;
+}
+.ipMsg[data-kind="muted"] .ipBubble .sapMFT,
+.ipMsg[data-kind="error"] .ipBubble .sapMFT {
+  white-space: pre-wrap;
+}
+
+.ipFooterActions {
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+}

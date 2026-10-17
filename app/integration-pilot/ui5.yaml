@@ -1,0 +1,6 @@
+# SAPUI5 freestyle app. The framework is loaded from the SAPUI5 CDN (see webapp/index.html),
+# so the build only bundles the app's own files (Component-preload.js, minification).
+specVersion: "4.0"
+metadata:
+  name: integration.pilot
+type: application

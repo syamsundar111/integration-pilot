@@ -1,0 +1,645 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://iflow-pilot/spec-schema.json",
+  "title": "iFlow spec v1",
+  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Router, splitter and mapping are not supported in v1. Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs. HTTP receivers use authType None; authentication is configured in the CPI web editor after creation.",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "packageId",
+    "trigger",
+    "steps",
+    "end"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "maxLength": 100,
+      "description": "Technical iFlow id (letters, digits, underscore)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Display name."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "packageId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9.]+$",
+      "description": "Target package id."
+    },
+    "trigger": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "httpsSender",
+            "timer"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "httpsSender"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/httpsSender"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "timer"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/timer"
+          }
+        }
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "maxItems": 25,
+      "items": {
+        "$ref": "#/definitions/step"
+      }
+    },
+    "end": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "httpReceiver",
+            "none"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "httpReceiver"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/httpReceiver"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "none"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/noEnd"
+          }
+        }
+      ]
+    },
+    "exceptionSubprocess": {
+      "type": "object",
+      "required": [
+        "steps"
+      ],
+      "additionalProperties": false,
+      "description": "Exception Subprocess: runs when any step of the main flow fails, instead of the normal end. Its steps run in order and end with a Message End, so for an HTTPS trigger the resulting message is returned to the sender as the response. The error text is available as ${exception.message}. Set header CamelHttpResponseCode (e.g. 500) to return an HTTP error status instead of 200.",
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/stepName",
+          "description": "Optional display name; defaults to Exception Subprocess 1."
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/definitions/exceptionStep"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Externalized parameters: name -> default value. Reference them as {{Name}}.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "definitions": {
+    "stepName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Optional display name; defaults like 'Content Modifier 1'."
+    },
+    "systemName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "maxLength": 50,
+      "description": "Optional receiver system (participant) name; defaults to Receiver / Receiver1..n."
+    },
+    "httpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ]
+    },
+    "authType": {
+      "enum": [
+        "None"
+      ],
+      "description": "Only 'None' in v1 (the only value verified by the reference exports). If the receiver needs authentication, create it with None and set authentication and credentials in the CPI web editor after creation."
+    },
+    "httpsSender": {
+      "type": "object",
+      "required": [
+        "type",
+        "address"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "httpsSender"
+        },
+        "address": {
+          "type": "string",
+          "pattern": "^(/[A-Za-z0-9_.~-]+)+$",
+          "description": "Endpoint path, e.g. /orders/create"
+        }
+      }
+    },
+    "timer": {
+      "type": "object",
+      "required": [
+        "type",
+        "mode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "timer"
+        },
+        "mode": {
+          "const": "once",
+          "description": "Run once after deployment (only mode in v1)."
+        }
+      }
+    },
+    "tableEntry": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+$"
+        },
+        "type": {
+          "enum": [
+            "constant",
+            "expression"
+          ],
+          "description": "constant value, or Camel simple expression like ${header.X}"
+        },
+        "value": {
+          "type": "string"
+        },
+        "datatype": {
+          "type": "string",
+          "description": "Optional Java type, e.g. java.lang.String"
+        }
+      }
+    },
+    "contentModifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "contentModifier"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/tableEntry"
+          }
+        },
+        "properties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/tableEntry"
+          }
+        },
+        "body": {
+          "type": "string",
+          "description": "New message body (Camel simple expression allowed). Omit to keep the body."
+        }
+      }
+    },
+    "groovyScript": {
+      "type": "object",
+      "required": [
+        "type",
+        "fileName",
+        "code"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "groovyScript"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "fileName": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "description": "Without extension; stored as script/<fileName>.groovy"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "converter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "jsonToXml",
+            "xmlToJson"
+          ]
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        }
+      }
+    },
+    "httpCall": {
+      "properties": {
+        "system": {
+          "$ref": "#/definitions/systemName"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^(https?://\\S+|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Full URL or a whole {{Parameter}} reference"
+        },
+        "method": {
+          "$ref": "#/definitions/httpMethod"
+        },
+        "authType": {
+          "$ref": "#/definitions/authType"
+        }
+      }
+    },
+    "requestReplyHttp": {
+      "type": "object",
+      "required": [
+        "type",
+        "url",
+        "method",
+        "authType"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/definitions/httpCall"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "requestReplyHttp"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "system": true,
+        "url": true,
+        "method": true,
+        "authType": true
+      }
+    },
+    "httpReceiver": {
+      "type": "object",
+      "required": [
+        "type",
+        "url",
+        "method",
+        "authType"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/definitions/httpCall"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "httpReceiver"
+        },
+        "system": true,
+        "url": true,
+        "method": true,
+        "authType": true
+      }
+    },
+    "noEnd": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "none"
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "contentModifier",
+            "groovyScript",
+            "jsonToXml",
+            "xmlToJson",
+            "requestReplyHttp"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "contentModifier"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/contentModifier"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "groovyScript"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/groovyScript"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "jsonToXml"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/converter"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "xmlToJson"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/converter"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "requestReplyHttp"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/requestReplyHttp"
+          }
+        }
+      ]
+    },
+    "exceptionStep": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "contentModifier",
+            "groovyScript",
+            "jsonToXml",
+            "xmlToJson"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "contentModifier"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/contentModifier"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "groovyScript"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/groovyScript"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "jsonToXml"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/converter"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "xmlToJson"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/converter"
+          }
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "id": "Order_Forward",
+      "name": "Order Forward",
+      "description": "Receives an order via HTTPS, tags it and forwards it as XML",
+      "packageId": "PilotReference",
+      "trigger": {
+        "type": "httpsSender",
+        "address": "/orders/forward"
+      },
+      "steps": [
+        {
+          "type": "contentModifier",
+          "headers": [
+            {
+              "name": "Source",
+              "type": "constant",
+              "value": "Pilot"
+            }
+          ],
+          "properties": [
+            {
+              "name": "OrderId",
+              "type": "expression",
+              "value": "${header.OrderId}"
+            }
+          ]
+        },
+        {
+          "type": "jsonToXml"
+        }
+      ],
+      "end": {
+        "type": "httpReceiver",
+        "url": "{{TargetURL}}",
+        "method": "POST",
+        "authType": "None"
+      },
+      "parameters": {
+        "TargetURL": "https://example.org/orders"
+      }
+    },
+    {
+      "id": "Nightly_Ping",
+      "name": "Nightly Ping",
+      "packageId": "PilotReference",
+      "trigger": {
+        "type": "timer",
+        "mode": "once"
+      },
+      "steps": [
+        {
+          "type": "requestReplyHttp",
+          "url": "https://example.org/ping",
+          "method": "GET",
+          "authType": "None"
+        }
+      ],
+      "end": {
+        "type": "none"
+      }
+    },
+    {
+      "id": "Order_Json_To_Xml",
+      "name": "Order JSON to XML",
+      "description": "Converts an order to XML; on any error returns a JSON error body with HTTP 500",
+      "packageId": "PilotReference",
+      "trigger": {
+        "type": "httpsSender",
+        "address": "/orders/json-to-xml"
+      },
+      "steps": [
+        {
+          "type": "jsonToXml"
+        }
+      ],
+      "end": {
+        "type": "none"
+      },
+      "exceptionSubprocess": {
+        "steps": [
+          {
+            "type": "contentModifier",
+            "name": "Set Error Body",
+            "headers": [
+              {
+                "name": "CamelHttpResponseCode",
+                "type": "constant",
+                "value": "500"
+              },
+              {
+                "name": "Content-Type",
+                "type": "constant",
+                "value": "application/json"
+              }
+            ],
+            "body": "{\"status\": \"Failed\", \"error\": \"${exception.message}\"}"
+          }
+        ]
+      }
+    }
+  ]
+}

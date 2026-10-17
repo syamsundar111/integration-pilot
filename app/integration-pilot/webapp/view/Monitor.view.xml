@@ -1,0 +1,118 @@
+<mvc:View controllerName="integration.pilot.controller.Monitor" xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m" xmlns:f="sap.f" xmlns:core="sap.ui.core">
+  <f:DynamicPage id="page" toggleHeaderOnTitleClick="false">
+    <f:title>
+      <f:DynamicPageTitle>
+        <f:heading><Title text="Monitor" level="H2" /></f:heading>
+        <f:expandedContent><Text text="Runtime status and message processing on your tenant." /></f:expandedContent>
+        <f:actions>
+          <Button text="Refresh" icon="sap-icon://refresh" press=".onRefresh" />
+        </f:actions>
+      </f:DynamicPageTitle>
+    </f:title>
+    <f:content>
+      <VBox class="ipGapM" renderType="Bare">
+        <!-- runtime artifacts -->
+        <Table items="{view>/runtimeRows}" busy="{view>/runtimeBusy}" busyIndicatorDelay="0" class="ipCard" sticky="ColumnHeaders">
+          <headerToolbar>
+            <OverflowToolbar>
+              <Title text="Runtime artifacts" level="H3" />
+              <ToolbarSpacer />
+              <SegmentedButton selectedKey="{view>/status}" selectionChange=".onStatusFilter">
+                <items>
+                  <SegmentedButtonItem key="ALL" text="All ({view>/counts/ALL})" />
+                  <SegmentedButtonItem key="STARTED" text="Started ({view>/counts/STARTED})" />
+                  <SegmentedButtonItem key="ERROR" text="Error ({view>/counts/ERROR})" />
+                  <SegmentedButtonItem key="STARTING" text="Starting ({view>/counts/STARTING})" />
+                </items>
+              </SegmentedButton>
+            </OverflowToolbar>
+          </headerToolbar>
+          <infoToolbar>
+            <OverflowToolbar visible="{= ${view>/pending}.length > 0 }" design="Info">
+              <core:Icon src="sap-icon://alert" />
+              <Text text="Waiting for the runtime: {view>/pendingText}. CPI accepted the deployment, but the iFlow is not running yet — trial tenants can take several minutes." wrapping="true" />
+            </OverflowToolbar>
+          </infoToolbar>
+          <noData>
+            <IllustratedMessage
+              illustrationType="sapIllus-NoActivities"
+              title="{= ${view>/status} === 'ALL' ? 'Nothing deployed' : 'No artifacts with status ' + ${view>/status} }"
+              description="{= ${view>/status} === 'ALL' ? 'Deploy an iFlow to see it here.' : 'Everything else looks fine.' }"
+            />
+          </noData>
+          <columns>
+            <Column><Text text="Name" /></Column>
+            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="Type" /></Column>
+            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="Version" /></Column>
+            <Column minScreenWidth="Desktop" demandPopin="true"><Text text="Deployed" /></Column>
+            <Column><Text text="Status" /></Column>
+          </columns>
+          <items>
+            <ColumnListItem type="{= ${view>status} === 'ERROR' ? 'Navigation' : 'Inactive' }" press=".onShowError">
+              <cells>
+                <ObjectIdentifier title="{view>name}" text="{view>id}" />
+                <ObjectStatus text="{view>type}" class="ipMono" />
+                <Text text="{view>version}" />
+                <VBox renderType="Bare">
+                  <Text text="{path: 'view>deployedOn', formatter: '.formatter.relativeTime'}" tooltip="{path: 'view>deployedOn', formatter: '.formatter.dateTime'}" />
+                  <Text text="{view>deployedBy}" class="ipSubtle" />
+                </VBox>
+                <ObjectStatus text="{view>status}" state="{path: 'view>status', formatter: '.formatter.statusState'}" inverted="true" class="ipNoWrap" />
+              </cells>
+            </ColumnListItem>
+          </items>
+        </Table>
+
+        <!-- message processing logs -->
+        <Table items="{view>/logs}" busy="{view>/logsBusy}" busyIndicatorDelay="0" class="ipCard" growing="true" growingThreshold="25">
+          <headerToolbar>
+            <OverflowToolbar>
+              <Title text="Message processing logs" level="H3" />
+              <ToolbarSpacer />
+              <Select selectedKey="{view>/logStatus}" change=".loadLogs" width="11rem" tooltip="Message status">
+                <core:Item key="" text="All statuses" />
+                <core:Item key="FAILED" text="Failed" />
+                <core:Item key="COMPLETED" text="Completed" />
+                <core:Item key="PROCESSING" text="Processing" />
+                <core:Item key="RETRY" text="Retry" />
+                <core:Item key="ESCALATED" text="Escalated" />
+                <core:Item key="CANCELLED" text="Cancelled" />
+              </Select>
+              <Select selectedKey="{view>/hours}" change=".loadLogs" width="10rem" tooltip="Time window">
+                <core:Item key="1" text="Last hour" />
+                <core:Item key="24" text="Last 24 hours" />
+                <core:Item key="168" text="Last 7 days" />
+              </Select>
+            </OverflowToolbar>
+          </headerToolbar>
+          <infoToolbar>
+            <OverflowToolbar visible="{= !!${view>/logsError} }" design="Info">
+              <Text text="{view>/logsError}" />
+            </OverflowToolbar>
+          </infoToolbar>
+          <noData>
+            <IllustratedMessage illustrationType="sapIllus-NoMail" title="No messages" description="No messages match these filters. Widen the time window or clear the status filter." />
+          </noData>
+          <columns>
+            <Column width="9rem"><Text text="Status" /></Column>
+            <Column><Text text="iFlow" /></Column>
+            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="Started" /></Column>
+            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="Duration" /></Column>
+            <Column minScreenWidth="Desktop" demandPopin="true"><Text text="Message ID" /></Column>
+          </columns>
+          <items>
+            <ColumnListItem>
+              <cells>
+                <ObjectStatus text="{view>status}" state="{path: 'view>status', formatter: '.formatter.statusState'}" inverted="true" class="ipNoWrap" />
+                <ObjectIdentifier title="{view>integrationFlowName}" text="{view>packageName}" />
+                <Text text="{path: 'view>logStart', formatter: '.formatter.relativeTime'}" tooltip="{path: 'view>logStart', formatter: '.formatter.dateTime'}" />
+                <Text text="{parts: ['view>logStart', 'view>logEnd'], formatter: '.formatter.duration'}" />
+                <Text text="{view>messageGuid}" class="ipMono ipSubtle" />
+              </cells>
+            </ColumnListItem>
+          </items>
+        </Table>
+      </VBox>
+    </f:content>
+  </f:DynamicPage>
+</mvc:View>

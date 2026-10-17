@@ -1,0 +1,120 @@
+{
+  "name": "integration-pilot",
+  "version": "1.0.0",
+  "description": "Integration Pilot — AI assistant & SAPUI5 dashboard for SAP Cloud Integration",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@cap-js/hana": "^3",
+    "@cap-js/sqlite": "^3",
+    "@sap-cloud-sdk/connectivity": "^4.9.1",
+    "@sap-cloud-sdk/http-client": "^4.9.1",
+    "@sap/cds": "^10",
+    "@sap/xssec": "^4",
+    "@xmldom/xmldom": "^0.9.12",
+    "ajv": "^8.20.0",
+    "express": "^5",
+    "jszip": "^3.10.2"
+  },
+  "devDependencies": {
+    "@cap-js/cds-test": "^1.0.2",
+    "@sap/cds-dk": "^10",
+    "jest": "^30.5.2"
+  },
+  "scripts": {
+    "start": "cds-serve",
+    "watch": "cds watch",
+    "watch:hybrid": "cds bind --exec --profile hybrid -- cds watch --profile hybrid",
+    "watch:hana": "cds bind --exec --profile hybrid-hana -- cds watch --profile hybrid-hana",
+    "db:deploy": "cds deploy",
+    "templates:derive": "node srv/iflow-builder/derive-templates.js",
+    "ui:install": "npm --prefix app/integration-pilot install",
+    "ui:build": "npm --prefix app/integration-pilot run build",
+    "ui:lint": "npm --prefix app/integration-pilot run lint",
+    "build:mta": "mbt build -t mta_archives --mtar integration-pilot.mtar",
+    "build:mta:sqlite": "mbt build -f mta-sqlite.yaml -t mta_archives --mtar integration-pilot-sqlite.mtar",
+    "deploy": "cf deploy mta_archives/integration-pilot.mtar",
+    "deploy:sqlite": "cf deploy mta_archives/integration-pilot-sqlite.mtar",
+    "test": "jest"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/test/**/*.test.js"
+    ],
+    "passWithNoTests": true
+  },
+  "cds": {
+    "server": {
+      "port": 4005
+    },
+    "requires": {
+      "[development]": {
+        "db": {
+          "kind": "sqlite",
+          "credentials": {
+            "url": "db.sqlite"
+          },
+          "schema_evolution": "auto"
+        },
+        "auth": {
+          "kind": "custom",
+          "impl": "srv/lib/dev-auth.js"
+        }
+      },
+      "[hybrid]": {
+        "db": {
+          "kind": "sqlite",
+          "credentials": {
+            "url": "db.sqlite"
+          },
+          "schema_evolution": "auto"
+        },
+        "auth": {
+          "kind": "custom",
+          "impl": "srv/lib/dev-auth.js"
+        },
+        "destinations": true
+      },
+      "[hybrid-hana]": {
+        "db": {
+          "kind": "hana",
+          "impl": "@cap-js/hana",
+          "credentials": {
+            "url": null
+          },
+          "schema_evolution": false
+        },
+        "auth": {
+          "kind": "custom",
+          "impl": "srv/lib/dev-auth.js"
+        },
+        "destinations": true
+      },
+      "[production]": {
+        "auth": "xsuaa",
+        "destinations": true
+      },
+      "[sqlite]": {
+        "db": {
+          "kind": "sqlite",
+          "credentials": {
+            "url": ":memory:"
+          }
+        }
+      },
+      "[hana]": {
+        "db": "hana"
+      }
+    },
+    "log": {
+      "[production]": {
+        "levels": {
+          "auth": "error"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+target/
+_out/
+gen/
+app/integration-pilot/dist/
+app/integration-pilot/node_modules/
+app/router/resources/
+*.tsbuildinfo
+
+# Secrets & local bindings — never commit
+.cdsrc-private.json
+default-env.json
+default-*.json
+.env
+.env.*``
+
+# Local databases (dev/hybrid SQLite file in the project root)
+db.sqlite
+db.sqlite-wal
+db.sqlite-shm
+*.sqlite
+*.sqlite-journal
+*.db
+
+# MTA
+mta_archives/
+*_mta_build_tmp
+*.mtar
+
+# Test / logs
+coverage/
+*.log
+npm-debug.log*
+
+# @cap-js/cds-typer
+@cds-models
+
+# OS / editor
+.DS_Store
+Thumbs.db

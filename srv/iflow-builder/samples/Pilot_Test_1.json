@@ -1,0 +1,23 @@
+{
+  "id": "Pilot_Test_1",
+  "name": "Pilot_Test_1",
+  "description": "Sample built by iFlow Pilot: HTTPS sender -> Content Modifier -> Groovy -> HTTP receiver",
+  "packageId": "PilotReference",
+  "trigger": { "type": "httpsSender", "address": "/pilot/test1" },
+  "steps": [
+    {
+      "type": "contentModifier",
+      "name": "Set Pilot Headers",
+      "headers": [{ "name": "Source", "type": "constant", "value": "iFlowPilot" }],
+      "properties": [{ "name": "ReceivedAt", "type": "expression", "value": "${date:now:yyyy-MM-dd'T'HH:mm:ss}" }]
+    },
+    {
+      "type": "groovyScript",
+      "name": "Add Length Header",
+      "fileName": "addLengthHeader",
+      "code": "import com.sap.gateway.ip.core.customdev.util.Message\n\ndef Message processData(Message message) {\n    def body = message.getBody(String) ?: ''\n    message.setHeader('X-Pilot-Length', body.length().toString())\n    message.setProperty('PilotProcessed', 'true')\n    return message\n}\n"
+    }
+  ],
+  "end": { "type": "httpReceiver", "url": "{{ReceiverURL}}", "method": "POST", "authType": "None" },
+  "parameters": { "ReceiverURL": "https://httpbin.org/post" }
+}

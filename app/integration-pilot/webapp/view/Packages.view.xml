@@ -1,0 +1,58 @@
+<mvc:View controllerName="integration.pilot.controller.Packages" xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m" xmlns:f="sap.f">
+  <f:DynamicPage id="page" toggleHeaderOnTitleClick="false">
+    <f:title>
+      <f:DynamicPageTitle>
+        <f:heading><Title text="Packages" level="H2" /></f:heading>
+        <f:expandedContent><Text text="Integration packages on your tenant." /></f:expandedContent>
+        <f:actions>
+          <Button text="Refresh" icon="sap-icon://refresh" press=".load" />
+          <Button text="Create package" icon="sap-icon://add" type="Emphasized" press=".onCreate" />
+        </f:actions>
+      </f:DynamicPageTitle>
+    </f:title>
+    <f:content>
+      <VBox>
+        <MessageStrip text="{view>/error/message}" type="Error" showIcon="true" visible="{= !!${view>/error} }" class="sapUiSmallMarginBottom">
+          <link><Link text="Retry" press=".load" /></link>
+        </MessageStrip>
+        <Table id="table" items="{view>/filtered}" busy="{view>/busy}" busyIndicatorDelay="0" growing="true" growingThreshold="50" sticky="ColumnHeaders,HeaderToolbar" class="ipCard">
+          <headerToolbar>
+            <OverflowToolbar>
+              <SearchField width="18rem" placeholder="Search packages" liveChange=".onSearch" value="{view>/search}" ariaLabelledBy="title" />
+              <Text text="{= ${view>/filtered}.length + ' of ' + ${view>/packages}.length }" class="ipSubtle" />
+            </OverflowToolbar>
+          </headerToolbar>
+          <noData>
+            <IllustratedMessage
+              illustrationType="{= ${view>/search} ? 'sapIllus-NoSearchResults' : 'sapIllus-NoEntries' }"
+              title="{= ${view>/search} ? 'No matching packages' : 'No packages yet' }"
+              description="{= ${view>/search} ? 'Try a different search term.' : 'Create a package to hold your integration flows.' }"
+            />
+          </noData>
+          <columns>
+            <Column><Text text="Name" /></Column>
+            <Column><Text text="ID" /></Column>
+            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="Version" /></Column>
+            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="Modified" /></Column>
+            <Column hAlign="End" width="7rem"><Text text="" /></Column>
+          </columns>
+          <items>
+            <ColumnListItem type="Navigation" press=".onOpenIflows">
+              <cells>
+                <ObjectIdentifier title="{view>name}" text="{= ${view>shortText} !== ${view>name} ? ${view>shortText} : '' }" />
+                <ObjectStatus text="{view>id}" class="ipMono" />
+                <Text text="{= ${view>version} || '—' }" />
+                <Text text="{path: 'view>modifiedAt', formatter: '.formatter.relativeTime'}" tooltip="{path: 'view>modifiedAt', formatter: '.formatter.dateTime'}" />
+                <HBox justifyContent="End" renderType="Bare">
+                  <ObjectStatus text="Read-only" icon="sap-icon://locked" visible="{= ${view>partnerContent} || ${view>mode} === 'READ_ONLY' }" tooltip="Partner or read-only content" />
+                  <Button icon="sap-icon://edit" type="Transparent" tooltip="Edit {view>name}" press=".onEdit" visible="{= !${view>partnerContent} &amp;&amp; ${view>mode} !== 'READ_ONLY' }" />
+                  <Button icon="sap-icon://delete" type="Transparent" tooltip="Delete {view>name}" press=".onDelete" visible="{= !${view>partnerContent} &amp;&amp; ${view>mode} !== 'READ_ONLY' }" />
+                </HBox>
+              </cells>
+            </ColumnListItem>
+          </items>
+        </Table>
+      </VBox>
+    </f:content>
+  </f:DynamicPage>
+</mvc:View>

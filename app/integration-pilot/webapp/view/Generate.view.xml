@@ -1,0 +1,280 @@
+<mvc:View
+  controllerName="integration.pilot.controller.Generate"
+  xmlns:mvc="sap.ui.core.mvc"
+  xmlns="sap.m"
+  xmlns:f="sap.f"
+  xmlns:core="sap.ui.core"
+  xmlns:ce="sap.ui.codeeditor"
+  height="100%"
+>
+  <f:DynamicPage id="page" toggleHeaderOnTitleClick="false" fitContent="true">
+    <f:title>
+      <f:DynamicPageTitle>
+        <f:heading><Title text="Generate" level="H2" /></f:heading>
+        <f:expandedContent><Text text="Describe an integration; review and approve the proposed iFlow." /></f:expandedContent>
+        <f:actions>
+          <SplitButton
+            id="sessionButton"
+            text="New conversation"
+            icon="sap-icon://add"
+            press=".onNewChat"
+            arrowPress=".onSessionsOpen"
+            tooltip="Start a new conversation; use the arrow for conversation history"
+          />
+        </f:actions>
+      </f:DynamicPageTitle>
+    </f:title>
+    <f:dependents>
+      <Popover id="sessionPopover" placement="Bottom" contentWidth="24rem" showHeader="false" horizontalScrolling="false">
+        <List items="{chat>/sessions}" mode="Delete" delete=".onDeleteSession" noDataText="No conversations yet">
+          <StandardListItem
+            title="{= ${chat>title} || 'Untitled' }"
+            description="{path: 'chat>modifiedAt', formatter: '.formatter.relativeTime'}"
+            type="Active"
+            press=".onSessionPick"
+            highlight="{= ${chat>ID} === ${chat>/sessionId} ? 'Information' : 'None' }"
+          />
+        </List>
+      </Popover>
+    </f:dependents>
+    <f:content>
+      <HBox renderType="Bare" class="ipTwoPane">
+        <!-- ================= chat ================= -->
+        <VBox renderType="Bare" class="ipPane ipCard">
+          <ScrollContainer id="chatScroll" vertical="true" horizontal="false" height="100%" class="ipPaneBody ipChatScroll" busy="{chat>/loadingSession}" busyIndicatorDelay="0">
+            <!-- empty state with starter prompts -->
+            <VBox class="ipEmpty" alignItems="Center" visible="{= !${chat>/messages}.length &amp;&amp; !${chat>/turn} &amp;&amp; !${chat>/loadingSession} }">
+              <core:Icon src="sap-icon://lightbulb" size="2.5rem" color="Default" class="sapUiSmallMarginBottom" />
+              <Title text="What should we integrate?" level="H3" />
+              <Text text="The assistant asks for missing details, then proposes an iFlow. Nothing is created until you approve." textAlign="Center" class="sapUiTinyMarginTop sapUiMediumMarginBottom" />
+              <VBox items="{chat>/starters}" width="100%" class="ipGapS" renderType="Bare">
+                <Button text="{chat>}" press=".onStarter" class="ipStarter" />
+              </VBox>
+            </VBox>
+
+            <!-- messages -->
+            <VBox items="{chat>/messages}" renderType="Bare">
+              <HBox renderType="Bare" class="ipMsg">
+                <customData><core:CustomData key="kind" value="{chat>kind}" writeToDom="true" /></customData>
+                <Avatar
+                  src="{= ${chat>kind} === 'user' ? 'sap-icon://person-placeholder' : (${chat>kind} === 'error' ? 'sap-icon://alert' : 'sap-icon://lightbulb') }"
+                  displaySize="XS"
+                  backgroundColor="{= ${chat>kind} === 'user' ? 'Accent10' : (${chat>kind} === 'error' ? 'Accent2' : 'Accent6') }"
+                  decorative="true"
+                />
+                <VBox renderType="Bare" class="ipBubble">
+                  <FormattedText htmlText="{chat>html}" />
+                </VBox>
+              </HBox>
+            </VBox>
+
+            <!-- live progress of the running turn -->
+            <HBox renderType="Bare" class="ipMsg" visible="{= !!${chat>/turn} }">
+              <customData><core:CustomData key="kind" value="assistant" writeToDom="true" /></customData>
+              <Avatar src="sap-icon://lightbulb" displaySize="XS" backgroundColor="Accent6" decorative="true" />
+              <VBox renderType="Bare" class="ipBubble">
+                <List items="{chat>/turn/events}" showSeparators="None" backgroundDesign="Transparent" class="ipProgress" ariaLabelledBy="title">
+                  <CustomListItem>
+                    <HBox alignItems="Center" class="ipGapS" renderType="Bare">
+                      <BusyIndicator size="0.9rem" visible="{chat>current}" />
+                      <core:Icon src="sap-icon://accept" color="Positive" visible="{= !${chat>current} }" size="0.9rem" />
+                      <Text text="{chat>label}" />
+                      <Text text="{chat>detail}" class="ipMono ipSubtle" visible="{= !!${chat>detail} }" />
+                    </HBox>
+                  </CustomListItem>
+                </List>
+                <HBox justifyContent="SpaceBetween" alignItems="Center" class="sapUiTinyMarginTop" renderType="Bare">
+                  <Text text="{= ${chat>/turn/seconds} + 's' + (${chat>/turn/seconds} > 20 ? ' · reasoning models can take a minute' : '') }" class="ipSubtle" />
+                  <Button text="{= ${chat>/turn/cancelling} ? 'Cancelling…' : 'Cancel' }" icon="sap-icon://stop" type="Transparent" press=".onCancel" enabled="{= !${chat>/turn/cancelling} }" />
+                </HBox>
+              </VBox>
+            </HBox>
+          </ScrollContainer>
+
+          <HBox class="ipComposer ipGapS" renderType="Bare">
+            <TextArea
+              id="input"
+              value="{chat>/input}"
+              valueLiveUpdate="true"
+              rows="2"
+              growing="true"
+              growingMaxLines="6"
+              width="100%"
+              placeholder="{= ${chat>/turn} ? 'The assistant is working… you can type your next message' : 'Describe the integration… (Enter to send, Shift+Enter for a new line)' }"
+              ariaLabelledBy="title"
+            >
+              <layoutData><FlexItemData growFactor="1" /></layoutData>
+            </TextArea>
+            <Button icon="sap-icon://paper-plane" type="Emphasized" press=".onSend" tooltip="Send (Enter)" enabled="{= !!${chat>/input}.trim() &amp;&amp; !${chat>/turn} &amp;&amp; !${chat>/starting} }" />
+          </HBox>
+        </VBox>
+
+        <!-- ================= proposal ================= -->
+        <VBox renderType="Bare" class="ipPane ipCard">
+          <IconTabHeader id="proposalTabs" items="{chat>/proposals}" selectedKey="{chat>/activeId}" select=".onProposalTab" visible="{= ${chat>/proposals}.length > 1 }" mode="Inline" backgroundDesign="Transparent">
+            <items>
+              <IconTabFilter key="{chat>ID}" text="{parts: ['chat>iflowId', 'chat>packageId', 'chat>kind', 'chat>operation', 'chat>createdAt'], formatter: '.proposalTabText'}" count="{chat>status}" />
+            </items>
+          </IconTabHeader>
+
+          <ScrollContainer vertical="true" horizontal="false" height="100%" class="ipPaneBody">
+            <IllustratedMessage
+              illustrationType="sapIllus-NoData"
+              title="No proposal yet"
+              description="When the assistant proposes an iFlow, it appears here with a diagram, steps, parameters and generated Groovy for your review."
+              visible="{= !${chat>/active} }"
+            />
+
+            <VBox visible="{= !!${chat>/active} }" renderType="Bare">
+              <!-- header -->
+              <VBox class="ipPanelHeader" renderType="Bare">
+                <HBox justifyContent="SpaceBetween" alignItems="Start" renderType="Bare">
+                  <VBox renderType="Bare">
+                    <Text text="{= ${chat>/active/isIflow} ? 'iFlow proposal' : 'Package proposal' }" class="ipEyebrow" />
+                    <Title text="{chat>/active/title}" level="H3" wrapping="true" />
+                  </VBox>
+                  <ObjectStatus text="{chat>/active/status}" state="{path: 'chat>/active/status', formatter: '.formatter.statusState'}" inverted="true" class="ipNoWrap" />
+                </HBox>
+                <Text text="{chat>/active/subtitle}" class="ipSubtle ipMono sapUiTinyMarginTop" />
+              </VBox>
+
+              <VBox class="ipPanelBody ipGapM" renderType="Bare">
+                <MessageStrip text="Validated against spec v1 — nothing is created until you approve." type="Success" showIcon="true" visible="{chat>/active/pending}" />
+
+                <!-- target package (pending iFlow proposals) -->
+                <VBox class="ipPackageBox" visible="{chat>/active/showPackage}" renderType="Bare">
+                  <customData><core:CustomData key="warn" value="{= ${chat>/active/needsPackage} ? 'true' : 'false' }" writeToDom="true" /></customData>
+                  <!-- summary -->
+                  <HBox justifyContent="SpaceBetween" alignItems="Center" visible="{= !${chat>/pkg/editing} }" renderType="Bare">
+                    <HBox alignItems="Center" class="ipGapS" renderType="Bare">
+                      <core:Icon src="sap-icon://product" />
+                      <FormattedText htmlText="{chat>/active/packageSummary}" />
+                    </HBox>
+                    <Button text="Change" type="Transparent" press=".onPackageEdit" />
+                  </HBox>
+                  <!-- editor -->
+                  <VBox visible="{chat>/pkg/editing}" class="ipGapS" renderType="Bare">
+                    <HBox alignItems="Start" class="ipGapS" renderType="Bare">
+                      <core:Icon src="sap-icon://product" color="{= ${chat>/active/needsPackage} ? 'Critical' : 'Default' }" class="sapUiTinyMarginTop" />
+                      <VBox renderType="Bare">
+                        <Text text="{chat>/active/packageHeading}" class="sapUiTinyMarginTop" />
+                        <FormattedText htmlText="{chat>/active/packageHint}" visible="{= !!${chat>/active/packageHint} }" class="ipSubtle" />
+                      </VBox>
+                    </HBox>
+                    <RadioButton groupName="pkgMode" text="Use an existing package" selected="{= ${chat>/pkg/mode} === 'existing' }" select=".onPackageModeExisting" enabled="{= ${chat>/packages}.length > 0 }" />
+                    <!-- the margin sits on a wrapper: width 100% plus a margin on the Select itself overflows to the right -->
+                    <VBox renderType="Bare" class="sapUiMediumMarginBegin" visible="{= ${chat>/pkg/mode} === 'existing' }">
+                      <Select selectedKey="{chat>/pkg/existingId}" items="{path: 'chat>/packages', sorter: {path: 'name'}}" width="100%" tooltip="Existing package">
+                        <core:Item key="{chat>id}" text="{chat>name} ({chat>id})" />
+                      </Select>
+                    </VBox>
+                    <RadioButton groupName="pkgMode" text="Create a new package" selected="{= ${chat>/pkg/mode} === 'new' }" select=".onPackageModeNew" />
+                    <HBox class="ipGapS sapUiMediumMarginBegin" visible="{= ${chat>/pkg/mode} === 'new' }" wrap="Wrap" renderType="Bare">
+                      <VBox renderType="Bare">
+                        <Label text="Package ID" required="true" labelFor="newPkgId" />
+                        <Input id="newPkgId" value="{chat>/pkg/newId}" valueLiveUpdate="true" liveChange=".onPackageIdChange" placeholder="OrdersInbound" width="14rem" valueState="{= ${chat>/pkg/newIdError} ? 'Error' : 'None' }" valueStateText="{chat>/pkg/newIdError}" class="ipMono" />
+                      </VBox>
+                      <VBox renderType="Bare">
+                        <Label text="Package name" required="true" labelFor="newPkgName" />
+                        <Input id="newPkgName" value="{chat>/pkg/newName}" valueLiveUpdate="true" placeholder="Orders Inbound" width="14rem" />
+                      </VBox>
+                    </HBox>
+                    <MessageStrip text="{chat>/pkg/error}" type="Error" showIcon="true" visible="{= !!${chat>/pkg/error} }" />
+                    <HBox justifyContent="End" class="ipGapS" renderType="Bare">
+                      <Button text="Cancel" press=".onPackageCancel" visible="{= !${chat>/active/needsPackage} }" />
+                      <Button
+                        text="{= ${chat>/pkg/mode} === 'existing' ? 'Use this package' : 'Create on approval' }"
+                        type="Emphasized"
+                        press=".onPackageApply"
+                        enabled="{= ${chat>/pkg/mode} === 'existing' ? !!${chat>/pkg/existingId} : (!!${chat>/pkg/newId} &amp;&amp; !${chat>/pkg/newIdError} &amp;&amp; !!${chat>/pkg/newName}.trim()) }"
+                      />
+                    </HBox>
+                  </VBox>
+                </VBox>
+
+                <!-- execution progress -->
+                <List items="{chat>/active/execSteps}" visible="{chat>/active/showExecution}" showSeparators="None" headerText="Execution" backgroundDesign="Transparent">
+                  <StandardListItem title="{chat>label}" description="{chat>detail}" icon="{path: 'chat>status', formatter: '.formatter.stepIcon'}" iconInset="false" highlight="{= ${chat>status} === 'failed' ? 'Error' : (${chat>status} === 'warning' ? 'Warning' : (${chat>status} === 'done' ? 'Success' : 'None')) }" />
+                </List>
+                <MessageStrip text="{chat>/active/doneText}" type="Success" showIcon="true" visible="{= !!${chat>/active/doneText} }">
+                  <link><Link text="Open in iFlows" press=".onOpenCreated" visible="{chat>/active/isIflow}" /></link>
+                </MessageStrip>
+                <MessageStrip text="{chat>/active/warningText}" type="Warning" showIcon="true" visible="{= !!${chat>/active/warningText} }">
+                  <link><Link text="Monitor" href="#/monitor" /></link>
+                </MessageStrip>
+                <MessageStrip text="{chat>/active/errorText}" type="Error" showIcon="true" visible="{= !!${chat>/active/errorText} }">
+                  <link><Link text="Retry" press=".onRetry" /></link>
+                </MessageStrip>
+                <MessageStrip text="{chat>/active/rejectedText}" type="Information" showIcon="true" visible="{= !!${chat>/active/rejectedText} }" />
+
+                <!-- iFlow content -->
+                <VBox visible="{chat>/active/isIflow}" class="ipGapM" renderType="Bare">
+                  <VBox class="ipFlowBox" renderType="Bare">
+                    <core:HTML content="{chat>/active/diagramHtml}" sanitizeContent="false" />
+                  </VBox>
+
+                  <Title text="Steps" level="H5" />
+                  <VBox items="{chat>/active/stepCards}" renderType="Bare">
+                    <VBox class="ipStepCard" renderType="Bare">
+                      <HBox justifyContent="SpaceBetween" renderType="Bare">
+                        <Text text="{chat>title}" class="sapMTextBold" />
+                        <Text text="{chat>type}" class="ipEyebrow" />
+                      </HBox>
+                      <Text text="{chat>lines}" class="ipPre ipSubtle" visible="{= !!${chat>lines} }" />
+                    </VBox>
+                  </VBox>
+
+                  <Title text="Externalized parameters" level="H5" visible="{= ${chat>/active/params}.length > 0 }" />
+                  <Table items="{chat>/active/params}" visible="{= ${chat>/active/params}.length > 0 }">
+                    <columns>
+                      <Column width="35%"><Text text="Parameter" /></Column>
+                      <Column><Text text="Default value" /></Column>
+                    </columns>
+                    <items>
+                      <ColumnListItem>
+                        <cells>
+                          <Text text="{chat>key}" class="ipMono" />
+                          <Text text="{chat>value}" class="ipMono" />
+                        </cells>
+                      </ColumnListItem>
+                    </items>
+                  </Table>
+
+                  <Title text="Generated Groovy" level="H5" visible="{= ${chat>/active/scripts}.length > 0 }" />
+                  <VBox items="{chat>/active/scripts}" renderType="Bare">
+                    <VBox class="sapUiSmallMarginBottom" renderType="Bare">
+                      <Text text="{chat>fileName}" class="ipMono sapUiTinyMarginBottom" />
+                      <ce:CodeEditor type="groovy" value="{chat>code}" editable="false" height="260px" syntaxHints="false" />
+                    </VBox>
+                  </VBox>
+
+                  <MessageStrip
+                    text="Receivers are created without authentication. If a target system needs authentication, open the iFlow in the CPI web editor after creation and set the authentication method and credentials on its receiver adapter before deploying."
+                    type="Information"
+                    showIcon="true"
+                    visible="{chat>/active/hasHttpReceiver}"
+                  />
+                </VBox>
+
+                <!-- package proposal -->
+                <VBox visible="{= !!${chat>/active} &amp;&amp; !${chat>/active/isIflow} }" renderType="Bare">
+                  <Label text="ID" /><Text text="{chat>/active/spec/id}" class="ipMono" />
+                  <Label text="Short text" class="sapUiSmallMarginTop" /><Text text="{chat>/active/spec/shortText}" />
+                </VBox>
+              </VBox>
+            </VBox>
+          </ScrollContainer>
+
+          <!-- actions wrap onto a second line instead of hiding in an overflow menu -->
+          <HBox visible="{= !!${chat>/active/pending} }" class="ipPanelFooter ipFooterActions" wrap="Wrap" alignItems="Center" renderType="Bare">
+            <Button text="Approve &amp; create" icon="sap-icon://accept" type="Emphasized" press=".onApprove" enabled="{= !${chat>/active/needsPackage} }" />
+            <Button text="Approve, create &amp; deploy" icon="sap-icon://upload-to-cloud" press=".onApproveDeploy" visible="{chat>/active/isIflow}" enabled="{= !${chat>/active/needsPackage} }" />
+            <Button text="Request changes" icon="sap-icon://comment" type="Transparent" press=".onRequestChanges" />
+            <Button text="Reject" icon="sap-icon://decline" type="Reject" press=".onReject" />
+            <Text text="Choose the target package above first." class="ipWarnText" visible="{chat>/active/needsPackage}" />
+          </HBox>
+        </VBox>
+      </HBox>
+    </f:content>
+  </f:DynamicPage>
+</mvc:View>

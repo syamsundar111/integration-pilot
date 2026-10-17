@@ -1,0 +1,15 @@
+{
+  "name": "integration-pilot-approuter",
+  "version": "1.0.0",
+  "description": "Standalone approuter: XSUAA login, serves the dashboard build, forwards /api to the CAP service",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node node_modules/@sap/approuter/approuter.js"
+  },
+  "dependencies": {
+    "@sap/approuter": "^23"
+  }
+}

@@ -1,0 +1,217 @@
+<mvc:View
+  controllerName="integration.pilot.controller.Iflows"
+  xmlns:mvc="sap.ui.core.mvc"
+  xmlns="sap.m"
+  xmlns:f="sap.f"
+  xmlns:core="sap.ui.core"
+  xmlns:form="sap.ui.layout.form"
+  xmlns:u="sap.ui.unified"
+  xmlns:ce="sap.ui.codeeditor"
+  height="100%"
+>
+  <f:FlexibleColumnLayout id="fcl" layout="{view>/layout}" backgroundDesign="Translucent">
+    <!-- list -->
+    <f:beginColumnPages>
+      <f:DynamicPage id="listPage" toggleHeaderOnTitleClick="false">
+        <f:title>
+          <f:DynamicPageTitle>
+            <f:heading><Title text="iFlows" level="H2" /></f:heading>
+            <f:expandedContent><Text text="Integration flows per package, with runtime status." /></f:expandedContent>
+            <f:actions>
+              <u:FileUploader
+                id="zipUploader"
+                buttonOnly="true"
+                buttonText="Explain from ZIP"
+                icon="sap-icon://upload"
+                fileType="zip"
+                mimeType="application/zip,application/x-zip-compressed"
+                sameFilenameAllowed="true"
+                change=".onZipSelected"
+                tooltip="Upload an iFlow ZIP to explain it"
+                typeMissmatch=".onZipTypeMismatch"
+              />
+              <Button text="Refresh" icon="sap-icon://refresh" press=".onRefresh" />
+            </f:actions>
+          </f:DynamicPageTitle>
+        </f:title>
+        <f:content>
+          <VBox>
+            <MessageStrip text="{i18n>editorBanner}" type="Warning" showIcon="true" class="sapUiSmallMarginBottom" />
+            <MessageStrip text="{view>/error/message}" type="Error" showIcon="true" visible="{= !!${view>/error} }" class="sapUiSmallMarginBottom" />
+            <Table id="table" items="{view>/filtered}" busy="{view>/busy}" busyIndicatorDelay="0" growing="true" growingThreshold="50" sticky="ColumnHeaders,HeaderToolbar" mode="SingleSelectMaster" selectionChange=".onSelect" class="ipCard">
+              <headerToolbar>
+                <OverflowToolbar>
+                  <Select id="packageSelect" selectedKey="{path: 'view>/packageId', mode: 'OneWay'}" items="{path: 'view>/packages', sorter: {path: 'name'}}" change=".onPackageChange" width="16rem" ariaLabelledBy="title" forceSelection="false">
+                    <core:Item key="{view>id}" text="{view>name}" />
+                  </Select>
+                  <SearchField width="16rem" placeholder="Search iFlows" liveChange=".onSearch" value="{view>/search}" />
+                  <Text text="{= ${view>/filtered}.length + ' iFlow(s)' }" class="ipSubtle" />
+                </OverflowToolbar>
+              </headerToolbar>
+              <noData>
+                <IllustratedMessage
+                  illustrationType="{= ${view>/search} ? 'sapIllus-NoSearchResults' : 'sapIllus-NoEntries' }"
+                  title="{= ${view>/search} ? 'No matching iFlows' : 'No iFlows in this package' }"
+                  description="{= ${view>/search} ? 'Try a different search term.' : 'Use Generate to create one with AI, or pick another package.' }"
+                />
+              </noData>
+              <columns>
+                <Column><Text text="Name" /></Column>
+                <Column minScreenWidth="Tablet" demandPopin="true"><Text text="ID" /></Column>
+                <Column minScreenWidth="Desktop" demandPopin="true" visible="{= ${view>/layout} === 'OneColumn' }"><Text text="Version" /></Column>
+                <Column minScreenWidth="Desktop" demandPopin="true" visible="{= ${view>/layout} === 'OneColumn' }"><Text text="Modified" /></Column>
+                <Column><Text text="Runtime" /></Column>
+              </columns>
+              <items>
+                <ColumnListItem type="Navigation" selected="{= ${view>id} === ${view>/iflowId} }">
+                  <cells>
+                    <Text text="{view>name}" class="sapUiTinyMarginTopBottom" />
+                    <ObjectStatus text="{view>id}" class="ipMono" />
+                    <Text text="{view>version}" />
+                    <Text text="{path: 'view>modifiedAt', formatter: '.formatter.relativeTime'}" />
+                    <ObjectStatus text="{path: 'view>runtime', formatter: '.formatter.statusText'}" state="{path: 'view>runtime', formatter: '.formatter.statusState'}" inverted="true" class="ipNoWrap" />
+                  </cells>
+                </ColumnListItem>
+              </items>
+            </Table>
+          </VBox>
+        </f:content>
+      </f:DynamicPage>
+    </f:beginColumnPages>
+
+    <!-- detail -->
+    <f:midColumnPages>
+      <f:DynamicPage id="detailPage" toggleHeaderOnTitleClick="false">
+        <f:title>
+          <f:DynamicPageTitle>
+            <f:heading><Title text="{view>/selected/name}" level="H2" wrapping="true" /></f:heading>
+            <f:expandedContent>
+              <HBox alignItems="Center" renderType="Bare" class="ipGapS">
+                <ObjectStatus text="{view>/selected/id}" class="ipMono" />
+                <ObjectStatus
+                  text="{= ${view>/runtime} ? ${view>/runtime/status} : (${view>/runtimeBusy} ? '…' : 'Not deployed') }"
+                  state="{path: 'view>/runtime/status', formatter: '.formatter.statusState'}"
+                  inverted="true"
+                />
+              </HBox>
+            </f:expandedContent>
+            <f:actions>
+              <Button text="Download ZIP" icon="sap-icon://download" press=".onDownload" />
+              <Button text="Deploy" icon="sap-icon://upload-to-cloud" type="Emphasized" press=".onDeploy" />
+              <Button text="Undeploy" icon="sap-icon://stop" press=".onUndeploy" visible="{= !!${view>/runtime} }" />
+              <Button text="Explain with AI" icon="sap-icon://lightbulb" press=".onExplain" />
+              <Button text="Delete" icon="sap-icon://delete" type="Reject" press=".onDelete" />
+            </f:actions>
+            <f:navigationActions>
+              <OverflowToolbarButton type="Transparent" icon="{= ${view>/layout} === 'MidColumnFullScreen' ? 'sap-icon://exit-full-screen' : 'sap-icon://full-screen' }" press=".onToggleFullScreen" tooltip="Full screen" />
+              <OverflowToolbarButton type="Transparent" icon="sap-icon://decline" press=".onCloseDetail" tooltip="Close" />
+            </f:navigationActions>
+          </f:DynamicPageTitle>
+        </f:title>
+        <f:content>
+          <VBox>
+            <MessageStrip text="{i18n>editorBanner}" type="Warning" showIcon="true" class="sapUiSmallMarginBottom" />
+            <IconTabBar id="tabs" selectedKey="{view>/tab}" expandable="false" headerMode="Inline" headerBackgroundDesign="Transparent" applyContentPadding="false" class="ipCard">
+              <items>
+                <!-- Overview -->
+                <IconTabFilter key="overview" text="Overview">
+                  <VBox class="sapUiSmallMargin">
+                    <form:SimpleForm layout="ColumnLayout" columnsM="2" columnsL="4" columnsXL="4" editable="false">
+                      <Label text="Version" /><Text text="{view>/selected/version}" />
+                      <Label text="Package" /><Text text="{view>/selected/packageId}" />
+                      <Label text="Modified" /><Text text="{path: 'view>/selected/modifiedAt', formatter: '.formatter.dateTime'}" />
+                      <Label text="Modified by" /><Text text="{= ${view>/selected/modifiedBy} || ${view>/selected/createdBy} || '—' }" />
+                    </form:SimpleForm>
+                    <Toolbar style="Clear">
+                      <Title text="Flow" level="H4" />
+                      <ToolbarSpacer />
+                      <Button text="Explain with AI" icon="sap-icon://lightbulb" type="Transparent" press=".onExplain" />
+                    </Toolbar>
+                    <VBox busy="{view>/parsedBusy}" busyIndicatorDelay="0" class="ipFlowBox">
+                      <core:HTML content="{view>/diagramHtml}" sanitizeContent="false" />
+                      <MessageStrip text="{view>/parsedError}" type="Error" showIcon="true" visible="{= !!${view>/parsedError} }" />
+                    </VBox>
+                    <Title text="Adapters" level="H4" class="ipSectionTitle" visible="{= ${view>/parsed/adapters}.length > 0 }" />
+                    <List items="{view>/parsed/adapters}" visible="{= ${view>/parsed/adapters}.length > 0 }" showSeparators="Inner">
+                      <StandardListItem
+                        title="{view>type} · {view>direction} · {view>system}"
+                        description="{= (${view>method} ? ${view>method} + ' ' : '') + (${view>address} || '') + (${view>authType} &amp;&amp; ${view>authType} !== 'None' ? ' · ' + ${view>authType} : '') }"
+                        icon="{= ${view>direction} === 'Sender' ? 'sap-icon://inbox' : 'sap-icon://outbox' }"
+                      />
+                    </List>
+                  </VBox>
+                </IconTabFilter>
+
+                <!-- Parameters -->
+                <IconTabFilter key="parameters" text="Parameters" count="{= ${view>/configs}.length || '' }">
+                  <VBox class="sapUiSmallMargin">
+                    <Table items="{view>/configs}" busy="{view>/configsBusy}" busyIndicatorDelay="0">
+                      <noData>
+                        <IllustratedMessage illustrationType="sapIllus-NoEntries" illustrationSize="Small" title="No externalized parameters" description="This iFlow has no configurable parameters." />
+                      </noData>
+                      <columns>
+                        <Column width="35%"><Text text="Parameter" /></Column>
+                        <Column><Text text="Value" /></Column>
+                      </columns>
+                      <items>
+                        <ColumnListItem>
+                          <cells>
+                            <VBox renderType="Bare">
+                              <Text text="{view>key}" class="ipMono" />
+                              <Text text="{view>dataType}" class="ipSubtle" />
+                            </VBox>
+                            <Input value="{view>value}" valueLiveUpdate="true" liveChange=".onParamChange" class="ipMono" ariaLabelledBy="title" />
+                          </cells>
+                        </ColumnListItem>
+                      </items>
+                    </Table>
+                    <Toolbar style="Clear" visible="{= ${view>/configs}.length > 0 }">
+                      <ToolbarSpacer />
+                      <ObjectStatus text="{view>/changes} unsaved change(s)" state="Warning" visible="{= ${view>/changes} > 0 }" />
+                      <Button text="Reset" press=".onResetParams" enabled="{= ${view>/changes} > 0 }" />
+                      <Button text="Save parameters" icon="sap-icon://save" type="Emphasized" press=".onSaveParams" enabled="{= ${view>/changes} > 0 }" />
+                    </Toolbar>
+                  </VBox>
+                </IconTabFilter>
+
+                <!-- Scripts -->
+                <IconTabFilter key="scripts" text="Scripts" count="{= ${view>/parsed/scripts}.length || '' }">
+                  <VBox class="sapUiSmallMargin" items="{view>/parsed/scripts}">
+                    <items>
+                      <VBox class="sapUiSmallMarginBottom" renderType="Bare">
+                        <Text text="{view>path}" class="ipMono sapUiTinyMarginBottom" />
+                        <ce:CodeEditor type="groovy" value="{view>content}" editable="false" height="320px" lineNumbers="true" syntaxHints="false" />
+                      </VBox>
+                    </items>
+                  </VBox>
+                  <IllustratedMessage illustrationType="sapIllus-NoEntries" illustrationSize="Small" title="No scripts" description="This iFlow contains no scripts." visible="{= !${view>/parsedBusy} &amp;&amp; !${view>/parsed/scripts}.length }" />
+                </IconTabFilter>
+
+                <!-- Runtime -->
+                <IconTabFilter key="runtime" text="Runtime">
+                  <VBox class="sapUiSmallMargin" busy="{view>/runtimeBusy}" busyIndicatorDelay="0">
+                    <IllustratedMessage illustrationType="sapIllus-NoActivities" illustrationSize="Small" title="Not deployed" description="Deploy this iFlow to run it on the tenant." visible="{= !${view>/runtime} &amp;&amp; !${view>/runtimeBusy} }" />
+                    <VBox visible="{= !!${view>/runtime} }">
+                      <Toolbar style="Clear">
+                        <ObjectStatus text="{view>/runtime/status}" state="{path: 'view>/runtime/status', formatter: '.formatter.statusState'}" inverted="true" />
+                        <ToolbarSpacer />
+                        <Button text="Refresh" icon="sap-icon://refresh" type="Transparent" press=".loadRuntime" />
+                      </Toolbar>
+                      <form:SimpleForm layout="ColumnLayout" columnsM="3" columnsL="3" editable="false">
+                        <Label text="Deployed version" /><Text text="{view>/runtime/version}" />
+                        <Label text="Deployed on" /><Text text="{path: 'view>/runtime/deployedOn', formatter: '.formatter.dateTime'}" />
+                        <Label text="Deployed by" /><Text text="{= ${view>/runtime/deployedBy} || '—' }" />
+                      </form:SimpleForm>
+                      <Title text="Error details" level="H4" class="ipSectionTitle" visible="{= ${view>/runtime/status} === 'ERROR' }" />
+                      <Text text="{= ${view>/runtimeError} || 'No error details available.' }" class="ipPre ipPreError" visible="{= ${view>/runtime/status} === 'ERROR' }" width="100%" />
+                    </VBox>
+                  </VBox>
+                </IconTabFilter>
+              </items>
+            </IconTabBar>
+          </VBox>
+        </f:content>
+      </f:DynamicPage>
+    </f:midColumnPages>
+  </f:FlexibleColumnLayout>
+</mvc:View>

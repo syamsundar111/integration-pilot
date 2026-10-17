@@ -1,0 +1,9 @@
+<mvc:View xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m">
+  <Page showHeader="false">
+    <IllustratedMessage illustrationType="sapIllus-PageNotFound" title="Page not found" description="This page does not exist.">
+      <additionalContent>
+        <Link text="Go to Dashboard" href="#/" />
+      </additionalContent>
+    </IllustratedMessage>
+  </Page>
+</mvc:View>

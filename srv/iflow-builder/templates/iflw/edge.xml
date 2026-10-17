@@ -1,0 +1,2 @@
+            <bpmndi:BPMNEdge bpmnElement="{{ELEMENT}}" id="{{ID}}" sourceElement="{{SOURCE}}" targetElement="{{TARGET}}">
+{{WAYPOINTS}}            </bpmndi:BPMNEdge>

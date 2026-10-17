@@ -1,0 +1,3 @@
+            <bpmndi:BPMNShape bpmnElement="{{ELEMENT}}" id="{{ID}}">
+                <dc:Bounds height="{{HEIGHT}}" width="{{WIDTH}}" x="{{X}}" y="{{Y}}"/>
+            </bpmndi:BPMNShape>

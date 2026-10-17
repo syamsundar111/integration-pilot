@@ -1,0 +1,8 @@
+        <bpmn2:participant id="{{ID}}" ifl:type="EndpointRecevier" name="{{NAME}}">
+            <bpmn2:extensionElements>
+                <ifl:property>
+                    <key>ifl:type</key>
+                    <value>EndpointRecevier</value>
+                </ifl:property>
+            </bpmn2:extensionElements>
+        </bpmn2:participant>

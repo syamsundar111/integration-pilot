@@ -1,0 +1,60 @@
+<mvc:View controllerName="integration.pilot.controller.App" xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m" xmlns:tnt="sap.tnt" xmlns:core="sap.ui.core" displayBlock="true" height="100%">
+  <tnt:ToolPage id="toolPage" sideExpanded="{app>/sideExpanded}">
+    <tnt:header>
+      <tnt:ToolHeader>
+        <Button icon="sap-icon://menu2" type="Transparent" press=".onSideToggle" tooltip="Toggle navigation">
+          <layoutData><OverflowToolbarLayoutData priority="NeverOverflow" /></layoutData>
+        </Button>
+        <core:Icon src="sap-icon://chain-link" class="ipLogo" decorative="true" />
+        <Title text="{i18n>appTitle}" level="H1" class="ipAppTitle" />
+        <Text text="{i18n>appSubtitle}" class="ipSubtle sapUiTinyMarginBegin" />
+        <ToolbarSpacer />
+        <VBox renderType="Bare" class="ipTenant">
+          <Label text="{i18n>tenant}" class="ipTenantLabel" />
+          <Text text="{= ${app>/health/tenantHost} || '…' }" class="ipMono" wrapping="false" />
+        </VBox>
+        <ObjectStatus
+          text="{= ${app>/health} ? (${app>/health/connected} ? ${i18n>connected} + ' · ' + ${app>/health/latencyMs} + ' ms' : ${i18n>disconnected}) : ${i18n>checking} }"
+          state="{= ${app>/health} ? (${app>/health/connected} ? 'Success' : 'Error') : 'None' }"
+          icon="{= ${app>/health/connected} ? 'sap-icon://connected' : 'sap-icon://disconnected' }"
+          tooltip="{= ${app>/health/error/message} || '' }"
+          inverted="true"
+          class="sapUiSmallMarginBegin"
+        />
+        <ToolbarSpacer width="1rem" />
+        <VBox renderType="Bare" alignItems="End" class="ipUser">
+          <Text text="{app>/user/id}" />
+          <Link text="{i18n>signOut}" href="do/logout" visible="{= !!${app>/user/id} &amp;&amp; ${app>/user/id} !== 'local-dev' }" />
+          <Text text="{i18n>localDevelopment}" class="ipSubtle" visible="{= ${app>/user/id} === 'local-dev' }" />
+        </VBox>
+        <Avatar initials="{path: 'app>/user/id', formatter: '.formatter.initials'}" displaySize="XS" backgroundColor="Accent6" tooltip="{app>/user/id}" class="sapUiTinyMarginBegin" />
+      </tnt:ToolHeader>
+    </tnt:header>
+    <tnt:sideContent>
+      <tnt:SideNavigation id="sideNav" selectedKey="{app>/selectedKey}" itemSelect=".onNavSelect" ariaLabel="Main navigation">
+        <tnt:NavigationList>
+          <tnt:NavigationListGroup text="{i18n>navOverview}">
+            <tnt:NavigationListItem key="dashboard" text="{i18n>navDashboard}" icon="sap-icon://home" />
+            <tnt:NavigationListItem key="monitor" text="{i18n>navMonitor}" icon="sap-icon://line-chart" />
+          </tnt:NavigationListGroup>
+          <tnt:NavigationListGroup text="{i18n>navBuild}">
+            <tnt:NavigationListItem key="generate" text="{i18n>navGenerate}" icon="sap-icon://lightbulb" />
+            <tnt:NavigationListItem key="packages" text="{i18n>navPackages}" icon="sap-icon://product" />
+            <tnt:NavigationListItem key="iflows" text="{i18n>navIflows}" icon="sap-icon://process" />
+          </tnt:NavigationListGroup>
+          <tnt:NavigationListGroup text="{i18n>navHistory}">
+            <tnt:NavigationListItem key="activity" text="{i18n>navActivity}" icon="sap-icon://history" />
+          </tnt:NavigationListGroup>
+        </tnt:NavigationList>
+        <tnt:fixedItem>
+          <tnt:NavigationList>
+            <tnt:NavigationListItem text="v1 · linear flows" icon="sap-icon://hint" selectable="false" enabled="false" />
+          </tnt:NavigationList>
+        </tnt:fixedItem>
+      </tnt:SideNavigation>
+    </tnt:sideContent>
+    <tnt:mainContents>
+      <NavContainer id="pageContainer" />
+    </tnt:mainContents>
+  </tnt:ToolPage>
+</mvc:View>

@@ -1,0 +1,18 @@
+        <bpmn2:serviceTask id="{{ID}}" name="{{NAME}}">
+            <bpmn2:extensionElements>
+                <ifl:property>
+                    <key>componentVersion</key>
+                    <value>1.0</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>activityType</key>
+                    <value>ExternalCall</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>cmdVariantUri</key>
+                    <value>ctype::FlowstepVariant/cname::ExternalCall/version::1.0.4</value>
+                </ifl:property>
+            </bpmn2:extensionElements>
+            <bpmn2:incoming>{{INCOMING}}</bpmn2:incoming>
+            <bpmn2:outgoing>{{OUTGOING}}</bpmn2:outgoing>
+        </bpmn2:serviceTask>

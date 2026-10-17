@@ -1,0 +1,43 @@
+<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core" xmlns:form="sap.ui.layout.form">
+  <Dialog id="packageDialog" title="{= ${view>/form/mode} === 'create' ? 'Create package' : 'Edit package' }" contentWidth="32rem" busy="{view>/form/busy}" busyIndicatorDelay="0" afterClose=".onDialogClosed">
+    <content>
+      <form:SimpleForm editable="true" layout="ResponsiveGridLayout" labelSpanL="4" labelSpanM="4" columnsL="1" columnsM="1">
+        <Label text="Name" required="true" />
+        <Input value="{view>/form/name}" placeholder="Order Processing" valueLiveUpdate="true" />
+        <Label text="ID" required="true" visible="{= ${view>/form/mode} === 'create' }" />
+        <Input
+          value="{view>/form/id}"
+          placeholder="OrderProcessing"
+          valueLiveUpdate="true"
+          liveChange=".onIdChange"
+          visible="{= ${view>/form/mode} === 'create' }"
+          valueState="{= ${view>/form/idError} ? 'Error' : 'None' }"
+          valueStateText="{view>/form/idError}"
+          class="ipMono"
+        />
+        <Label text="" visible="{= ${view>/form/mode} === 'create' }" />
+        <Text text="Letters, digits and dots only (no underscores). Cannot be changed later." class="ipSubtle" visible="{= ${view>/form/mode} === 'create' }" />
+        <Label text="ID" visible="{= ${view>/form/mode} === 'edit' }" />
+        <Text text="{view>/form/id}" class="ipMono" visible="{= ${view>/form/mode} === 'edit' }" />
+        <Label text="Short description" />
+        <Input value="{view>/form/shortText}" placeholder="One line shown in lists" />
+        <Label text="Description" />
+        <TextArea value="{view>/form/description}" rows="3" width="100%" />
+        <Label text="Version" />
+        <Input value="{view>/form/version}" width="8rem" class="ipMono" />
+      </form:SimpleForm>
+      <MessageStrip text="{view>/form/error}" type="Error" showIcon="true" visible="{= !!${view>/form/error} }" class="sapUiSmallMarginBeginEnd sapUiSmallMarginBottom" />
+    </content>
+    <beginButton>
+      <Button
+        text="{= ${view>/form/mode} === 'create' ? 'Create package' : 'Save changes' }"
+        type="Emphasized"
+        press=".onSave"
+        enabled="{= !!${view>/form/name} &amp;&amp; (${view>/form/mode} === 'edit' || (!!${view>/form/id} &amp;&amp; !${view>/form/idError})) }"
+      />
+    </beginButton>
+    <endButton>
+      <Button text="Cancel" press=".onCancelDialog" />
+    </endButton>
+  </Dialog>
+</core:FragmentDefinition>
