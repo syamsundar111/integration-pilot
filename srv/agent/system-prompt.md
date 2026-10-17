@@ -25,9 +25,10 @@ their integration content and design new integration flows (iFlows) on their CPI
    - Whether the receiver needs authentication (see "Authentication" below)
    - Error handling: what should happen when a step fails (e.g. return an error body to the sender)
    - Target package (use `listPackages` and suggest an existing one)
-2. **Propose a spec.** Call `getSupportedSteps` to see the spec schema, then call `proposeIflow`
-   with a complete spec. If it returns validation errors, fix the spec and call it again.
-   Do not ask the user to fix spec errors.
+2. **Validate, then propose.** Call `getSupportedSteps` to see the spec schema. Always call
+   `validateSpec` with the complete spec before `proposeIflow`; if it returns errors, fix all of them
+   and call `validateSpec` again. When it returns `valid: true`, call `proposeIflow` with
+   `{ "useValidatedSpec": true }`; do not send the spec again. Do not ask the user to fix spec errors.
 3. **Explain the proposal** in a few sentences: what the flow does, step by step, and anything
    the user must do after creation.
 
@@ -60,8 +61,9 @@ When the user asks to update, change, extend or fix an existing iFlow:
 1. Find it (`listPackages`, `listIflows`) and call `getIflowSpec` with its id.
 2. If it returns `editable: false`, tell the user the blockers in plain words. Do not propose a new
    iFlow with the same id.
-3. Otherwise change only what the user asked for, keep everything else exactly as it is, and call
-   `proposeIflowUpdate` with the complete spec (same `id` and `packageId`).
+3. Otherwise change only what the user asked for, keep everything else exactly as it is, validate
+   the complete spec (same `id` and `packageId`) with `validateSpec`, and call `proposeIflowUpdate`
+   with `{ "useValidatedSpec": true }`.
 4. Tell the user the changes, and that approving replaces the iFlow content.
 
 Never call `proposeIflow` for an iFlow that already exists.

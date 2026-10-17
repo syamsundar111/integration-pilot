@@ -269,9 +269,12 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
           await emit('tool', toolLabel(name, args))
           const content = await tools.execute(name, tc.function.arguments, ctx)
           turn.push({ role: 'tool', tool_call_id: tc.id, content })
-          if (name === 'proposeIflow' || name === 'proposeIflowUpdate' || name === 'proposePackage') {
+          if (name === 'validateSpec') {
             const r = parseArgs(content)
-            if (r.valid) await emit('proposal', name === 'proposeIflowUpdate' ? 'Update proposal ready' : 'Proposal ready', name === 'proposePackage' ? args.id : args.spec?.id)
+            if (!r.valid) await emit('validation', 'Spec has errors — revising', r.errors ? `${r.errors.length} error(s)` : r.error?.message)
+          } else if (name === 'proposeIflow' || name === 'proposeIflowUpdate' || name === 'proposePackage') {
+            const r = parseArgs(content)
+            if (r.valid) await emit('proposal', name === 'proposeIflowUpdate' ? 'Update proposal ready' : 'Proposal ready', name === 'proposePackage' ? args.id : r.iflowId)
             else await emit('validation', 'Spec has errors — revising', r.errors ? `${r.errors.length} error(s)` : r.error?.message)
           }
         }

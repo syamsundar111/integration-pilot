@@ -619,3 +619,27 @@ describe('session defaults', () => {
     await expect(POST('/api/chat', { message: 'x', defaults: { timer: 'hourly' } })).rejects.toMatchObject({ response: { status: 400 } })
   })
 })
+
+describe('validate, then propose', () => {
+  test('validateSpec returns compact codes; proposeIflow reuses the validated spec', async () => {
+    const spec = { ...sample, id: 'Agent_Validated_1', name: 'Agent Validated 1' }
+    const broken = { ...spec, steps: [...spec.steps, { type: 'router' }] }
+    llm.chat
+      .mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true })) // nothing validated yet
+      .mockResolvedValueOnce(toolCall('validateSpec', { spec: broken }))
+      .mockResolvedValueOnce(toolCall('validateSpec', { spec }))
+      .mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true }))
+      .mockResolvedValueOnce(answer('Ready.'))
+    const turn = await chat({ message: 'Build it' })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Agent_Validated_1', status: 'PENDING', spec })])
+
+    const results = llm.chat.mock.calls[4][0].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))
+    expect(results[0]).toMatchObject({ valid: false, errors: [expect.stringMatching(/^NO_VALIDATED_SPEC /)] })
+    expect(results[1]).toMatchObject({ valid: false, errors: [expect.stringMatching(/^STEP_NOT_IN_V1 steps\[\d+\]: 'router'/)] })
+    expect(results[2]).toEqual({ valid: true, next: expect.stringContaining('useValidatedSpec') })
+    expect(results[3]).toMatchObject({ valid: true, iflowId: 'Agent_Validated_1' })
+    // tool results never echo the spec
+    for (const r of results) expect(JSON.stringify(r)).not.toContain('"type":"contentModifier"')
+    expect(turn.events.map((e) => e.type)).toContain('validation')
+  })
+})

@@ -1,6 +1,7 @@
 /**
  * iFlow spec v1 validator: JSON Schema + semantic rules.
- * Returns human-readable errors an LLM (or a user) can act on directly.
+ * Returns human-readable errors an LLM (or a user) can act on directly, and the same
+ * errors as issues with a stable code ({ code, message }) for compact tool results.
  */
 const Ajv = require('ajv')
 const schema = require('./spec-schema.json')
@@ -80,9 +81,10 @@ const PATTERN_HINTS = {
   name: 'use letters, digits, dot, dash or underscore'
 }
 
-/** Translates Ajv errors into plain sentences */
+/** Translates Ajv errors into plain sentences: [{ code, message }] */
 function schemaErrors(errors, skipPaths) {
   const out = []
+  const push = (code, message) => out.push({ code, message })
   for (const e of errors) {
     if (e.keyword === 'if') continue // the specific error of the "then" branch is reported separately
     if (skipPaths.some((p) => e.instancePath === p || e.instancePath.startsWith(p + '/'))) continue
@@ -91,28 +93,28 @@ function schemaErrors(errors, skipPaths) {
     const field = e.instancePath.split('/').pop()
     switch (e.keyword) {
       case 'required':
-        out.push(`${where}: missing required field '${e.params.missingProperty}'`)
+        push('MISSING_FIELD', `${where}: missing required field '${e.params.missingProperty}'`)
         break
       case 'additionalProperties':
-        out.push(`${where}: unknown field '${e.params.additionalProperty}'`)
+        push('UNKNOWN_FIELD', `${where}: unknown field '${e.params.additionalProperty}'`)
         break
       case 'enum':
-        out.push(`${where}: must be one of ${e.params.allowedValues.join(', ')}`)
+        push('BAD_VALUE', `${where}: must be one of ${e.params.allowedValues.join(', ')}`)
         break
       case 'const':
-        out.push(`${where}: must be '${e.params.allowedValue}'`)
+        push('BAD_VALUE', `${where}: must be '${e.params.allowedValue}'`)
         break
       case 'pattern':
-        out.push(`${where}: invalid value — ${PATTERN_HINTS[field] || `must match ${e.params.pattern}`}`)
+        push('BAD_FORMAT', `${where}: invalid value — ${PATTERN_HINTS[field] || `must match ${e.params.pattern}`}`)
         break
       case 'propertyNames':
-        out.push(`${where}: invalid parameter name '${e.params.propertyName}' — start with a letter, then letters, digits or underscore`)
+        push('BAD_PARAM_NAME', `${where}: invalid parameter name '${e.params.propertyName}' — start with a letter, then letters, digits or underscore`)
         break
       default:
-        out.push(`${where}: ${e.message}`)
+        push(e.keyword === 'maxItems' ? 'TOO_MANY' : e.keyword === 'type' ? 'BAD_TYPE' : 'INVALID', `${where}: ${e.message}`)
     }
   }
-  return [...new Set(out)]
+  return out
 }
 
 /** Visits every string in the spec with its path */
@@ -130,8 +132,10 @@ const PARAM_FIELDS = /^(steps\[\d+\]|end)\.url$/
  * @returns {{ valid: boolean, errors: string[] }}
  */
 function validate(spec) {
-  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return { valid: false, errors: ['spec: must be a JSON object'] }
-  const errors = []
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec))
+    return { valid: false, errors: ['spec: must be a JSON object'], issues: [{ code: 'NOT_OBJECT', message: 'spec: must be a JSON object' }] }
+  const issues = []
+  const err = (code, message) => issues.push({ code, message })
   const skip = []
 
   // Unsupported step/trigger/end types get one clear message instead of schema noise
@@ -140,20 +144,22 @@ function validate(spec) {
     const type = s?.type
     if (!type || SUPPORTED_STEPS.includes(type)) return
     skip.push(`/steps/${i}`)
-    errors.push(
-      EXCEPTION_STEP.test(type)
-        ? `steps[${i}]: error handling is not a step — remove '${type}' from steps and put the error handling steps into the top-level 'exceptionSubprocess': { "steps": [...] }`
-        : NOT_IN_V1.test(type)
-          ? `steps[${i}]: '${type}' is not supported in v1 — flows must be linear (no router, splitter, mapping). Supported step types: ${supportedList}. Routing or mapping logic can often be done in a groovyScript step.`
-          : `steps[${i}]: unknown step type '${type}'. Supported step types: ${supportedList}.`
-    )
+    if (EXCEPTION_STEP.test(type))
+      err('EXCEPTION_AS_STEP', `steps[${i}]: error handling is not a step — remove '${type}' from steps and put the error handling steps into the top-level 'exceptionSubprocess': { "steps": [...] }`)
+    else if (NOT_IN_V1.test(type))
+      err(
+        'STEP_NOT_IN_V1',
+        `steps[${i}]: '${type}' is not supported in v1 — flows must be linear (no router, splitter, mapping). Supported step types: ${supportedList}. Routing or mapping logic can often be done in a groovyScript step.`
+      )
+    else err('UNKNOWN_STEP', `steps[${i}]: unknown step type '${type}'. Supported step types: ${supportedList}.`)
   })
   const exceptionList = SUPPORTED_EXCEPTION_STEPS.join(', ')
   exceptionSteps(spec).forEach((s, i) => {
     const type = s?.type
     if (!type || SUPPORTED_EXCEPTION_STEPS.includes(type)) return
     skip.push(`/exceptionSubprocess/steps/${i}`)
-    errors.push(
+    err(
+      'EXCEPTION_STEP_UNSUPPORTED',
       type === 'requestReplyHttp'
         ? `exceptionSubprocess.steps[${i}]: requestReplyHttp is not supported in the exception subprocess in v1. Supported: ${exceptionList}. The subprocess result is returned to the sender.`
         : `exceptionSubprocess.steps[${i}]: '${type}' is not supported in the exception subprocess. Supported: ${exceptionList}.`
@@ -161,11 +167,11 @@ function validate(spec) {
   })
   if (spec.trigger?.type && !SUPPORTED_TRIGGERS.includes(spec.trigger.type)) {
     skip.push('/trigger')
-    errors.push(`trigger: '${spec.trigger.type}' is not supported in v1. Use httpsSender { address } or timer { mode: "once" }.`)
+    err('TRIGGER_UNSUPPORTED', `trigger: '${spec.trigger.type}' is not supported in v1. Use httpsSender { address } or timer { mode: "once" }.`)
   }
   if (spec.end?.type && !SUPPORTED_ENDS.includes(spec.end.type)) {
     skip.push('/end')
-    errors.push(`end: '${spec.end.type}' is not supported in v1. Use httpReceiver { url, method, authType } or none.`)
+    err('END_UNSUPPORTED', `end: '${spec.end.type}' is not supported in v1. Use httpReceiver { url, method, authType } or none.`)
   }
 
   // Receiver authentication: only None in v1; one actionable message instead of an enum error
@@ -174,12 +180,12 @@ function validate(spec) {
   for (const [call, where, ptr] of calls) {
     if (call.authType != null && call.authType !== 'None') {
       skip.push(`${ptr}/authType`)
-      errors.push(`${where}.authType: '${call.authType}' is not supported in v1 — ${AUTH_HINT}`)
+      err('AUTH_UNSUPPORTED', `${where}.authType: '${call.authType}' is not supported in v1 — ${AUTH_HINT}`)
     }
-    if ('credentialAlias' in call) errors.push(`${where}: credentialAlias is not supported in v1 — ${AUTH_HINT}`)
+    if ('credentialAlias' in call) err('AUTH_UNSUPPORTED', `${where}: credentialAlias is not supported in v1 — ${AUTH_HINT}`)
   }
 
-  if (!checkSchema(spec)) errors.push(...schemaErrors(checkSchema.errors, skip))
+  if (!checkSchema(spec)) issues.push(...schemaErrors(checkSchema.errors, skip))
 
   // --- semantic rules (defensive: the spec may be partially invalid) ------------
   const isObj = (s) => s && typeof s === 'object'
@@ -195,18 +201,18 @@ function validate(spec) {
 
   const dupes = (list) => [...new Set(list.filter((v, i) => v && list.indexOf(v) !== i))]
   for (const d of dupes([...names.steps, ...names.exceptionSteps, names.exceptionSubprocess]))
-    errors.push(`steps: step name '${d}' is used more than once — step names must be unique (main flow and exception subprocess together)`)
+    err('DUPLICATE_STEP_NAME', `steps: step name '${d}' is used more than once — step names must be unique (main flow and exception subprocess together)`)
   for (const d of dupes([...names.systems, names.endSystem]))
-    errors.push(`receiver system name '${d}' is used more than once — give each receiver a unique 'system'`)
+    err('DUPLICATE_SYSTEM', `receiver system name '${d}' is used more than once — give each receiver a unique 'system'`)
   for (const d of dupes(allSteps.filter(([s]) => s?.type === 'groovyScript').map(([s]) => s.fileName)))
-    errors.push(`steps: Groovy fileName '${d}' is used more than once — each script needs its own file`)
+    err('DUPLICATE_FILENAME', `steps: Groovy fileName '${d}' is used more than once — each script needs its own file`)
 
   for (const [s, where] of allSteps) {
     if (s?.type === 'groovyScript' && typeof s.code === 'string') {
       if (!GROOVY_IMPORT.test(s.code))
-        errors.push(`${where}.code: Groovy script must import com.sap.gateway.ip.core.customdev.util.Message`)
+        err('GROOVY_IMPORT', `${where}.code: Groovy script must import com.sap.gateway.ip.core.customdev.util.Message`)
       if (!GROOVY_ENTRY.test(s.code))
-        errors.push(`${where}.code: Groovy script must define 'def Message processData(Message message)' and return the message`)
+        err('GROOVY_ENTRY', `${where}.code: Groovy script must define 'def Message processData(Message message)' and return the message`)
     }
   }
 
@@ -214,7 +220,7 @@ function validate(spec) {
   if (spec.end?.type === 'httpReceiver') httpCalls.push([spec.end, 'end'])
   for (const [call, where] of httpCalls)
     if (typeof call.url === 'string' && /^https?:\/\/[^/@\s]+:[^/@\s]+@/.test(call.url))
-      errors.push(`${where}.url: contains user:password — remove it; ${AUTH_HINT}`)
+      err('URL_CREDENTIALS', `${where}.url: contains user:password — remove it; ${AUTH_HINT}`)
 
   // --- no plaintext secrets ------------------------------------------------------------
   for (const [s, where] of allSteps) {
@@ -222,19 +228,18 @@ function validate(spec) {
     for (const table of ['headers', 'properties'])
       (Array.isArray(s[table]) ? s[table] : []).forEach((e, j) => {
         if (e?.type === 'constant' && SECRET_NAME.test(e.name || '') && e.value)
-          errors.push(
+          err(
+            'SECRET',
             `${where}.${table}[${j}]: '${e.name}' looks like a secret with a constant value — never put passwords or tokens in the flow; set authentication on the receiver in the CPI web editor instead`
           )
       })
     if (typeof s.body === 'string' && /"(password|passwd|pwd|secret|client_secret|token)"\s*:\s*"[^"$]+"/i.test(s.body))
-      errors.push(`${where}.body: contains a plaintext secret — never put passwords or tokens in the flow`)
+      err('SECRET', `${where}.body: contains a plaintext secret — never put passwords or tokens in the flow`)
   }
   for (const [s, where] of allSteps) {
     if (s?.type !== 'groovyScript' || typeof s.code !== 'string') continue
     if (/(password|passwd|pwd|secret|token)\w*\s*=\s*["'][^"'$]{3,}["']/i.test(s.code) || /Basic\s+[A-Za-z0-9+/]{12,}={0,2}/.test(s.code))
-      errors.push(
-        `${where}.code: contains a hard-coded secret — read credentials from deployed security material (SecureStoreService) instead`
-      )
+      err('SECRET', `${where}.code: contains a hard-coded secret — read credentials from deployed security material (SecureStoreService) instead`)
   }
 
   // --- externalized parameters --------------------------------------------------
@@ -245,18 +250,19 @@ function validate(spec) {
     // Groovy code and body may legitimately contain {{ }} text
     if (/\.(code|body)$/.test(path)) return
     if (!PARAM_FIELDS.test(path)) {
-      errors.push(`${path}: parameters ({{…}}) can only be used as an HTTP receiver url in v1`)
+      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as an HTTP receiver url in v1`)
       return
     }
     if (!WHOLE_PARAM.test(value)) {
-      errors.push(`${path}: a parameter must be the whole value, e.g. "{{TargetURL}}", not part of a text`)
+      err('PARAM_PARTIAL', `${path}: a parameter must be the whole value, e.g. "{{TargetURL}}", not part of a text`)
       return
     }
     const name = value.match(WHOLE_PARAM)[1]
-    if (!(name in params)) errors.push(`${path}: parameter '${name}' is referenced but not defined in 'parameters'`)
+    if (!(name in params)) err('PARAM_UNDEFINED', `${path}: parameter '${name}' is referenced but not defined in 'parameters'`)
   })
 
-  return { valid: errors.length === 0, errors: [...new Set(errors)] }
+  const unique = issues.filter((i, n) => issues.findIndex((x) => x.message === i.message) === n)
+  return { valid: unique.length === 0, errors: unique.map((i) => i.message), issues: unique }
 }
 
 module.exports = { validate, effectiveNames, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, DEFAULT_STEP_NAMES, schema }

@@ -18,7 +18,7 @@ describe('validator', () => {
   })
 
   test('rejects non-objects', () => {
-    expect(validate(null)).toEqual({ valid: false, errors: ['spec: must be a JSON object'] })
+    expect(validate(null)).toEqual({ valid: false, errors: ['spec: must be a JSON object'], issues: [{ code: 'NOT_OBJECT', message: 'spec: must be a JSON object' }] })
   })
 
   test('reports missing required fields', () => {
@@ -110,5 +110,20 @@ describe('validator', () => {
 
     const partial = baseSpec({ end: { type: 'httpReceiver', url: 'https://x.org/{{P}}', method: 'POST', authType: 'None' }, parameters: { P: 'x' } })
     expectError(partial, /end\.url: a parameter must be the whole value/)
+  })
+
+  test('every error has a stable code', () => {
+    const spec = baseSpec({
+      steps: [
+        { type: 'contentModifier', name: 'A' },
+        { type: 'contentModifier', name: 'A', headers: [{ name: 'X', type: 'xpath', value: '/a' }] },
+        { type: 'router' },
+        ...Array.from({ length: 24 }, () => ({ type: 'jsonToXml' }))
+      ],
+      end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'Basic' }
+    })
+    const { issues, errors } = validate(spec)
+    expect(issues.map((i) => i.message)).toEqual(errors)
+    expect(new Set(issues.map((i) => i.code))).toEqual(new Set(['STEP_NOT_IN_V1', 'AUTH_UNSUPPORTED', 'BAD_VALUE', 'TOO_MANY', 'DUPLICATE_STEP_NAME', 'PARAM_UNDEFINED']))
   })
 })

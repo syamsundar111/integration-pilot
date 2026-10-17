@@ -13,6 +13,7 @@ const { specFromParsed, describeChanges } = require('../iflow-builder/to-spec')
 
 const LOG = cds.log('agent')
 const MAX_RESULT_CHARS = 12_000
+const MAX_ERRORS = 15 // validation errors returned to the model per call
 const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
 
 const fn = (name, description, properties = {}, required = []) => ({
@@ -39,13 +40,20 @@ const definitions = [
     }
   ),
   fn('getSupportedSteps', 'The iFlow spec v1 JSON schema with examples: what can be built and how to write a spec. Call before proposing an iFlow.'),
-  fn('validateSpec', 'Validate an iFlow spec without proposing it. Returns errors to fix.', { spec: { type: 'object' } }, ['spec']),
+  fn(
+    'validateSpec',
+    'Validate a complete iFlow spec with the same checks the builder runs. Always call it before proposeIflow/proposeIflowUpdate and fix every error first. Returns { valid: true } or compact errors "CODE path: message".',
+    { spec: { type: 'object', description: 'Complete iFlow spec v1' } },
+    ['spec']
+  ),
   fn('explainIflow', 'Parse an existing iFlow (trigger, steps, adapters, parameters, scripts) to explain it.', { iflowId: { type: 'string' } }, ['iflowId']),
   fn(
     'proposeIflow',
-    'Propose a new iFlow for the user to approve. Validates the spec; on errors returns them so you can fix the spec and call again. Nothing is created until the user approves.',
-    { spec: { type: 'object', description: 'Complete iFlow spec v1' } },
-    ['spec']
+    'Propose a new iFlow for the user to approve. After validateSpec returned valid, call it with { "useValidatedSpec": true } instead of sending the spec again. Nothing is created until the user approves.',
+    {
+      useValidatedSpec: { type: 'boolean', description: 'true: propose the spec the last validateSpec call accepted' },
+      spec: { type: 'object', description: 'Complete iFlow spec v1 (only if you did not validate it)' }
+    }
   ),
   fn(
     'getIflowSpec',
@@ -55,9 +63,11 @@ const definitions = [
   ),
   fn(
     'proposeIflowUpdate',
-    'Propose new content for an EXISTING iFlow (same id and package). Start from getIflowSpec, change only what the user asked for, and send the complete spec. Nothing changes until the user approves.',
-    { spec: { type: 'object', description: 'Complete iFlow spec v1 of the updated iFlow' } },
-    ['spec']
+    'Propose new content for an EXISTING iFlow (same id and package). Start from getIflowSpec, change only what the user asked for, validate the complete spec with validateSpec, then call this with { "useValidatedSpec": true }. Nothing changes until the user approves.',
+    {
+      useValidatedSpec: { type: 'boolean', description: 'true: propose the spec the last validateSpec call accepted' },
+      spec: { type: 'object', description: 'Complete iFlow spec v1 of the updated iFlow (only if you did not validate it)' }
+    }
   ),
   fn(
     'proposePackage',
@@ -68,6 +78,22 @@ const definitions = [
 ]
 
 // --- helpers -----------------------------------------------------------------------
+
+/** Validation result for the model: codes and short messages, never the spec itself */
+function compactInvalid(issues, instruction) {
+  const errors = issues.slice(0, MAX_ERRORS).map((i) => `${i.code} ${i.message}`)
+  if (issues.length > MAX_ERRORS) errors.push(`… ${issues.length - MAX_ERRORS} more; fix these first`)
+  return { valid: false, errors, ...(instruction && { instruction }) }
+}
+
+/** The spec to propose: the one passed, or the one the last validateSpec call of this turn accepted */
+function specToPropose({ spec, useValidatedSpec }, ctx) {
+  if (spec) return { spec }
+  if (useValidatedSpec && ctx.validatedSpec) return { spec: ctx.validatedSpec }
+  return {
+    error: compactInvalid([{ code: 'NO_VALIDATED_SPEC', message: 'spec: no validated spec — call validateSpec with the complete spec first, then propose with { "useValidatedSpec": true }' }])
+  }
+}
 
 const notFound = (e) => e.status === 404
 
@@ -186,8 +212,16 @@ const handlers = {
     }
   },
 
-  async validateSpec({ spec }) {
-    return validate(spec)
+  async validateSpec({ spec }, ctx) {
+    const { valid, issues } = validate(spec)
+    if (!valid) return compactInvalid(issues, 'Fix every error and call validateSpec again.')
+    try {
+      await build(spec) // the builder's own checks: the spec must turn into an iFlow zip
+    } catch (e) {
+      return compactInvalid(e.errors ? e.errors.map((m) => ({ code: 'BUILD', message: m })) : [{ code: 'BUILD', message: `spec: cannot be built — ${e.message}` }])
+    }
+    ctx.validatedSpec = spec
+    return { valid: true, next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
   },
 
   async explainIflow({ iflowId }) {
@@ -197,9 +231,11 @@ const handlers = {
     return summary
   },
 
-  async proposeIflow({ spec }, ctx) {
-    const { valid, errors } = validate(spec)
-    if (!valid) return { valid: false, errors, instruction: 'Fix these errors and call proposeIflow again.' }
+  async proposeIflow(args, ctx) {
+    const { spec, error } = specToPropose(args, ctx)
+    if (error) return error
+    const { valid, issues } = validate(spec)
+    if (!valid) return compactInvalid(issues, 'Fix these errors, call validateSpec, then propose again.')
 
     // Fail early on things the user could not approve successfully
     const existing = await iflowExists(spec.id)
@@ -217,6 +253,7 @@ const handlers = {
     return {
       valid: true,
       proposalId,
+      iflowId: spec.id,
       status: 'PENDING',
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
       ...(!pkgExists && {
@@ -240,9 +277,11 @@ const handlers = {
     return { editable: true, spec: current.spec, instruction: 'Change only what the user asked for, keep everything else as it is, and call proposeIflowUpdate with the complete spec.' }
   },
 
-  async proposeIflowUpdate({ spec }, ctx) {
-    const { valid, errors } = validate(spec)
-    if (!valid) return { valid: false, errors, instruction: 'Fix these errors and call proposeIflowUpdate again.' }
+  async proposeIflowUpdate(args, ctx) {
+    const { spec, error } = specToPropose(args, ctx)
+    if (error) return error
+    const { valid, issues } = validate(spec)
+    if (!valid) return compactInvalid(issues, 'Fix these errors, call validateSpec, then propose again.')
     const current = await currentSpec(spec.id)
     if (!current) return { valid: false, errors: [`id: iFlow '${spec.id}' does not exist — use proposeIflow to create a new iFlow`] }
     if (current.packageId !== spec.packageId)
@@ -256,6 +295,7 @@ const handlers = {
     return {
       valid: true,
       proposalId,
+      iflowId: spec.id,
       status: 'PENDING',
       operation: 'UPDATE',
       changes,
@@ -293,12 +333,13 @@ const parseJsonString = (v) => {
  * nested objects (trigger, steps, …) as JSON strings. Accept those shapes instead of failing.
  */
 function normalizeSpecArgs(args) {
-  let spec = args.spec === undefined && (args.id || args.steps || args.trigger) ? args : parseJsonString(args.spec)
+  const { useValidatedSpec, ...rest } = args
+  let spec = rest.spec === undefined && (rest.id || rest.steps || rest.trigger) ? rest : parseJsonString(rest.spec)
   if (spec && typeof spec === 'object' && !Array.isArray(spec)) {
     spec = { ...spec }
     for (const f of SPEC_OBJECT_FIELDS) if (f in spec) spec[f] = parseJsonString(spec[f])
   }
-  return { spec }
+  return { spec, useValidatedSpec: useValidatedSpec === true || useValidatedSpec === 'true' }
 }
 
 /**
