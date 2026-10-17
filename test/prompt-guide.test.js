@@ -39,6 +39,10 @@ describe('prompt guide: SF -> Directory worked example', () => {
     expect(lint(example('improved-request'), { defaults })).toEqual([])
   })
 
+  test('the measurement script sends the same improved request', () => {
+    expect(read('scripts/measure/sf-entra-improved-request.md')).toBe(example('improved-request'))
+  })
+
   test('the improved request keeps the values of the original', () => {
     const improved = example('improved-request')
     for (const p of spec.steps[0].properties) expect(improved).toContain(`${p.name} = ${p.value}`)

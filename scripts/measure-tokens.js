@@ -8,8 +8,10 @@
  *
  *   node scripts/measure-tokens.js --log server.log [--api http://localhost:4005/api]
  *        [--defaults] [--label before] [--max-turns 5] [--out results.jsonl]
+ *        [--request scripts/measure/sf-entra-improved-request.md] [--attach a.groovy,b.groovy]
  *
  * --defaults sends the session defaults (package, timer, auth note) with every turn.
+ * --request replaces the original request; --attach sends files with the first message.
  * Read-only on the tenant: proposals stay PENDING; nothing is approved.
  */
 const fs = require('fs')
@@ -36,7 +38,8 @@ const DIR = path.join(__dirname, 'measure')
 // A unique iFlow id per run, so the proposal never clashes with an existing iFlow
 const suffix = `M${Date.now().toString(36)}`
 const unique = (text) => text.replace(/Employee_Data_Replication_V1/g, `Employee_Data_Replication_${suffix}`).replace(/Employee Data Replication_V1/g, `Employee Data Replication_${suffix}`)
-const REQUEST = unique(fs.readFileSync(path.join(DIR, 'sf-entra-request.md'), 'utf8'))
+const REQUEST = unique(fs.readFileSync(opt('request', path.join(DIR, 'sf-entra-request.md')), 'utf8'))
+const ATTACH = (opt('attach', '') || '').split(',').filter(Boolean).map((f) => ({ fileName: path.basename(f), content: fs.readFileSync(f, 'utf8') }))
 const ANSWERS = fs.readFileSync(path.join(DIR, 'sf-entra-answers.md'), 'utf8')
 const FOLLOW_UP = 'Use sensible defaults for anything still open and propose the iFlow now.'
 const DEFAULTS = {
@@ -53,7 +56,7 @@ async function call(method, url, body) {
 }
 
 async function runTurn(sessionId, message) {
-  const body = { message, ...(sessionId && { sessionId }), ...(flag('defaults') && { defaults: DEFAULTS }) }
+  const body = { message, ...(sessionId && { sessionId }), ...(flag('defaults') && { defaults: DEFAULTS }), ...(!sessionId && ATTACH.length && { attachments: ATTACH }) }
   const started = await call('POST', '/chat', body)
   let seen = 0
   for (;;) {
