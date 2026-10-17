@@ -41,3 +41,4 @@ npm-debug.log*
 # OS / editor
 .DS_Store
 Thumbs.db
+test/ui/screenshots/

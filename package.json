@@ -21,7 +21,14 @@
   "devDependencies": {
     "@cap-js/cds-test": "^1.0.2",
     "@sap/cds-dk": "^10",
-    "jest": "^30.5.2"
+    "@wdio/cli": "^9.32.0",
+    "@wdio/globals": "^9.31.3",
+    "@wdio/local-runner": "^9.32.0",
+    "@wdio/mocha-framework": "^9.32.0",
+    "@wdio/spec-reporter": "^9.32.0",
+    "jest": "^30.5.2",
+    "wdio-ui5-service": "^3.0.12",
+    "webdriverio": "^9.32.0"
   },
   "scripts": {
     "start": "cds-serve",
@@ -39,7 +46,8 @@
     "build:mta:sqlite": "mbt build -f mta-sqlite.yaml -t mta_archives --mtar integration-pilot-sqlite.mtar",
     "deploy": "cf deploy mta_archives/integration-pilot.mtar",
     "deploy:sqlite": "cf deploy mta_archives/integration-pilot-sqlite.mtar",
-    "test": "jest"
+    "test": "jest",
+    "test:ui": "wdio run test/ui/wdio.conf.mjs"
   },
   "jest": {
     "testEnvironment": "node",

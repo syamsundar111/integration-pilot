@@ -87,11 +87,18 @@ blocks proposals instead (set in the MTA files, where the sidecar is the module
 ## Checks
 
 ```bash
-npm test                 # backend: 108 jest tests (validator, builder, parser, fidelity, LLM, agent, proposals, stats)
+npm test                 # backend: jest tests (validator, builder, parser, import, agent, proposals, LLM, Groovy check, prompt linter)
+npm run test:ui          # UI: wdi5 tests of the Generate page in Chrome (app on port 4011 with the AI, CPI and Groovy check faked)
 npm run ui:lint          # UI5 linter (deprecated APIs, manifest, best practices)
 npm run ui:build         # UI5 build: Component-preload.js, minified sources in app/integration-pilot/dist
 scripts/test-chat.sh     # live agent conversation via curl (default http://localhost:4005/api)
 ```
+
+`npm run test:ui` starts the app itself (`test/ui/fake-backend.cjs`, in-memory database) and
+drives it with WebdriverIO + wdi5 (`test/ui/wdio.conf.mjs`). WebdriverIO downloads a matching
+Chrome unless `CHROME_BIN` (and `CHROME_VERSION`) point to one; `HEADED=1` shows the browser.
+The UI5 runtime comes from ui5.sap.com, so the browser needs internet access (`HTTPS_PROXY` is
+passed on). Screenshots of failing tests land in `test/ui/screenshots/`.
 
 ## Deploy to Cloud Foundry
 
