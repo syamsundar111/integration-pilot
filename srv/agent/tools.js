@@ -90,10 +90,15 @@ function compactInvalid(issues, instruction) {
   return { valid: false, errors, ...(instruction && { instruction }) }
 }
 
-/** The spec to propose: the one passed, or the one the last validateSpec call of this turn accepted */
-function specToPropose({ spec, useValidatedSpec }, ctx) {
+/**
+ * The spec to propose: the one passed, or the one the last validateSpec call accepted (in this
+ * turn, or kept as the conversation's draft spec from an earlier one)
+ */
+async function specToPropose({ spec, useValidatedSpec }, ctx) {
   if (spec) return { spec }
   if (useValidatedSpec && ctx.validatedSpec) return { spec: ctx.validatedSpec }
+  const draft = useValidatedSpec ? await draftOf(ctx) : null
+  if (draft?.valid) return { spec: draft.spec }
   return {
     error: compactInvalid([{ code: 'NO_VALIDATED_SPEC', message: 'spec: no validated spec — call validateSpec with the complete spec first, then propose with { "useValidatedSpec": true }' }])
   }
@@ -156,6 +161,16 @@ async function draftOf(ctx) {
   if (!ctx.sessionId) return null
   const s = await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.one.from('iflowpilot.ChatSession', ctx.sessionId).columns('draftSpec')))
   return s?.draftSpec ? JSON.parse(s.draftSpec) : null
+}
+
+/**
+ * Keeps the latest spec of the conversation as session state (draftSpec), so the history does
+ * not need to carry copies of it. Specs never contain attached script bodies.
+ */
+async function saveDraft(ctx, spec, { source, valid = false }) {
+  if (!ctx.sessionId || !spec || typeof spec !== 'object') return
+  const draft = { spec, source, valid, at: new Date().toISOString() }
+  await cds.tx({ user: ctx.user }, (tx) => tx.run(UPDATE('iflowpilot.ChatSession', ctx.sessionId).set({ draftSpec: JSON.stringify(draft) })))
 }
 
 /** Stores a PENDING proposal in its own transaction, so it survives a failing chat turn */
@@ -262,17 +277,24 @@ const handlers = {
   },
 
   async validateSpec({ spec, useDraftSpec }, ctx) {
-    if (!spec && useDraftSpec) spec = (await draftOf(ctx))?.spec
+    const draft = !spec && useDraftSpec ? await draftOf(ctx) : null
+    if (draft) spec = draft.spec
     if (!spec) return compactInvalid([{ code: 'NO_SPEC', message: useDraftSpec ? 'spec: this conversation has no draft spec' : 'spec: missing — send the complete spec' }])
+    const source = draft ? draft.source : 'your latest validateSpec'
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
-    if (!valid) return compactInvalid(issues, 'Fix every error and call validateSpec again.')
+    if (!valid) {
+      await saveDraft(ctx, spec, { source })
+      return compactInvalid(issues, 'Fix every error and call validateSpec again.')
+    }
     try {
       await build(spec, { attachments }) // the builder's own checks: the spec must turn into an iFlow zip
     } catch (e) {
+      await saveDraft(ctx, spec, { source })
       return compactInvalid(e.errors ? e.errors.map((m) => ({ code: 'BUILD', message: m })) : [{ code: 'BUILD', message: `spec: cannot be built — ${e.message}` }])
     }
     ctx.validatedSpec = spec
+    await saveDraft(ctx, spec, { source, valid: true })
     return { valid: true, next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
   },
 
@@ -290,8 +312,9 @@ const handlers = {
   },
 
   async proposeIflow(args, ctx) {
-    const { spec, error } = specToPropose(args, ctx)
+    const { spec, error } = await specToPropose(args, ctx)
     if (error) return error
+    if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix these errors, call validateSpec, then propose again.')
@@ -334,6 +357,7 @@ const handlers = {
           'This iFlow cannot be updated here: an update rebuilds it from the spec and would lose the blockers. Tell the user, list the blockers, and suggest changing it in the CPI web editor or creating a new iFlow.'
       }
     const { spec, attachedFiles, keptUploads } = await detachFiles(ctx, current.spec, current.resources)
+    await saveDraft(ctx, spec, { source: `current content of iFlow ${iflowId}` })
     return {
       editable: true,
       spec,
@@ -346,8 +370,9 @@ const handlers = {
   },
 
   async proposeIflowUpdate(args, ctx) {
-    const { spec, error } = specToPropose(args, ctx)
+    const { spec, error } = await specToPropose(args, ctx)
     if (error) return error
+    if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflowUpdate' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix these errors, call validateSpec, then propose again.')

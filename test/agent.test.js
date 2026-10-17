@@ -755,3 +755,34 @@ describe('import an iFlow', () => {
     await expect(POST('/api/importIflow', { fileName: 'x.txt', contentBase64: 'eA==' })).rejects.toMatchObject({ response: { status: 400 } })
   })
 })
+
+describe('history trimming and the latest spec as session state', () => {
+  test('earlier tool exchanges are not re-sent; a spec validated last turn can still be proposed', async () => {
+    const spec = { ...sample, id: 'Agent_State_1', name: 'Agent State 1' }
+    const broken = { ...spec, steps: [...spec.steps, { type: 'router' }] }
+    llm.chat
+      .mockResolvedValueOnce(toolCall('getSupportedSteps', {}))
+      .mockResolvedValueOnce(toolCall('validateSpec', { spec: broken }))
+      .mockResolvedValueOnce(toolCall('validateSpec', { spec }))
+      .mockResolvedValueOnce(answer('The spec is valid. Shall I propose it?'))
+    const first = await chat({ message: 'Build it' })
+    // within the turn: the broken copy was replaced once the fixed one was sent
+    const lastOfTurn = llm.chat.mock.calls.at(-1)[0].messages
+    expect(lastOfTurn.filter((m) => m.tool_calls).map((m) => m.tool_calls[0].function.name)).toEqual(['getSupportedSteps', 'validateSpec', 'validateSpec'])
+    expect(JSON.parse(lastOfTurn.find((m) => m.tool_calls?.[0].function.name === 'validateSpec').tool_calls[0].function.arguments).spec).toMatch(/^\(older spec omitted/)
+
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true })).mockResolvedValueOnce(answer('Ready.'))
+    const second = await chat({ sessionId: first.sessionId, message: 'Yes, propose it.' })
+    expect(second.proposals).toEqual([expect.objectContaining({ iflowId: 'Agent_State_1', spec })])
+
+    // the second turn got the first one as user message + answer only, and the spec as context
+    const sent = llm.chat.mock.calls.at(-2)[0].messages
+    expect(sent.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user'])
+    expect(sent[0].content).toMatch(/Draft spec of this conversation \(your latest validateSpec, valid\): Agent_State_1/)
+    expect(JSON.stringify(sent)).not.toContain('"type":"router"')
+
+    // the database keeps the full exchange
+    const { data: stored } = await GET(`/api/ChatSessions/${first.sessionId}/messages?$orderby=seq`)
+    expect(stored.filter((m) => m.role === 'tool')).toHaveLength(4)
+  })
+})

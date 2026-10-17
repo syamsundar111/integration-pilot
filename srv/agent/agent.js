@@ -17,10 +17,11 @@ const llm = require('../lib/llm')
 const attachmentStore = require('../lib/attachments')
 const { importIflow } = require('../iflow-builder/import')
 const tools = require('./tools')
+const history = require('./history')
 
 const LOG = cds.log('agent')
 const MAX_ITERATIONS = 8
-const HISTORY_LIMIT = 40 // messages sent back to the model
+const HISTORY_LIMIT = 40 // earlier user messages and answers sent back to the model
 const INTERRUPTED = 'Interrupted by server restart — please send your message again.'
 const PACKAGE_ID = /^[A-Za-z0-9.]+$/
 const MAX_AUTH_NOTE = 500
@@ -71,13 +72,14 @@ function attachmentsContext(files) {
   return `Attached files (stored on the server; reference them by name, never write their content):\n${files.map(line).join('\n')}`
 }
 
-/** The draft spec as context: what it is and how to use it, never the spec itself */
+/** The latest spec as context: what it is and how to use it, never the spec itself */
 function draftContext(draft) {
   if (!draft?.spec) return ''
-  const { spec, source } = draft
+  const { spec, source, valid } = draft
   const placeholders = [...(spec.steps || []), ...(spec.exceptionSubprocess?.steps || [])].filter((s) => /^REPLACE WITH /.test(s.description || '')).length
   return (
-    `Draft spec of this conversation (${source}): ${spec.id} "${spec.name}", ${spec.steps?.length || 0} steps${placeholders ? `, ${placeholders} placeholder(s)` : ''}, package ${spec.packageId}. ` +
+    `Draft spec of this conversation (${source}${valid ? ', valid' : ''}): ${spec.id} "${spec.name}", ${spec.steps?.length || 0} steps${placeholders ? `, ${placeholders} placeholder(s)` : ''}, package ${spec.packageId}. ` +
+    'It is the latest spec of the conversation; earlier copies are not repeated in the history. ' +
     'Read it with getDraftSpec only if you need to change it; to propose it unchanged, call validateSpec with { "useDraftSpec": true }, then proposeIflow with { "useValidatedSpec": true }.'
   )
 }
@@ -116,18 +118,18 @@ async function ensureSession(user, sessionId, firstMessage) {
   })
 }
 
-/** Stored messages -> OpenAI format, starting at a user message (no orphaned tool results) */
+/**
+ * Earlier turns for the model, starting at a user message: user messages and final answers
+ * only. Tool calls and outputs stay in the database but are not sent again (see history.js).
+ */
 async function loadHistory(user, sessionId) {
   const { ChatMessage } = E()
-  const rows = await db(user, (tx) => tx.run(SELECT.from(ChatMessage).where({ session_ID: sessionId }).orderBy('seq desc').limit(HISTORY_LIMIT)))
+  const rows = await db(user, (tx) =>
+    tx.run(SELECT.from(ChatMessage).where({ session_ID: sessionId, role: { in: ['user', 'assistant'] }, toolCalls: null }).orderBy('seq desc').limit(HISTORY_LIMIT))
+  )
   rows.reverse()
   while (rows.length && rows[0].role !== 'user') rows.shift()
-  return rows.map((m) => {
-    const extra = m.toolCalls ? JSON.parse(m.toolCalls) : null
-    if (m.role === 'tool') return { role: 'tool', tool_call_id: extra?.tool_call_id, content: m.content || '' }
-    if (m.role === 'assistant' && Array.isArray(extra)) return { role: 'assistant', content: m.content || null, tool_calls: extra }
-    return { role: m.role, content: m.content || '' }
-  })
+  return history.pastTurns(rows.map((m) => ({ role: m.role, content: m.content || '' })))
 }
 
 async function saveMessages(user, sessionId, messages) {
@@ -275,14 +277,14 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
     await update({ status: 'DONE', text, proposals: JSON.stringify(proposals) })
   }
   try {
-    const history = await loadHistory(user, sessionId)
+    const past = await loadHistory(user, sessionId)
     const system = await systemMessage(user, sessionId)
     let text = null
 
     for (let i = 0; i < MAX_ITERATIONS && text === null; i++) {
       await checkCancel()
       if (i > 0) await emit('thinking', 'Thinking…')
-      const res = await llm.chat({ messages: [system, ...history, ...turn], tools: tools.definitions, signal })
+      const res = await llm.chat({ messages: [system, ...past, ...history.compactTurn(turn)], tools: tools.definitions, signal })
       const { message: msg, finish_reason: finish } = res.choices[0]
       if (res.fallbackUsed) await emit('info', `Answered by fallback model ${res.model}`)
 
@@ -359,7 +361,7 @@ async function importIntoSession({ sessionId, fileName, buffer, packageId, user 
   sessionId = await ensureSession(user, sessionId, `Import ${fileName}`)
   const files = Object.entries(result.attachments).map(([name, content]) => ({ fileName: name, content }))
   if (files.length) await attachmentStore.save(user, sessionId, files, 'import')
-  const draft = { spec: result.spec, source: `imported from ${fileName}`, at: new Date().toISOString() }
+  const draft = { spec: result.spec, source: `imported from ${fileName}`, valid: false, at: new Date().toISOString() }
   await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ draftSpec: JSON.stringify(draft) })))
 
   const { spec } = result
