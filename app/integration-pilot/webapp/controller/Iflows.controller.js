@@ -4,9 +4,16 @@ sap.ui.define(
     'sap/ui/model/json/JSONModel',
     'integration/pilot/util/api',
     'integration/pilot/util/flowDiagram',
-    'integration/pilot/util/ExplainDialog'
+    'integration/pilot/util/ExplainDialog',
+    'sap/m/Dialog',
+    'sap/m/Button',
+    'sap/m/Select',
+    'sap/m/Text',
+    'sap/m/VBox',
+    'sap/m/MessageStrip',
+    'sap/ui/core/Item'
   ],
-  (BaseController, JSONModel, api, flowDiagram, ExplainDialog) => {
+  (BaseController, JSONModel, api, flowDiagram, ExplainDialog, Dialog, Button, Select, Text, VBox, MessageStrip, Item) => {
     'use strict'
 
     const MAX_ZIP_MB = 10
@@ -16,6 +23,7 @@ sap.ui.define(
         this.setModel(
           new JSONModel({
             layout: 'OneColumn',
+            backups: [],
             packages: [],
             packageId: '',
             iflows: [],
@@ -165,6 +173,71 @@ sap.ui.define(
         this.loadParsed()
         this.loadConfigs()
         this.loadRuntime()
+        this.loadBackups()
+      },
+
+      // --- backups from approved updates: "Restore previous version" ------------------------------
+
+      async loadBackups() {
+        const m = this.getModel('view')
+        const id = m.getProperty('/iflowId')
+        m.setProperty('/backups', [])
+        try {
+          const backups = await api.get(`/Iflows/${api.seg(id)}/backups()`)
+          if (m.getProperty('/iflowId') === id) m.setProperty('/backups', backups)
+        } catch (e) {
+          // no backups shown; the iFlow itself still works
+        }
+      },
+
+      backupText(b) {
+        const when = this.formatter.dateTime(b.at || b.createdAt)
+        return `${when} · version ${b.version || '?'}${b.savedVersion ? ` (also CPI version ${b.savedVersion})` : ''}`
+      },
+
+      onRestore() {
+        const m = this.getModel('view')
+        const id = m.getProperty('/iflowId')
+        const backups = m.getProperty('/backups')
+        const select = new Select({ width: '100%', items: backups.map((b) => new Item({ key: b.proposalId, text: this.backupText(b) })) })
+        const dialog = new Dialog({
+          title: `Restore ${id}?`,
+          type: 'Message',
+          state: 'Warning',
+          contentWidth: '32rem',
+          content: new VBox({
+            renderType: 'Bare',
+            items: [
+              new Text({ text: 'The content this iFlow had before the chosen update is put back. Its current content is saved as a CPI version first. The restored iFlow is not deployed.' }),
+              select,
+              new MessageStrip({ type: 'Information', showIcon: true, text: 'Deploy the iFlow afterwards to run the restored version.' })
+            ]
+          }).addStyleClass('ipGapS'),
+          beginButton: new Button({
+            text: 'Restore',
+            type: 'Emphasized',
+            press: async () => {
+              dialog.setBusy(true)
+              try {
+                const r = await api.post(`/Iflows/${api.seg(id)}/restore`, { proposalId: select.getSelectedKey() })
+                dialog.close()
+                this.toast(`Restored version ${r.restoredFrom.version || ''} of ${id}${r.savedCurrentAs ? `; the replaced content is CPI version ${r.savedCurrentAs}` : ''}. Deploy to activate it.`)
+                if (r.warning) this.showError({ message: r.warning }, 'Restored with a warning')
+                this.loadParsed()
+                this.loadConfigs()
+                this.loadIflows()
+              } catch (e) {
+                this.showError(e, 'Restore failed')
+              } finally {
+                dialog.setBusy(false)
+              }
+            }
+          }),
+          endButton: new Button({ text: this.text('cancel'), press: () => dialog.close() }),
+          afterClose: () => dialog.destroy()
+        })
+        this.getView().addDependent(dialog)
+        dialog.open()
       },
 
       async loadParsed() {

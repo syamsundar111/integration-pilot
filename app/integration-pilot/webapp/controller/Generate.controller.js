@@ -731,10 +731,12 @@ sap.ui.define(
         const a = this.chat().getProperty('/active')
         const target = p.packageName && !this.chat().getProperty('/packages').some((x) => x.id === p.packageId) ? `the new package "${p.packageName}" (${p.packageId})` : `package ${p.packageId}`
         const ok = await this.confirm({
-          title: deploy ? `Create and deploy ${p.iflowId}?` : `Create ${a.isIflow ? p.iflowId : p.packageId}?`,
-          message: a.isIflow
-            ? `The iFlow is created in ${target} and its parameters are set.${deploy ? ' It is then deployed; the status is checked for up to 2 minutes.' : ' It is not deployed.'}`
-            : 'The package is created on the tenant.',
+          title: a.isUpdate ? `${deploy ? 'Update and deploy' : 'Update'} ${p.iflowId}?` : deploy ? `Create and deploy ${p.iflowId}?` : `Create ${a.isIflow ? p.iflowId : p.packageId}?`,
+          message: a.isUpdate
+            ? `The current content of ${p.iflowId} is backed up first (kept with this proposal and saved as a CPI version), then replaced and its parameters are set.${deploy ? ' It is then deployed; the status is checked for up to 2 minutes.' : ' It is not deployed.'} "Restore previous version" on the iFlows page puts the backup back.`
+            : a.isIflow
+              ? `The iFlow is created in ${target} and its parameters are set.${deploy ? ' It is then deployed; the status is checked for up to 2 minutes.' : ' It is not deployed.'}`
+              : 'The package is created on the tenant.',
           action: deploy ? 'Approve, create & deploy' : 'Approve & create'
         })
         if (!ok) return

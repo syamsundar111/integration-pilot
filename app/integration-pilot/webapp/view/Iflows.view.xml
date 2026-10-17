@@ -99,6 +99,7 @@
               <Button text="Download ZIP" icon="sap-icon://download" press=".onDownload" />
               <Button text="Deploy" icon="sap-icon://upload-to-cloud" type="Emphasized" press=".onDeploy" />
               <Button text="Undeploy" icon="sap-icon://stop" press=".onUndeploy" visible="{= !!${view>/runtime} }" />
+              <Button text="Restore previous version" icon="sap-icon://undo" press=".onRestore" visible="{= ${view>/backups}.length > 0 }" tooltip="Put back the content this iFlow had before an update approved in Generate" />
               <Button text="Explain with AI" icon="sap-icon://lightbulb" press=".onExplain" />
               <Button text="Delete" icon="sap-icon://delete" type="Reject" press=".onDelete" />
             </f:actions>

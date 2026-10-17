@@ -110,6 +110,9 @@ module.exports = class ApiService extends cds.ApplicationService {
       return audited(req, { action: 'DEPLOY_IFLOW', targetType: 'Iflow', targetId: id }, () => cpi.deployIflow(id))
     })
 
+    this.on('backups', Iflows, (req) => proposals.listBackups(keyOf(req), req.user))
+    this.on('restore', Iflows, (req) => proposals.restoreBackup(keyOf(req), req.data.proposalId, req.user))
+
     this.on('undeploy', Iflows, (req) => {
       const id = keyOf(req)
       return audited(req, { action: 'UNDEPLOY_IFLOW', targetType: 'Iflow', targetId: id }, () => cpi.undeployIflow(id))
@@ -224,7 +227,8 @@ module.exports = class ApiService extends cds.ApplicationService {
         ...p,
         ...('spec' in p && { spec: parseJson(p.spec) }),
         ...('result' in p && { result: parseJson(p.result) }),
-        ...('attachments' in p && { attachments: parseJson(p.attachments) })
+        ...('attachments' in p && { attachments: parseJson(p.attachments) }),
+        ...('backup' in p && { backup: parseJson(p.backup) })
       }
     this.on('READ', 'Proposals', async (req, next) => {
       const result = await next()

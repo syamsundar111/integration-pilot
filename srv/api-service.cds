@@ -97,6 +97,24 @@ service ApiService {
     taskId : String;
   }
 
+  type IflowBackup {
+    proposalId   : UUID;
+    createdAt    : Timestamp;
+    iflowId      : String;
+    version      : String; // version of the iFlow when it was backed up
+    savedVersion : String; // CPI version saved before the update (if it worked)
+    versionError : String;
+    sizeBytes    : Integer;
+    at           : String;
+  }
+
+  type RestoreResult {
+    iflowId        : String;
+    restoredFrom   : IflowBackup;
+    savedCurrentAs : String; // CPI version the replaced content was saved as
+    warning        : String;
+  }
+
   /**
    * GET/PATCH/DELETE /api/Iflows/{id} (Version='active'), POST /api/Iflows,
    * GET /api/Iflows/{id}/configurations | resources | runtime
@@ -126,6 +144,10 @@ service ApiService {
     /** Parsed structure (trigger, steps, adapters, parameters, scripts) for the Overview/Scripts tabs */
     function parsed()                                           returns LargeString;
     action   updateConfigurations(parameters : many ConfigurationInput) returns many Configurations;
+    /** Backups stored before updates by approved proposals, newest first */
+    function backups()                                          returns many IflowBackup;
+    /** Puts a backup back as the iFlow's content (latest backup without proposalId); not deployed */
+    action   restore(proposalId : UUID)                         returns RestoreResult;
     action   deploy()                                           returns DeployResult;
     action   undeploy();
   }
@@ -281,7 +303,7 @@ service ApiService {
    * POST /api/Proposals/{id}/retry { deploy? } (FAILED only; deploy defaults to the previous choice)
    */
   @readonly
-  entity Proposals    as projection on db.Proposal actions {
+  entity Proposals    as projection on db.Proposal excluding { backupZip } actions {
     action approve(deploy : Boolean) returns Proposals;
     action reject(reason : String)   returns Proposals;
     action retry(deploy : Boolean)   returns Proposals;

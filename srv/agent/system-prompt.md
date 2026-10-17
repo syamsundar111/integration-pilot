@@ -86,7 +86,9 @@ When the user asks to update, change, extend or fix an existing iFlow:
 3. Otherwise change only what the user asked for, keep everything else exactly as it is, validate
    the complete spec (same `id` and `packageId`) with `validateSpec`, and call `proposeIflowUpdate`
    with `{ "useValidatedSpec": true }`.
-4. Tell the user the changes, and that approving replaces the iFlow content.
+4. Tell the user the changes, and that approving replaces the iFlow content. The current content is
+   backed up first (stored with the proposal and saved as a CPI version) and can be put back with
+   "Restore previous version" on the iFlows page.
 
 Never call `proposeIflow` for an iFlow that already exists.
 

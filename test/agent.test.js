@@ -24,6 +24,7 @@ jest.mock('../srv/lib/cpi-client', () => {
     createPackage: jest.fn(async (p) => p),
     createIflow: jest.fn(async (f) => ({ ...f, version: '1.0.0' })),
     updateIflowContent: jest.fn(async (id) => ({ id })),
+    saveIflowAsVersion: jest.fn(async () => {}),
     updateConfiguration: jest.fn(async () => {}),
     deployIflow: jest.fn(async () => ({ taskId: 't1' })),
     getDeployStatus: jest.fn(async () => 'SUCCESS'),
@@ -878,5 +879,106 @@ describe('token usage', () => {
       .mockRejectedValueOnce(Object.assign(new Error('The AI model did not answer within 120s.'), { status: 504, code: 'LLM_TIMEOUT' }))
     const turn = await chat({ message: 'x' })
     expect(turn).toMatchObject({ status: 'FAILED', modelCalls: 1, totalTokens: 520 })
+  })
+})
+
+describe('backup before updates and restore', () => {
+  const { build } = require('../srv/iflow-builder/builder')
+  const { nextVersion } = require('../srv/lib/proposals')
+  const current = { id: 'Backup_Me', name: 'Backup Me', packageId: 'PilotReference', trigger: { type: 'httpsSender', address: '/backup/me' }, steps: [{ type: 'jsonToXml' }], end: { type: 'none' } }
+  let zip, proposalId
+
+  beforeAll(async () => {
+    zip = Buffer.from((await build(current)).zipBase64, 'base64')
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (id === current.id) return { id, name: current.name, packageId: 'PilotReference', version: '1.0.4' }
+      throw Object.assign(new Error('not found'), { status: 404 })
+    })
+    cpi.downloadIflowZip.mockImplementation(async () => zip)
+  })
+  afterAll(() =>
+    cpi.getIflow.mockImplementation(async () => {
+      throw Object.assign(new Error('not found'), { status: 404 })
+    })
+  )
+
+  test('nextVersion bumps the patch level', () => {
+    expect(nextVersion('1.0.4')).toBe('1.0.5')
+    expect(nextVersion('active')).toBe('1.0.1')
+  })
+
+  test('an approved update stores the old zip and saves a CPI version first', async () => {
+    llm.chat
+      .mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: current.id }))
+      .mockResolvedValueOnce(answer('read'))
+    const first = await chat({ message: 'show it' })
+    const spec = { ...JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).spec, steps: [{ type: 'jsonToXml', name: 'To XML' }] }
+    llm.chat
+      .mockResolvedValueOnce(toolCall('validateSpec', { spec }))
+      .mockResolvedValueOnce(toolCall('proposeIflowUpdate', { useValidatedSpec: true }))
+      .mockResolvedValueOnce(answer('ok'))
+    const turn = await chat({ sessionId: first.sessionId, message: 'rename the step' })
+    proposalId = turn.proposals[0].ID
+    cpi.saveIflowAsVersion.mockClear()
+    cpi.updateIflowContent.mockClear()
+
+    await POST(`/api/Proposals/${proposalId}/approve`, { deploy: false })
+    const done = await waitFor(proposalId)
+    expect(done.status).toBe('DONE')
+    expect(done.result.steps.map((s) => s.key)).toEqual(['package', 'backup', 'build', 'create', 'configure'])
+    expect(done.result.steps[1]).toMatchObject({ status: 'done', detail: expect.stringMatching(/^Backup of version 1.0.4 stored \(\d+ KB\); saved as CPI version 1.0.5$/) })
+    expect(cpi.saveIflowAsVersion).toHaveBeenCalledWith(current.id, '1.0.5')
+    // the version is saved before the content is replaced
+    expect(cpi.saveIflowAsVersion.mock.invocationCallOrder[0]).toBeLessThan(cpi.updateIflowContent.mock.invocationCallOrder[0])
+    expect(done.backup).toMatchObject({ iflowId: current.id, version: '1.0.4', savedVersion: '1.0.5', sizeBytes: zip.length })
+    expect(done.backupZip).toBeUndefined() // never sent to the UI
+  })
+
+  test('the backups are listed and restored, audited as RESTORE_IFLOW', async () => {
+    const { data: backups } = await GET(`/api/Iflows/${current.id}/backups()`)
+    expect(backups[0]).toMatchObject({ proposalId, version: '1.0.4', savedVersion: '1.0.5' })
+
+    cpi.updateIflowContent.mockClear()
+    const { data: restored } = await POST(`/api/Iflows/${current.id}/restore`, {})
+    expect(restored).toMatchObject({ iflowId: current.id, restoredFrom: { proposalId, version: '1.0.4' }, savedCurrentAs: '1.0.5' })
+    expect(cpi.updateIflowContent).toHaveBeenCalledWith(current.id, { zipBase64: zip.toString('base64') })
+    const { data: log } = await GET(`/api/AuditLog?$filter=action eq 'RESTORE_IFLOW'&$orderby=createdAt desc&$top=1`)
+    expect(log[0]).toMatchObject({ targetId: current.id, status: 'SUCCESS' })
+
+    await expect(POST(`/api/Iflows/Other_Flow/restore`, { proposalId })).rejects.toMatchObject({ response: { status: 400 } })
+    await expect(POST(`/api/Iflows/No_Backups/restore`, {})).rejects.toMatchObject({ response: { status: 404 } })
+  })
+
+  test('a retry keeps the first backup instead of backing up its own changes', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: current.id })).mockResolvedValueOnce(answer('read'))
+    const first = await chat({ message: 'show it' })
+    const spec = { ...JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).spec, steps: [{ type: 'jsonToXml', name: 'Retry Me' }] }
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflowUpdate', { spec })).mockResolvedValueOnce(answer('ok'))
+    const turn = await chat({ sessionId: first.sessionId, message: 'rename' })
+    const id = turn.proposals[0].ID
+    cpi.updateIflowContent.mockRejectedValueOnce(Object.assign(new Error('CPI busy'), { status: 503 }))
+    await POST(`/api/Proposals/${id}/approve`, { deploy: false })
+    expect((await waitFor(id)).status).toBe('FAILED')
+    cpi.downloadIflowZip.mockClear()
+    await POST(`/api/Proposals/${id}/retry`, {})
+    const done = await waitFor(id)
+    expect(done.status).toBe('DONE')
+    expect(done.result.steps.find((s) => s.key === 'backup')).toMatchObject({ status: 'done', detail: 'Backup from an earlier attempt kept' })
+    expect(cpi.downloadIflowZip).not.toHaveBeenCalled()
+  })
+
+  test('a failed CPI version save is a warning; the update goes on', async () => {
+    cpi.saveIflowAsVersion.mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { status: 403 }))
+    llm.chat
+      .mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: current.id }))
+      .mockResolvedValueOnce(answer('read'))
+    const first = await chat({ message: 'show it' })
+    const spec = { ...JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).spec, steps: [{ type: 'jsonToXml', name: 'Convert' }] }
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflowUpdate', { spec })).mockResolvedValueOnce(answer('ok'))
+    const turn = await chat({ sessionId: first.sessionId, message: 'rename' })
+    await POST(`/api/Proposals/${turn.proposals[0].ID}/approve`, { deploy: false })
+    const done = await waitFor(turn.proposals[0].ID)
+    expect(done.status).toBe('DONE')
+    expect(done.result.steps.find((s) => s.key === 'backup')).toMatchObject({ status: 'warning', detail: expect.stringMatching(/the CPI version could not be saved: Forbidden/) })
   })
 })

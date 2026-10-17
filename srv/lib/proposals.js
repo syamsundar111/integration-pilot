@@ -33,6 +33,7 @@ function plan(kind, deploy, operation) {
       ? [{ key: 'package', label: 'Create package' }]
       : [
           { key: 'package', label: 'Ensure package exists' },
+          ...(operation === 'UPDATE' ? [{ key: 'backup', label: 'Back up current iFlow' }] : []),
           { key: 'build', label: 'Build iFlow' },
           { key: 'create', label: operation === 'UPDATE' ? 'Update iFlow' : 'Create or update iFlow' },
           { key: 'configure', label: 'Set externalized parameters' },
@@ -198,6 +199,7 @@ async function execute(proposal, result, user) {
       })
     } else {
       await step('package', () => ensurePackage(spec.packageId, proposal, req))
+      if (proposal.operation === 'UPDATE') await step('backup', () => backupIflow(spec.id, proposal, result, req))
 
       let zip
       await step('build', async () => {
@@ -277,6 +279,84 @@ async function ensurePackage(packageId, proposal, req) {
   return `Created package ${packageId}`
 }
 
+/** "1.0.2" -> "1.0.3"; anything else -> "1.0.1" */
+function nextVersion(version) {
+  const m = String(version || '').match(/^(\d+)\.(\d+)\.(\d+)$/)
+  return m ? `${m[1]}.${m[2]}.${Number(m[3]) + 1}` : '1.0.1'
+}
+
+/**
+ * Before an update: stores the current iFlow zip with the proposal (for "Restore previous
+ * version") and saves the current content as a CPI version. A missing CPI version is a
+ * warning; a missing zip stops the update. A retry keeps the first backup, so it never
+ * holds content written by this proposal.
+ */
+async function backupIflow(iflowId, proposal, result, req) {
+  if (proposal.backupZip) return 'Backup from an earlier attempt kept'
+  let current
+  try {
+    current = await cpi.getIflow(iflowId)
+  } catch (e) {
+    if (e.status === 404) throw fail(404, 'IFLOW_NOT_FOUND', `iFlow '${iflowId}' no longer exists, so it cannot be updated. Ask the assistant for a new iFlow instead.`)
+    throw e
+  }
+  const zip = await cpi.downloadIflowZip(iflowId)
+  const backup = { iflowId, version: current.version, sizeBytes: zip.length, at: new Date().toISOString() }
+  try {
+    const version = nextVersion(current.version)
+    await audited(req, { action: 'SAVE_IFLOW_VERSION', targetType: 'Iflow', targetId: iflowId, details: { version, proposal: proposal.ID } }, () =>
+      cpi.saveIflowAsVersion(iflowId, version)
+    )
+    backup.savedVersion = version
+  } catch (e) {
+    backup.versionError = e.message
+  }
+  const zipBase64 = zip.toString('base64')
+  await db(req.user, (tx) => tx.run(UPDATE(entity(), proposal.ID).set({ backupZip: zipBase64, backup: JSON.stringify(backup) })))
+  proposal.backupZip = zipBase64
+  result.backup = backup
+  const stored = `Backup of version ${backup.version} stored (${Math.ceil(backup.sizeBytes / 1024)} KB)`
+  return backup.savedVersion
+    ? `${stored}; saved as CPI version ${backup.savedVersion}`
+    : { status: 'warning', detail: `${stored}; the CPI version could not be saved: ${backup.versionError}` }
+}
+
+/** Backups of an iFlow, newest first: [{ proposalId, createdAt, version, savedVersion, sizeBytes, at }] */
+async function listBackups(iflowId, user) {
+  const rows = await db(user, (tx) =>
+    tx.run(SELECT.from(entity()).columns('ID', 'createdAt', 'backup').where({ iflowId, backup: { '!=': null } }).orderBy('createdAt desc'))
+  )
+  return rows.map((r) => ({ proposalId: r.ID, createdAt: r.createdAt, ...parse(r.backup) }))
+}
+
+/**
+ * Puts a backup's zip back as the iFlow's content (not deployed); audited as RESTORE_IFLOW.
+ * The content it replaces is saved as a CPI version first (a warning in the result if that fails).
+ */
+async function restoreBackup(iflowId, proposalId, user) {
+  const Proposal = entity()
+  const p = await db(user, (tx) =>
+    proposalId
+      ? tx.run(SELECT.one.from(Proposal).columns('ID', 'iflowId', 'backupZip', 'backup').where({ ID: proposalId }))
+      : tx.run(SELECT.one.from(Proposal).columns('ID', 'iflowId', 'backupZip', 'backup').where({ iflowId, backup: { '!=': null } }).orderBy('createdAt desc'))
+  )
+  if (!p?.backupZip) throw fail(404, 'BACKUP_NOT_FOUND', proposalId ? `Proposal ${proposalId} has no backup` : `There is no backup of iFlow '${iflowId}'`)
+  if (p.iflowId !== iflowId) throw fail(400, 'BACKUP_OTHER_IFLOW', `The backup of proposal ${p.ID} belongs to iFlow '${p.iflowId}', not '${iflowId}'`)
+  const backup = parse(p.backup)
+  const out = { iflowId, restoredFrom: { proposalId: p.ID, ...backup } }
+  try {
+    const version = nextVersion((await cpi.getIflow(iflowId)).version)
+    await audited({ user }, { action: 'SAVE_IFLOW_VERSION', targetType: 'Iflow', targetId: iflowId, details: { version, before: 'RESTORE_IFLOW' } }, () => cpi.saveIflowAsVersion(iflowId, version))
+    out.savedCurrentAs = version
+  } catch (e) {
+    out.warning = `The current content could not be saved as a CPI version first: ${e.message}`
+  }
+  await audited({ user }, { action: 'RESTORE_IFLOW', targetType: 'Iflow', targetId: iflowId, details: { proposal: p.ID, version: backup.version, at: backup.at, savedCurrentAs: out.savedCurrentAs } }, () =>
+    cpi.updateIflowContent(iflowId, { zipBase64: p.backupZip })
+  )
+  return out
+}
+
 /**
  * Creates the iFlow, or updates its content if it already exists in the target package
  * (e.g. created by an earlier, interrupted attempt). An iFlow with the same id in a
@@ -330,4 +410,4 @@ async function waitForRuntime(iflowId, taskId) {
   return { status: last, pending: true }
 }
 
-module.exports = { approve, retry, reject, setPackage, recoverInterrupted, INTERRUPTED }
+module.exports = { approve, retry, reject, setPackage, recoverInterrupted, listBackups, restoreBackup, nextVersion, INTERRUPTED }

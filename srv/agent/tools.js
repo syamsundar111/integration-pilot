@@ -457,7 +457,7 @@ const handlers = {
       changes,
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
       instruction:
-        'Tell the user the update is ready for review in the proposal panel and list the changes. Mention: approving replaces the iFlow content (save a version in the CPI web editor first if they want to keep the old one), and a deployed iFlow runs the old version until they approve with deploy. Nothing has changed yet.'
+        'Tell the user the update is ready for review in the proposal panel and list the changes. Mention: approving replaces the iFlow content after backing it up (stored with the proposal and saved as a CPI version; "Restore previous version" on the iFlows page puts it back), and a deployed iFlow runs the old version until they approve with deploy. Nothing has changed yet.'
     }
   },
 

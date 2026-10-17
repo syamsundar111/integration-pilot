@@ -349,6 +349,15 @@ async function updateIflowContent(id, { name, zipBase64 }) {
   return getIflow(id)
 }
 
+/** Saves the iFlow's current design-time content as a new CPI version (IntegrationDesigntimeArtifactSaveAsVersion) */
+async function saveIflowAsVersion(id, version) {
+  await request({
+    method: 'POST',
+    path: `/IntegrationDesigntimeArtifactSaveAsVersion?Id=${lit(id)}&SaveAsVersion=${lit(version)}`,
+    role: 'WorkspacePackagesEdit'
+  })
+}
+
 async function deleteIflow(id) {
   await request({ method: 'DELETE', path: iflowPath(id), role: 'WorkspacePackagesEdit' })
 }
@@ -536,6 +545,7 @@ module.exports = {
   downloadIflowZip,
   createIflow,
   updateIflowContent,
+  saveIflowAsVersion,
   deleteIflow,
   // configurations
   getConfigurations,

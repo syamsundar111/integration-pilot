@@ -64,6 +64,8 @@ entity Proposal : cuid, managed {
   packageId : String(255);
   packageName : String(255); // name for the package if it is created on approval (chosen by the user)
   attachments : LargeString; // JSON { fileName: content }: attached files the spec references, as proposed
+  backupZip   : LargeString; // UPDATE proposals: the iFlow zip (base64) as it was before the update
+  backup      : LargeString; // JSON { iflowId, version, savedVersion?, versionError?, sizeBytes, at }
   result    : LargeString; // JSON execution result (steps, deploy status)
   error     : LargeString;
 }
