@@ -50,6 +50,32 @@ modules:
       - name: integration-pilot-auth
       - name: iflowpilot-dest
       - name: integration-pilot-db # DB
+      - name: groovy-check-api
+        properties:
+          GROOVY_CHECK_URL: ~{url}
+          GROOVY_CHECK_TOKEN: ~{token}
+          GROOVY_CHECK_REQUIRED: true
+
+  # Groovy syntax check (parse-only, groovy-check/): validateSpec checks every script before a proposal
+  - name: integration-pilot-groovy-check
+    type: java
+    path: groovy-check
+    parameters:
+      buildpack: java_buildpack
+      memory: 256M
+      disk-quota: 512M
+      check-token: ${generated-password}
+    build-parameters:
+      builder: maven
+      build-result: target/groovy-check.jar
+    properties:
+      CHECK_TOKEN: ${check-token}
+      JBP_CONFIG_OPEN_JDK_JRE: '{ jre: { version: 17.+ } }'
+    provides:
+      - name: groovy-check-api
+        properties:
+          url: ${default-url}
+          token: ${check-token}
 
   # DB: deploys the schema (gen/db) into the HDI container
   - name: integration-pilot-db-deployer

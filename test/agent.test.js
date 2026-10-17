@@ -8,6 +8,7 @@ process.env.DEPLOY_POLL_INTERVAL_MS = '10'
 process.env.DEPLOY_POLL_TIMEOUT_MS = '300'
 
 jest.mock('../srv/lib/llm', () => ({ chat: jest.fn(), health: jest.fn() }))
+jest.mock('../srv/lib/groovy-check', () => ({ checkScripts: jest.fn(async () => ({ checked: true, errors: [] })), required: jest.fn(() => false) }))
 jest.mock('../srv/lib/cpi-client', () => {
   const notFound = () => Object.assign(new Error('not found'), { status: 404, code: 'CPI_NOT_FOUND' })
   return {
@@ -36,6 +37,7 @@ jest.mock('../srv/lib/cpi-client', () => {
 const cds = require('@sap/cds')
 const llm = require('../srv/lib/llm')
 const cpi = require('../srv/lib/cpi-client')
+const groovyCheck = require('../srv/lib/groovy-check')
 const sample = require('../srv/iflow-builder/samples/Pilot_Test_1.json')
 
 const { GET, POST } = cds.test(__dirname + '/..', '--in-memory')
@@ -793,5 +795,55 @@ describe('a spec sent as a broken JSON string', () => {
     await chat({ message: 'Build it' })
     const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
     expect(result).toMatchObject({ valid: false, errors: [expect.stringMatching(/^SPEC_NOT_JSON spec: sent as a string that is not valid JSON \(.*position/)] })
+  })
+})
+
+describe('Groovy syntax check', () => {
+  const broken = { fileName: 'addLengthHeader', name: 'Add Length Header' }
+  afterEach(() => {
+    groovyCheck.checkScripts.mockImplementation(async () => ({ checked: true, errors: [] }))
+    groovyCheck.required.mockImplementation(() => false)
+  })
+
+  test('syntax errors come back as compact GROOVY_SYNTAX lines; attached files say so', async () => {
+    groovyCheck.checkScripts.mockImplementation(async (scripts) => ({
+      checked: true,
+      errors: scripts.map((s) => ({ fileName: s.fileName, line: 4, column: 7, message: "Unexpected input: 'return'" }))
+    }))
+    const spec = { ...sample, id: 'Agent_Groovy_1', steps: [sample.steps[0], { type: 'groovyScript', name: 'Map Users', fileName: 'mapUsers' }, sample.steps[1]] }
+    llm.chat.mockResolvedValueOnce(toolCall('validateSpec', { spec })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Build it', attachments: [{ fileName: 'mapUsers.groovy', content: require('./helpers').GROOVY }] })
+    const sent = groovyCheck.checkScripts.mock.calls.at(-1)[0]
+    expect(sent.map((s) => s.fileName)).toEqual(['mapUsers.groovy', `${broken.fileName}.groovy`]) // attached and written scripts
+    expect(sent[0].code).toBe(require('./helpers').GROOVY)
+    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result).toEqual({
+      valid: false,
+      errors: [
+        "GROOVY_SYNTAX mapUsers.groovy:4:7: Unexpected input: 'return' (attached file: tell the user to fix it and attach it again)",
+        "GROOVY_SYNTAX addLengthHeader.groovy:4:7: Unexpected input: 'return'"
+      ],
+      instruction: 'Fix the scripts and call validateSpec again.'
+    })
+  })
+
+  test('an unavailable checker is a warning, or an error when required', async () => {
+    groovyCheck.checkScripts.mockImplementation(async () => ({ checked: false, errors: [], reason: 'GROOVY_CHECK_URL is not set' }))
+    llm.chat.mockResolvedValueOnce(toolCall('validateSpec', { spec: { ...sample, id: 'Agent_Groovy_2' } })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Build it' })
+    expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)).toMatchObject({ valid: true, warnings: ['Groovy syntax not checked: GROOVY_CHECK_URL is not set'] })
+
+    groovyCheck.required.mockImplementation(() => true)
+    llm.chat.mockResolvedValueOnce(toolCall('validateSpec', { spec: { ...sample, id: 'Agent_Groovy_3' } })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Build it' })
+    expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)).toMatchObject({ valid: false, errors: [expect.stringMatching(/^GROOVY_NOT_CHECKED /)] })
+  })
+
+  test('proposeIflow with a spec checks the scripts too', async () => {
+    groovyCheck.checkScripts.mockImplementation(async (scripts) => ({ checked: true, errors: [{ fileName: scripts[0].fileName, line: 1, column: 1, message: 'bad' }] }))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Agent_Groovy_4' } })).mockResolvedValueOnce(answer('ok'))
+    const turn = await chat({ message: 'Build it' })
+    expect(turn.proposals).toEqual([])
+    expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).errors).toEqual(['GROOVY_SYNTAX addLengthHeader.groovy:1:1: bad'])
   })
 })

@@ -100,6 +100,10 @@ Prefer standard steps. Write Groovy only when no standard step fits. Groovy scri
 `import com.sap.gateway.ip.core.customdev.util.Message` and define
 `def Message processData(Message message)` that returns the message.
 
+`validateSpec` checks the syntax of every Groovy script and reports `GROOVY_SYNTAX file:line:column:
+message`. Fix scripts you wrote at that line; for an attached file, tell the user what to fix and
+ask them to attach it again. Never retype an attached script.
+
 ## Target package
 
 Check the package the user names with `listPackages`. If it does not exist, tell them in plain words. If

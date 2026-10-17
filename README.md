@@ -48,7 +48,8 @@ xs-security.json                    XSUAA: scope Admin, role collection Integrat
 ```bash
 npm install
 npm run ui:install       # UI5 Tooling and linter (only needed for build/lint)
-npm run db:deploy        # creates db.sqlite (git-ignored) for the local profiles
+npm run db:deploy        # creates db.sqlite (git-ignored) for the local profiles; run it again after schema changes
+npm run groovy-check:build  # Groovy syntax check sidecar (needs JDK 17+ and Maven)
 ```
 
 `.env` holds `LLM_MODEL` and `LLM_FALLBACK_MODEL`, plus optional `LLM_TIMEOUT_MS` (per model call,
@@ -74,6 +75,14 @@ and changes appear after a browser reload. If `app/integration-pilot/dist` exist
 Tab*, or use the Command Palette → *Ports: Preview* → 4005.
 
 Locally every request runs as `local-dev` with the `Admin` role (`srv/lib/dev-auth.js`).
+
+**Groovy syntax check.** `validateSpec` sends every Groovy script (written or attached) to the
+sidecar in `groovy-check/` (Groovy 4 parser, CONVERSION phase only: no SAP classpath, nothing is
+executed, `@Grab` is off) and returns errors as `GROOVY_SYNTAX file:line:column: message`. Run it next
+to the app with `npm run groovy-check` (port 4010) and set `GROOVY_CHECK_URL=http://localhost:4010`
+in `.env`. Without it, scripts are proposed with a "not checked" warning; `GROOVY_CHECK_REQUIRED=true`
+blocks proposals instead (set in the MTA files, where the sidecar is the module
+`integration-pilot-groovy-check` with a generated shared token).
 
 ## Checks
 

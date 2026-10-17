@@ -30,6 +30,8 @@
     "watch:hana": "cds bind --exec --profile hybrid-hana -- cds watch --profile hybrid-hana",
     "db:deploy": "cds deploy",
     "templates:derive": "node srv/iflow-builder/derive-templates.js",
+    "groovy-check:build": "mvn -q -B -f groovy-check/pom.xml package",
+    "groovy-check": "java -jar groovy-check/target/groovy-check.jar",
     "ui:install": "npm --prefix app/integration-pilot install",
     "ui:build": "npm --prefix app/integration-pilot run build",
     "ui:lint": "npm --prefix app/integration-pilot run lint",

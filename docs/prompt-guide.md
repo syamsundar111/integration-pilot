@@ -69,6 +69,9 @@ them again.
 
 ## Attach scripts instead of describing them
 
+Every Groovy script, written by the assistant or attached, is syntax-checked before it can be
+proposed; errors come back with file, line and column.
+
 Describing a long Groovy script in prose is the most expensive thing a request can contain.
 The model has to write the whole script into the spec, which is slow, can time out, and is
 repeated whenever the spec is revised. If you have the script, attach it:

@@ -9,6 +9,7 @@ const cpi = require('../lib/cpi-client')
 const { validate, schema } = require('../iflow-builder/validator')
 const { build, injectAttachments } = require('../iflow-builder/builder')
 const attachmentStore = require('../lib/attachments')
+const groovyCheck = require('../lib/groovy-check')
 const { parse } = require('../iflow-builder/parser')
 const { specFromParsed, describeChanges } = require('../iflow-builder/to-spec')
 
@@ -88,6 +89,30 @@ function compactInvalid(issues, instruction) {
   const errors = issues.slice(0, MAX_ERRORS).map((i) => `${i.code} ${i.message}`)
   if (issues.length > MAX_ERRORS) errors.push(`… ${issues.length - MAX_ERRORS} more; fix these first`)
   return { valid: false, errors, ...(instruction && { instruction }) }
+}
+
+/**
+ * Groovy syntax check of every script the spec builds (written in the spec or attached):
+ * { issues } on syntax errors, { warning } when the checker is unavailable and not required
+ */
+async function groovySyntax(spec, attachments) {
+  const own = new Set([...spec.steps, ...(spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript' && s.code != null).map((s) => s.fileName))
+  const filled = injectAttachments(spec, attachments)
+  const scripts = [...filled.steps, ...(filled.exceptionSubprocess?.steps || [])]
+    .filter((s) => s.type === 'groovyScript' && typeof s.code === 'string')
+    .map((s) => ({ fileName: `${s.fileName}.groovy`, code: s.code, attached: !own.has(s.fileName) }))
+  const { checked, errors, reason } = await groovyCheck.checkScripts(scripts.map(({ fileName, code }) => ({ fileName, code })))
+  if (!checked)
+    return groovyCheck.required()
+      ? { issues: [{ code: 'GROOVY_NOT_CHECKED', message: `scripts: the Groovy syntax check is unavailable (${reason}); try again later` }] }
+      : { issues: [], warning: `Groovy syntax not checked: ${reason}` }
+  const attached = new Set(scripts.filter((s) => s.attached).map((s) => s.fileName))
+  return {
+    issues: errors.map((e) => ({
+      code: 'GROOVY_SYNTAX',
+      message: `${e.fileName}:${e.line}:${e.column}: ${e.message}${attached.has(e.fileName) ? ' (attached file: tell the user to fix it and attach it again)' : ''}`
+    }))
+  }
 }
 
 /** A spec sent as a JSON string that does not parse: say where, instead of "must be a JSON object" */
@@ -287,7 +312,8 @@ const handlers = {
         'To change an existing iFlow: getIflowSpec, change the spec, proposeIflowUpdate. Never use proposeIflow with an existing id.',
         'HTTP receivers always use authType "None". If authentication is needed, say the user must set it in the CPI web editor after creation.',
         'Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs; define each in "parameters".',
-        'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).'
+        'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).',
+        'validateSpec checks the syntax of every Groovy script (GROOVY_SYNTAX file:line:column: message); fix written scripts, ask the user to fix attached ones.'
       ]
     }
   },
@@ -311,9 +337,14 @@ const handlers = {
       await saveDraft(ctx, spec, { source })
       return compactInvalid(e.errors ? e.errors.map((m) => ({ code: 'BUILD', message: m })) : [{ code: 'BUILD', message: `spec: cannot be built — ${e.message}` }])
     }
+    const groovy = await groovySyntax(spec, attachments)
+    if (groovy.issues.length) {
+      await saveDraft(ctx, spec, { source })
+      return compactInvalid(groovy.issues, 'Fix the scripts and call validateSpec again.')
+    }
     ctx.validatedSpec = spec
     await saveDraft(ctx, spec, { source, valid: true })
-    return { valid: true, next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
+    return { valid: true, ...(groovy.warning && { warnings: [groovy.warning] }), next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
   },
 
   async getDraftSpec(_args, ctx) {
@@ -351,12 +382,15 @@ const handlers = {
     const pkgExists = await packageExists(spec.packageId)
 
     const { summary } = await build(spec, { attachments }) // proves the spec builds into a zip
+    const groovy = await groovySyntax(spec, attachments)
+    if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts, call validateSpec, then propose again.')
     const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, attachments })
     return {
       valid: true,
       proposalId,
       iflowId: spec.id,
       status: 'PENDING',
+      ...(groovy.warning && { warnings: [groovy.warning] }),
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
       ...(!pkgExists && {
         packageNote: `Package '${spec.packageId}' does not exist on the tenant. Tell the user. They choose in the proposal panel: use an existing package or create '${spec.packageId}' with a name. Mention the similar packages, if any.`,
@@ -410,12 +444,15 @@ const handlers = {
     for (const f of spec.resources || []) if (current.resources?.[f] != null && current.resources[f] !== attachments[f]) changes.push(`${f} replaced`)
     if (!changes.length) return { valid: false, errors: ['NO_CHANGE spec: nothing changed compared to the current iFlow'] }
     const { summary } = await build(spec, { attachments })
+    const groovy = await groovySyntax(spec, attachments)
+    if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts, call validateSpec, then propose again.')
     const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments })
     return {
       valid: true,
       proposalId,
       iflowId: spec.id,
       status: 'PENDING',
+      ...(groovy.warning && { warnings: [groovy.warning] }),
       operation: 'UPDATE',
       changes,
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
