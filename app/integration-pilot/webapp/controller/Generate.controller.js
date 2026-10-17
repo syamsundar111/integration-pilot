@@ -18,6 +18,7 @@ sap.ui.define(
 
     const POLL_MS = 2000
     const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
+    const NO_DEFAULTS = { packageId: '', timer: '', authNote: '' }
     const STEP_TYPES = {
       contentModifier: 'Content Modifier',
       groovyScript: 'Groovy Script',
@@ -70,7 +71,8 @@ sap.ui.define(
             activeId: null,
             active: null,
             packages: [],
-            pkg: { editing: false }
+            pkg: { editing: false },
+            defaults: { ...NO_DEFAULTS }
           }),
           'chat'
         )
@@ -137,12 +139,14 @@ sap.ui.define(
         if (!sessionId) {
           c.setProperty('/messages', [])
           c.setProperty('/proposals', [])
+          c.setProperty('/defaults', { ...NO_DEFAULTS })
           this.setActive(null)
           return
         }
         c.setProperty('/loadingSession', true)
         try {
-          const [msgs, proposals, running] = await Promise.all([
+          const [session, msgs, proposals, running] = await Promise.all([
+            api.get(`/ChatSessions/${api.seg(sessionId)}`),
             api.get(`/ChatSessions/${api.seg(sessionId)}/messages${api.q({ $orderby: 'seq' })}`),
             api.get(`/Proposals${api.q({ $filter: `session_ID eq ${sessionId}`, $orderby: 'createdAt desc' })}`),
             api.get(`/ChatTurns${api.q({ $filter: `session_ID eq ${sessionId} and status eq 'RUNNING'`, $top: 1 })}`)
@@ -154,6 +158,7 @@ sap.ui.define(
             this.startTurnPolling(running[0].ID, new Date(running[0].createdAt).getTime(), running[0].events || [])
           }
           c.setProperty('/messages', messages)
+          c.setProperty('/defaults', { ...NO_DEFAULTS, ...(session.defaults ? JSON.parse(session.defaults) : {}) })
           c.setProperty('/proposals', proposals)
           this.setActive(proposals[0] ? proposals[0].ID : null)
           this.scrollChat()
@@ -272,7 +277,8 @@ sap.ui.define(
         const c = this.chat()
         const message = (text || '').trim()
         if (!message || c.getProperty('/turn') || c.getProperty('/starting')) return
-        const warnings = promptLint.lint(message)
+        const defaults = this.currentDefaults()
+        const warnings = promptLint.lint(message, { defaults })
         if (warnings.length && !(await this.confirmWarnings(warnings))) {
           setTimeout(() => this.byId('input').focus(), 50)
           return
@@ -282,7 +288,8 @@ sap.ui.define(
         c.setProperty('/starting', true)
         const sessionId = c.getProperty('/sessionId')
         try {
-          const started = await api.post('/chat', sessionId ? { sessionId, message } : { message })
+          // the defaults go with every message as structured context; the server stores them on the session
+          const started = await api.post('/chat', { ...(sessionId && { sessionId }), message, defaults })
           this.startTurnPolling(started.turnId, Date.now(), [])
           if (!sessionId) {
             this._skipLoad = started.sessionId
@@ -295,6 +302,24 @@ sap.ui.define(
         } finally {
           c.setProperty('/starting', false)
         }
+      },
+
+      // --- session defaults (package, timer, auth note) ---------------------------------------------
+
+      /** The defaults panel's values, trimmed */
+      currentDefaults() {
+        const d = this.chat().getProperty('/defaults')
+        return { packageId: d.packageId.trim(), timer: d.timer, authNote: d.authNote.trim() }
+      },
+
+      /** Panel header: what is set */
+      defaultsSummary(packageId, timer, authNote) {
+        const parts = [packageId && `package ${packageId.trim()}`, timer === 'once' && 'timer, run once', authNote && authNote.trim() && 'auth note'].filter(Boolean)
+        return parts.length ? parts.join(' · ') : 'none set: the assistant asks for package, trigger and authentication'
+      },
+
+      defaultsPackageState(packageId) {
+        return packageId && !PACKAGE_ID.test(packageId.trim()) ? 'Error' : 'None'
       },
 
       // --- async turn: poll GET /api/chat/turns/{id} every 2s --------------------------------------

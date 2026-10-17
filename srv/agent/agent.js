@@ -20,6 +20,8 @@ const LOG = cds.log('agent')
 const MAX_ITERATIONS = 8
 const HISTORY_LIMIT = 40 // messages sent back to the model
 const INTERRUPTED = 'Interrupted by server restart — please send your message again.'
+const PACKAGE_ID = /^[A-Za-z0-9.]+$/
+const MAX_AUTH_NOTE = 500
 
 const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 'utf8')
 
@@ -29,6 +31,50 @@ const fail = (status, code, message) => Object.assign(new Error(message), { stat
 
 /** AbortControllers of turns running in this process */
 const running = new Map()
+
+// --- session defaults ----------------------------------------------------------------
+
+/**
+ * Session defaults from the chat panel, checked and trimmed; undefined if none were sent
+ * (the stored ones stay), {} to clear them.
+ */
+function normalizeDefaults(d) {
+  if (d == null) return undefined
+  const out = {}
+  const packageId = String(d.packageId ?? '').trim()
+  const timer = String(d.timer ?? '').trim()
+  const authNote = String(d.authNote ?? '').trim()
+  if (packageId) {
+    if (!PACKAGE_ID.test(packageId)) throw fail(400, 'INVALID_DEFAULTS', 'Default package id: use letters, digits and dots only (CPI does not allow underscores)')
+    out.packageId = packageId
+  }
+  if (timer) {
+    if (timer !== 'once') throw fail(400, 'INVALID_DEFAULTS', `Default timer '${timer}' is not supported; v1 only runs once after deployment ('once')`)
+    out.timer = timer
+  }
+  if (authNote) {
+    if (authNote.length > MAX_AUTH_NOTE) throw fail(400, 'INVALID_DEFAULTS', `Default authentication note: at most ${MAX_AUTH_NOTE} characters`)
+    out.authNote = authNote
+  }
+  return out
+}
+
+/** Session defaults as structured context for the model, '' without defaults */
+function defaultsContext(defaults) {
+  if (!defaults || !Object.keys(defaults).length) return ''
+  const structured = {
+    ...(defaults.packageId && { packageId: defaults.packageId }),
+    ...(defaults.timer && { trigger: { type: 'timer', mode: defaults.timer } }),
+    ...(defaults.authNote && { receiverAuthentication: defaults.authNote })
+  }
+  const rules = [
+    defaults.packageId && '- Use packageId as the spec\'s packageId.',
+    defaults.timer && '- Use this trigger.',
+    defaults.authNote &&
+      '- Create every receiver with authType "None", and tell the user in your summary to set up this authentication in the CPI web editor after creation.'
+  ].filter(Boolean)
+  return `Session defaults (set by the user for this conversation; they override earlier messages; use them and never ask about them):\n${JSON.stringify(structured)}\n${rules.join('\n')}`
+}
 
 // --- persistence -------------------------------------------------------------------
 
@@ -100,10 +146,13 @@ const STATUS_MEANING = {
   FAILED: 'approved, but creating it on the tenant failed'
 }
 
-/** System prompt + live context: date and the status of this session's proposals */
+/** System prompt + live context: date, session defaults and the status of this session's proposals */
 async function systemMessage(user, sessionId) {
-  const { Proposal } = E()
-  const proposals = await db(user, (tx) => tx.run(SELECT.from(Proposal).where({ session_ID: sessionId }).orderBy('createdAt')))
+  const { Proposal, ChatSession } = E()
+  const { proposals, session } = await db(user, async (tx) => ({
+    proposals: await tx.run(SELECT.from(Proposal).where({ session_ID: sessionId }).orderBy('createdAt')),
+    session: await tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults'))
+  }))
   const lines = proposals.map((p) => {
     const result = p.result ? JSON.parse(p.result) : {}
     const detail = p.status === 'REJECTED' ? ` — reason: ${result.reason || 'none given'}` : p.status === 'FAILED' ? ` — error: ${p.error}` : ''
@@ -113,8 +162,9 @@ async function systemMessage(user, sessionId) {
     `Today is ${new Date().toISOString().slice(0, 10)}.`,
     lines.length
       ? `Proposals in this conversation (current status; it overrides anything said earlier in the conversation):\n${lines.join('\n')}`
-      : 'No proposals in this conversation yet.'
-  ]
+      : 'No proposals in this conversation yet.',
+    defaultsContext(session?.defaults ? JSON.parse(session.defaults) : null)
+  ].filter(Boolean)
   return { role: 'system', content: `${SYSTEM_PROMPT}\n\n## Context\n${context.join('\n')}` }
 }
 
@@ -150,10 +200,13 @@ function completeExchanges(turn) {
  * Starts a turn and returns immediately; the agent runs in the background.
  * @returns {Promise<{ turnId: string, sessionId: string, status: 'RUNNING' }>}
  */
-async function startTurn({ sessionId, message, user }) {
+async function startTurn({ sessionId, message, defaults, user }) {
   if (!message || !String(message).trim()) throw fail(400, 'EMPTY_MESSAGE', 'Message is empty')
+  const sessionDefaults = normalizeDefaults(defaults)
   sessionId = await ensureSession(user, sessionId, message)
-  const { ChatTurn } = E()
+  const { ChatTurn, ChatSession } = E()
+  if (sessionDefaults)
+    await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ defaults: Object.keys(sessionDefaults).length ? JSON.stringify(sessionDefaults) : null })))
 
   const turnId = cds.utils.uuid()
   await db(user, async (tx) => {

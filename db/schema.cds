@@ -4,6 +4,7 @@ using { cuid, managed } from '@sap/cds/common';
 
 entity ChatSession : cuid, managed {
   title    : String(200);
+  defaults : LargeString; // JSON { packageId?, timer?, authNote? }: session defaults from the chat panel
   messages : Composition of many ChatMessage on messages.session = $self;
 }
 

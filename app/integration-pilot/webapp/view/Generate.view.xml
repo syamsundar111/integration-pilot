@@ -94,6 +94,52 @@
             </HBox>
           </ScrollContainer>
 
+          <!-- session defaults: sent with every message as structured context -->
+          <Panel id="defaultsPanel" expandable="true" expanded="false" backgroundDesign="Transparent" class="ipDefaults">
+            <headerToolbar>
+              <Toolbar style="Clear" design="Transparent">
+                <core:Icon src="sap-icon://action-settings" />
+                <Text text="Session defaults" class="sapMTextBold" />
+                <Text
+                  text="{parts: ['chat>/defaults/packageId', 'chat>/defaults/timer', 'chat>/defaults/authNote'], formatter: '.defaultsSummary'}"
+                  class="ipSubtle"
+                  wrapping="false"
+                />
+              </Toolbar>
+            </headerToolbar>
+            <HBox wrap="Wrap" class="ipGapS" renderType="Bare">
+              <VBox renderType="Bare">
+                <Label text="Target package" labelFor="defaultPackage" />
+                <Input
+                  id="defaultPackage"
+                  value="{chat>/defaults/packageId}"
+                  valueLiveUpdate="true"
+                  showSuggestion="true"
+                  suggestionItems="{path: 'chat>/packages', sorter: {path: 'id'}, templateShareable: false}"
+                  placeholder="Package id"
+                  width="16rem"
+                  valueState="{path: 'chat>/defaults/packageId', formatter: '.defaultsPackageState'}"
+                  valueStateText="Letters, digits and dots only — CPI does not allow underscores"
+                  class="ipMono"
+                >
+                  <suggestionItems><core:ListItem text="{chat>id}" additionalText="{chat>name}" /></suggestionItems>
+                </Input>
+              </VBox>
+              <VBox renderType="Bare">
+                <Label text="Trigger" labelFor="defaultTimer" />
+                <Select id="defaultTimer" selectedKey="{chat>/defaults/timer}" width="14rem">
+                  <core:Item key="" text="Not set" />
+                  <core:Item key="once" text="Timer, run once after deployment" />
+                </Select>
+              </VBox>
+              <VBox renderType="Bare">
+                <layoutData><FlexItemData growFactor="1" /></layoutData>
+                <Label text="Receiver authentication (set up after creation)" labelFor="defaultAuth" />
+                <Input id="defaultAuth" value="{chat>/defaults/authNote}" valueLiveUpdate="true" maxLength="500" width="100%" placeholder="e.g. OAuth2 SAML Bearer with credential DEMO_OAUTH on all receivers" />
+              </VBox>
+            </HBox>
+          </Panel>
+
           <HBox class="ipComposer ipGapS" renderType="Bare">
             <TextArea
               id="input"

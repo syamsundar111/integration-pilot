@@ -217,6 +217,13 @@ service ApiService {
     createdAt : Timestamp;
   }
 
+  /** Session defaults from the chat panel; sent with each message, stored on the session */
+  type SessionDefaults {
+    packageId : String; // target package id
+    timer     : String; // 'once' = timer, run once after deployment
+    authNote  : String; // receiver authentication to set up after creation
+  }
+
   type TurnStarted {
     turnId    : UUID;
     sessionId : UUID;
@@ -224,10 +231,11 @@ service ApiService {
   }
 
   /**
-   * POST /api/chat { sessionId?, message } — starts a turn and returns at once
+   * POST /api/chat { sessionId?, message, defaults? } — starts a turn and returns at once
    * (omit sessionId to start a new conversation). Poll GET /api/chat/turns/{turnId}.
+   * defaults replace the session's stored defaults; omit them to keep the stored ones.
    */
-  action chat(sessionId : UUID, message : String) returns TurnStarted;
+  action chat(sessionId : UUID, message : String, defaults : SessionDefaults) returns TurnStarted;
 
   /**
    * GET /api/chat/turns/{id} (alias of /api/ChatTurns/{id}): status RUNNING|DONE|FAILED|CANCELLED,

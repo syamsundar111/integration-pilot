@@ -593,3 +593,29 @@ describe('spec arguments in the wrong shape', () => {
     expect(llm.chat.mock.calls[2][0].messages[0].content).toMatch(/Agent_Shape_1 → PENDING \(waiting for the user to approve or reject\)/)
   })
 })
+
+describe('session defaults', () => {
+  test('are stored on the session and sent to the model as structured context', async () => {
+    const defaults = { packageId: 'DEV.SF.Directory', timer: 'once', authNote: 'OAuth2 SAML Bearer, credential DEMO_OAUTH' }
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    const turn = await chat({ message: 'Create the iFlow', defaults })
+    const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+    expect(system).toContain('{"packageId":"DEV.SF.Directory","trigger":{"type":"timer","mode":"once"},"receiverAuthentication":"OAuth2 SAML Bearer, credential DEMO_OAUTH"}')
+    expect(system).toMatch(/never ask about them/)
+    const { data: session } = await GET(`/api/ChatSessions/${turn.sessionId}`)
+    expect(JSON.parse(session.defaults)).toEqual(defaults)
+
+    // omitted: the stored defaults stay; empty: cleared
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ sessionId: turn.sessionId, message: 'next' })
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('"packageId":"DEV.SF.Directory"')
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ sessionId: turn.sessionId, message: 'again', defaults: { packageId: '', timer: '', authNote: '' } })
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).not.toContain('Session defaults')
+  })
+
+  test('invalid defaults are rejected', async () => {
+    await expect(POST('/api/chat', { message: 'x', defaults: { packageId: 'DEV_SF' } })).rejects.toMatchObject({ response: { status: 400 } })
+    await expect(POST('/api/chat', { message: 'x', defaults: { timer: 'hourly' } })).rejects.toMatchObject({ response: { status: 400 } })
+  })
+})

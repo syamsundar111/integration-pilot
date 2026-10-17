@@ -178,9 +178,9 @@ module.exports = class ApiService extends cds.ApplicationService {
     this.on('llmHealth', () => llm.health())
 
     this.on('chat', (req) => {
-      const { sessionId, message } = req.data
+      const { sessionId, message, defaults } = req.data
       if (!message?.trim()) req.reject(400, 'message is required')
-      return agent.startTurn({ sessionId, message, user: req.user })
+      return agent.startTurn({ sessionId, message, defaults, user: req.user })
     })
 
     this.on('remove', 'ChatSessions', (req) => {
