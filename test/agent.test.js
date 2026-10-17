@@ -92,6 +92,10 @@ describe('agent', () => {
     const lastCall = llm.chat.mock.calls[2][0]
     expect(lastCall.messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'tool', 'assistant', 'tool'])
     expect(lastCall.messages[5]).toMatchObject({ tool_call_id: 'proposeIflow:0', content: expect.stringContaining('"valid":true') })
+    // the hard limits come first, and the model is told not to print specs or ask for given defaults
+    expect(lastCall.messages[0].content).toMatch(/^## Hard limits\n/)
+    expect(lastCall.messages[0].content).toContain('Never print the spec JSON in chat')
+    expect(lastCall.messages[0].content).toContain('never ask about them')
     expect(lastCall.tools.map((t) => t.function.name)).toEqual(
       expect.arrayContaining(['listPackages', 'listIflows', 'getIflowDetails', 'getRuntimeStatus', 'getMessageLogs', 'getSupportedSteps', 'validateSpec', 'explainIflow', 'proposeIflow', 'proposePackage'])
     )
