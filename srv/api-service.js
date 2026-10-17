@@ -183,6 +183,15 @@ module.exports = class ApiService extends cds.ApplicationService {
       return agent.startTurn({ sessionId, message, defaults, attachments, user: req.user })
     })
 
+    this.on('importIflow', (req) => {
+      const { sessionId, fileName, contentBase64, packageId } = req.data
+      requireFields(req, req.data, ['fileName', 'contentBase64'])
+      if (!/\.(zip|iflw)$/i.test(fileName)) req.reject(400, 'Import a .zip export of an iFlow or a .iflw file')
+      return audited(req, { action: 'IMPORT_IFLOW', targetType: 'ChatSession', targetId: sessionId || 'new', details: { fileName } }, () =>
+        agent.importIntoSession({ sessionId, fileName, buffer: Buffer.from(contentBase64, 'base64'), packageId, user: req.user })
+      )
+    })
+
     this.on('remove', 'Attachments', async (req) => {
       const id = keyOf(req)
       const n = await DELETE.from('iflowpilot.Attachment', id)

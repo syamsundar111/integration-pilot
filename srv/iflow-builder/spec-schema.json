@@ -267,6 +267,9 @@
         "name": {
           "$ref": "#/definitions/stepName"
         },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
         "headers": {
           "type": "array",
           "items": {
@@ -299,6 +302,9 @@
         "name": {
           "$ref": "#/definitions/stepName"
         },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
         "fileName": {
           "type": "string",
           "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
@@ -323,6 +329,9 @@
         },
         "name": {
           "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
         }
       }
     },
@@ -364,6 +373,9 @@
         },
         "name": {
           "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
         },
         "system": true,
         "url": true,
@@ -548,6 +560,11 @@
           }
         }
       ]
+    },
+    "stepDescription": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "What the step is for (shown in the proposal panel; not written to the iFlow). Imported placeholders say what to replace them with."
     }
   },
   "examples": [

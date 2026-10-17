@@ -5,6 +5,7 @@ using { cuid, managed } from '@sap/cds/common';
 entity ChatSession : cuid, managed {
   title       : String(200);
   defaults    : LargeString; // JSON { packageId?, timer?, authNote? }: session defaults from the chat panel
+  draftSpec   : LargeString; // JSON { spec, source, at }: the conversation's working spec (e.g. an imported iFlow); scripts are attachments
   messages    : Composition of many ChatMessage on messages.session = $self;
   attachments : Composition of many Attachment on attachments.session = $self;
 }

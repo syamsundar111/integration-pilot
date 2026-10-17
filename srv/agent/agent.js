@@ -15,6 +15,7 @@ const path = require('path')
 const cds = require('@sap/cds')
 const llm = require('../lib/llm')
 const attachmentStore = require('../lib/attachments')
+const { importIflow } = require('../iflow-builder/import')
 const tools = require('./tools')
 
 const LOG = cds.log('agent')
@@ -68,6 +69,17 @@ function attachmentsContext(files) {
       ? `- ${f.fileName} (Groovy, ${f.lines} lines${f.origin === 'iflow' ? ', from the existing iFlow' : ''}): groovyScript step with "fileName": "${f.fileName.replace(/\.groovy$/, '')}" and no "code"`
       : `- ${f.fileName} (XSLT, ${f.lines} lines${f.origin === 'iflow' ? ', from the existing iFlow' : ''}): list it in "resources"`
   return `Attached files (stored on the server; reference them by name, never write their content):\n${files.map(line).join('\n')}`
+}
+
+/** The draft spec as context: what it is and how to use it, never the spec itself */
+function draftContext(draft) {
+  if (!draft?.spec) return ''
+  const { spec, source } = draft
+  const placeholders = [...(spec.steps || []), ...(spec.exceptionSubprocess?.steps || [])].filter((s) => /^REPLACE WITH /.test(s.description || '')).length
+  return (
+    `Draft spec of this conversation (${source}): ${spec.id} "${spec.name}", ${spec.steps?.length || 0} steps${placeholders ? `, ${placeholders} placeholder(s)` : ''}, package ${spec.packageId}. ` +
+    'Read it with getDraftSpec only if you need to change it; to propose it unchanged, call validateSpec with { "useDraftSpec": true }, then proposeIflow with { "useValidatedSpec": true }.'
+  )
 }
 
 /** Session defaults as structured context for the model, '' without defaults */
@@ -162,7 +174,7 @@ async function systemMessage(user, sessionId) {
   const { Proposal, ChatSession } = E()
   const { proposals, session } = await db(user, async (tx) => ({
     proposals: await tx.run(SELECT.from(Proposal).where({ session_ID: sessionId }).orderBy('createdAt')),
-    session: await tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults'))
+    session: await tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults', 'draftSpec'))
   }))
   const lines = proposals.map((p) => {
     const result = p.result ? JSON.parse(p.result) : {}
@@ -175,6 +187,7 @@ async function systemMessage(user, sessionId) {
       ? `Proposals in this conversation (current status; it overrides anything said earlier in the conversation):\n${lines.join('\n')}`
       : 'No proposals in this conversation yet.',
     defaultsContext(session?.defaults ? JSON.parse(session.defaults) : null),
+    draftContext(session?.draftSpec ? JSON.parse(session.draftSpec) : null),
     attachmentsContext(await attachmentStore.list(user, sessionId))
   ].filter(Boolean)
   return { role: 'system', content: `${SYSTEM_PROMPT}\n\n## Context\n${context.join('\n')}` }
@@ -329,6 +342,43 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
   }
 }
 
+/**
+ * Imports an iFlow (.zip or .iflw) as the conversation's draft spec: its scripts and XSLT files
+ * become attachments, and a short note in the chat tells the user (and the model) what came in.
+ */
+async function importIntoSession({ sessionId, fileName, buffer, packageId, user }) {
+  const { ChatSession, ChatTurn } = E()
+  if (sessionId) {
+    const s = await db(user, (tx) => tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults')))
+    if (!s) throw fail(404, 'SESSION_NOT_FOUND', `Chat session ${sessionId} not found`)
+    packageId ||= s.defaults ? JSON.parse(s.defaults).packageId : undefined
+    if (await db(user, (tx) => tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' }))))
+      throw fail(409, 'TURN_IN_PROGRESS', 'The assistant is still working in this conversation. Wait for it or cancel it, then import.')
+  }
+  const result = await importIflow(buffer, { fileName, packageId })
+  sessionId = await ensureSession(user, sessionId, `Import ${fileName}`)
+  const files = Object.entries(result.attachments).map(([name, content]) => ({ fileName: name, content }))
+  if (files.length) await attachmentStore.save(user, sessionId, files, 'import')
+  const draft = { spec: result.spec, source: `imported from ${fileName}`, at: new Date().toISOString() }
+  await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ draftSpec: JSON.stringify(draft) })))
+
+  const { spec } = result
+  const stepList = (steps) => steps.map((s, i) => `${i + 1}. ${s.name}${/^REPLACE WITH /.test(s.description || '') ? ' *(placeholder)*' : ''}`).join('\n')
+  const summary = [
+    `Imported **${spec.name}** (\`${spec.id}\`) from ${fileName} as the draft spec: ${spec.trigger.type === 'timer' ? 'timer, run once' : `HTTPS ${spec.trigger.address}`}, ${spec.steps.length} steps.`,
+    stepList(spec.steps),
+    ...(spec.exceptionSubprocess ? [`Exception subprocess: ${spec.exceptionSubprocess.steps.map((s) => s.name).join(', ')}`] : []),
+    ...(result.notes.length ? ['Notes:', ...result.notes.map((n) => `- ${n}`)] : []),
+    ...(result.valid ? [] : ['The draft does not validate yet:', ...result.errors.map((e) => `- ${e}`)]),
+    'Ask me to propose it as a new iFlow, or to change it first.'
+  ].join('\n\n')
+  await saveMessages(user, sessionId, [
+    { role: 'user', content: `Import the iFlow from ${fileName}.` },
+    { role: 'assistant', content: summary }
+  ])
+  return { sessionId, spec, notes: result.notes, attachments: files.map((f) => f.fileName), placeholders: result.placeholders, valid: result.valid, errors: result.errors }
+}
+
 /** Requests cancellation; the turn ends as CANCELLED at the next step (the model call is aborted at once) */
 async function cancelTurn(turnId, user) {
   const { ChatTurn } = E()
@@ -379,4 +429,4 @@ async function recoverInterruptedTurns() {
   return stuck.length
 }
 
-module.exports = { startTurn, cancelTurn, deleteSession, recoverInterruptedTurns, toProposalInfo, toolLabel, INTERRUPTED }
+module.exports = { startTurn, cancelTurn, deleteSession, importIntoSession, recoverInterruptedTurns, toProposalInfo, toolLabel, INTERRUPTED }

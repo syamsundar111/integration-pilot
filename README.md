@@ -19,7 +19,7 @@ It shares the CPI tenant, the destinations and the AI model with `iflow-pilot`.
 | Dashboard | `sap.f.DynamicPage`, `GenericTile` KPIs, `sap.f.Card` lists (failed messages, recent proposals, quick actions) |
 | Packages | `sap.m.Table` with search, create/edit Dialog (CPI id rules), delete with type-to-confirm and a warning about deployed iFlows |
 | iFlows | `sap.f.FlexibleColumnLayout` list-detail; IconTabBar Overview (flow diagram, adapters) / Parameters (editable) / Scripts (`sap.ui.codeeditor` Groovy) / Runtime; Download, Deploy, Undeploy, Explain with AI, Delete; Explain from ZIP (`FileUploader`) |
-| Generate | Chat (Markdown replies, starter prompts, history, live agent steps with Cancel) and the proposal panel (target package check, flow diagram, steps, parameters, Groovy, approve / deploy / reject / retry with live progress) |
+| Generate | Chat (Markdown replies, request template with a pre-send check, session defaults, .groovy/.xsl attachments, Import iFlow, history, live agent steps with Cancel) and the proposal panel (target package check, flow diagram, steps, parameters, Groovy, approve / deploy / reject / retry with live progress). How to write requests: [docs/prompt-guide.md](docs/prompt-guide.md) |
 | Monitor | Runtime artifacts with a status filter and error details, a "waiting for the runtime" notice, message logs with status/time filters |
 | Activity | Audit log with search, action and result filters, and a details dialog |
 

@@ -20,6 +20,7 @@ sap.ui.define(
     const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
     const NO_DEFAULTS = { packageId: '', timer: '', authNote: '' }
     const MAX_ATTACHMENT_KB = 200
+    const MAX_IMPORT_MB = 10
     const ATTACHMENT_NAME = /^([A-Za-z][A-Za-z0-9_]*\.groovy|[A-Za-z][A-Za-z0-9_.-]*\.xslt?)$/
     const STEP_TYPES = {
       contentModifier: 'Content Modifier',
@@ -75,6 +76,7 @@ sap.ui.define(
             packages: [],
             pkg: { editing: false },
             defaults: { ...NO_DEFAULTS },
+            importing: false,
             files: [] // attached files: { fileName, pending, content? } (pending: sent with the next message) or stored { ID, fileName, lines, origin }
           }),
           'chat'
@@ -384,6 +386,41 @@ sap.ui.define(
         }
       },
 
+      // --- import an iFlow (.zip / .iflw) as the conversation's draft spec ------------------------------
+
+      async onImport(e) {
+        const file = (e.getParameter('files') || [])[0]
+        e.getSource().clear()
+        if (!file) return
+        if (file.size > MAX_IMPORT_MB * 1024 * 1024) return this.showError({ message: `${file.name} is larger than ${MAX_IMPORT_MB} MB.` })
+        const c = this.chat()
+        c.setProperty('/importing', true)
+        try {
+          const contentBase64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''))
+            reader.onerror = () => reject(new Error('The file could not be read.'))
+            reader.readAsDataURL(file)
+          })
+          const sessionId = c.getProperty('/sessionId')
+          const packageId = this.currentDefaults().packageId
+          const result = await api.post('/importIflow', { ...(sessionId && { sessionId }), fileName: file.name, contentBase64, ...(packageId && { packageId }) })
+          this.toast(`Imported ${result.spec.id}${result.placeholders ? ` — ${result.placeholders} placeholder(s) to replace` : ''}`)
+          this._skipLoad = null
+          if (result.sessionId === sessionId) await this.loadSession(sessionId)
+          else this.getRouter().navTo('generate', { '?query': { session: result.sessionId } })
+          c.setProperty('/input', 'Propose the imported iFlow as a new iFlow.')
+        } catch (err) {
+          this.showError(err, `Could not import ${file.name}`)
+        } finally {
+          c.setProperty('/importing', false)
+        }
+      },
+
+      onImportTypeMismatch() {
+        this.showError({ message: 'Import a .zip export of an iFlow or a .iflw file.' })
+      },
+
       // --- async turn: poll GET /api/chat/turns/{id} every 2s --------------------------------------
 
       startTurnPolling(turnId, startedAt, events) {
@@ -561,6 +598,7 @@ sap.ui.define(
         const stepCard = (s, prefix) => ({
           title: `${prefix} ${s.name || STEP_TYPES[s.type]}`,
           type: STEP_TYPES[s.type] || s.type,
+          description: s.description || '',
           lines:
             s.type === 'contentModifier'
               ? [

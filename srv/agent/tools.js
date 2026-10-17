@@ -44,9 +44,12 @@ const definitions = [
   fn(
     'validateSpec',
     'Validate a complete iFlow spec with the same checks the builder runs. Always call it before proposeIflow/proposeIflowUpdate and fix every error first. Returns { valid: true } or compact errors "CODE path: message".',
-    { spec: { type: 'object', description: 'Complete iFlow spec v1' } },
-    ['spec']
+    {
+      spec: { type: 'object', description: 'Complete iFlow spec v1' },
+      useDraftSpec: { type: 'boolean', description: "true: validate the conversation's draft spec (see Context) instead of sending one" }
+    }
   ),
+  fn('getDraftSpec', "The conversation's draft spec (e.g. an imported iFlow), to change it. Scripts are attached files: keep their steps without code."),
   fn('explainIflow', 'Parse an existing iFlow (trigger, steps, adapters, parameters, scripts) to explain it.', { iflowId: { type: 'string' } }, ['iflowId']),
   fn(
     'proposeIflow',
@@ -146,6 +149,13 @@ async function similarPackages(requested) {
 async function attachmentsOf(ctx) {
   ctx.attachments ??= ctx.sessionId ? await attachmentStore.contents(ctx.user, ctx.sessionId) : {}
   return ctx.attachments
+}
+
+/** The conversation's draft spec { spec, source, at }, or null */
+async function draftOf(ctx) {
+  if (!ctx.sessionId) return null
+  const s = await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.one.from('iflowpilot.ChatSession', ctx.sessionId).columns('draftSpec')))
+  return s?.draftSpec ? JSON.parse(s.draftSpec) : null
 }
 
 /** Stores a PENDING proposal in its own transaction, so it survives a failing chat turn */
@@ -251,7 +261,9 @@ const handlers = {
     }
   },
 
-  async validateSpec({ spec }, ctx) {
+  async validateSpec({ spec, useDraftSpec }, ctx) {
+    if (!spec && useDraftSpec) spec = (await draftOf(ctx))?.spec
+    if (!spec) return compactInvalid([{ code: 'NO_SPEC', message: useDraftSpec ? 'spec: this conversation has no draft spec' : 'spec: missing — send the complete spec' }])
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix every error and call validateSpec again.')
@@ -262,6 +274,12 @@ const handlers = {
     }
     ctx.validatedSpec = spec
     return { valid: true, next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
+  },
+
+  async getDraftSpec(_args, ctx) {
+    const draft = await draftOf(ctx)
+    if (!draft) return { error: { code: 'NO_DRAFT', message: 'This conversation has no draft spec.' } }
+    return { source: draft.source, spec: draft.spec, instruction: 'To change it, validate the complete changed spec with validateSpec, then propose with { "useValidatedSpec": true }.' }
   },
 
   async explainIflow({ iflowId }) {
@@ -387,13 +405,13 @@ const parseJsonString = (v) => {
  * nested objects (trigger, steps, …) as JSON strings. Accept those shapes instead of failing.
  */
 function normalizeSpecArgs(args) {
-  const { useValidatedSpec, ...rest } = args
+  const { useValidatedSpec, useDraftSpec, ...rest } = args
   let spec = rest.spec === undefined && (rest.id || rest.steps || rest.trigger) ? rest : parseJsonString(rest.spec)
   if (spec && typeof spec === 'object' && !Array.isArray(spec)) {
     spec = { ...spec }
     for (const f of SPEC_OBJECT_FIELDS) if (f in spec) spec[f] = parseJsonString(spec[f])
   }
-  return { spec, useValidatedSpec: useValidatedSpec === true || useValidatedSpec === 'true' }
+  return { spec, useValidatedSpec: useValidatedSpec === true || useValidatedSpec === 'true', useDraftSpec: useDraftSpec === true || useDraftSpec === 'true' }
 }
 
 /**

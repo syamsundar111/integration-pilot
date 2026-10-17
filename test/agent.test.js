@@ -720,3 +720,38 @@ describe('attached files', () => {
     await expect(POST('/api/chat', { message: 'x', attachments: [{ fileName: 'notes.txt', content: 'x' }] })).rejects.toMatchObject({ response: { status: 400 } })
   })
 })
+
+describe('import an iFlow', () => {
+  test('the import becomes the draft spec; it is proposed without the model writing the spec', async () => {
+    const fs = require('fs')
+    const { build } = require('../srv/iflow-builder/builder')
+    const dir = `${__dirname}/fixtures/sf-entra`
+    const spec = JSON.parse(fs.readFileSync(`${dir}/spec.json`, 'utf8'))
+    const attachments = { 'mapSfToEntra.groovy': fs.readFileSync(`${dir}/mapSfToEntra.groovy`, 'utf8'), 'buildErrorNotification.groovy': fs.readFileSync(`${dir}/buildErrorNotification.groovy`, 'utf8') }
+    const { zipBase64 } = await build(spec, { attachments })
+
+    const { data: imported } = await POST('/api/importIflow', { fileName: 'sf-entra.zip', contentBase64: zipBase64, packageId: 'PilotReference' })
+    expect(imported).toMatchObject({ valid: true, placeholders: 0, spec: { id: spec.id, packageId: 'PilotReference' } })
+    expect(imported.attachments.sort()).toEqual(['buildErrorNotification.groovy', 'mapSfToEntra.groovy'])
+    const { data: messages } = await GET(`/api/ChatSessions/${imported.sessionId}/messages?$orderby=seq`)
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant'])
+    expect(messages[1].content).toMatch(/^Imported \*\*SF SourceApp EC to Target Directory_Employee Data Replication_V1\*\*/)
+
+    llm.chat
+      .mockResolvedValueOnce(toolCall('validateSpec', { useDraftSpec: true }))
+      .mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true }))
+      .mockResolvedValueOnce(answer('Ready.'))
+    const turn = await chat({ sessionId: imported.sessionId, message: 'Propose the imported iFlow as a new iFlow.' })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: spec.id, status: 'PENDING' })])
+    const sent = llm.chat.mock.calls.at(-1)[0].messages
+    expect(sent[0].content).toMatch(/Draft spec of this conversation \(imported from sf-entra.zip\): SF_SourceApp_EC_to_Microsoft_Directory_ID_Employee_Data_Replication_V1/)
+    expect(sent[0].content).toContain('mapSfToEntra.groovy (Groovy,')
+    expect(JSON.stringify(sent)).not.toContain('ValueMappingApi') // the script body never reaches the model
+    const { data: proposal } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
+    expect(proposal.attachments).toEqual(attachments)
+  })
+
+  test('only .zip and .iflw files are imported', async () => {
+    await expect(POST('/api/importIflow', { fileName: 'x.txt', contentBase64: 'eA==' })).rejects.toMatchObject({ response: { status: 400 } })
+  })
+})

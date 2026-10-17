@@ -289,6 +289,22 @@ service ApiService {
     action setPackage(packageId : String, packageName : String) returns Proposals;
   };
 
+  type ImportResult {
+    sessionId    : UUID;
+    spec         : LargeString; // draft spec (object in responses)
+    notes        : many String;
+    attachments  : many String; // attached files the draft references
+    placeholders : Integer;
+    valid        : Boolean;
+    errors       : many String;
+  }
+
+  /**
+   * POST /api/importIflow { sessionId?, fileName, contentBase64, packageId? } — converts an iFlow
+   * (.zip export or .iflw) into the conversation's draft spec; unsupported steps become placeholders
+   */
+  action importIflow(sessionId : UUID, fileName : String, contentBase64 : LargeString, packageId : String) returns ImportResult;
+
   type Explanation {
     summary     : LargeString; // parsed iFlow (object in responses)
     explanation : LargeString; // Markdown from the LLM, null if it was unavailable

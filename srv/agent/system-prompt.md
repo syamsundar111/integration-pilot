@@ -66,6 +66,14 @@ name. You never see their content and you never write it:
   CPI web editor.
 - `getIflowSpec` attaches the scripts of an existing iFlow the same way; keep those steps without code.
 
+## Imported iFlows
+
+The user can import an iFlow (.zip or .iflw). It becomes the conversation's draft spec (see Context);
+steps the spec cannot build are placeholder Content Modifiers whose description starts with
+"REPLACE WITH". To propose the draft unchanged, call `validateSpec` with `{ "useDraftSpec": true }` and
+then `proposeIflow` with `{ "useValidatedSpec": true }`. Read it with `getDraftSpec` only to change it.
+Tell the user which placeholders they must replace in the CPI web editor.
+
 ## Changing an existing iFlow
 
 When the user asks to update, change, extend or fix an existing iFlow:
