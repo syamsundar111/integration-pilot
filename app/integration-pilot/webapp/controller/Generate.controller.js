@@ -19,6 +19,8 @@ sap.ui.define(
     const POLL_MS = 2000
     const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
     const NO_DEFAULTS = { packageId: '', timer: '', authNote: '' }
+    const MAX_ATTACHMENT_KB = 200
+    const ATTACHMENT_NAME = /^([A-Za-z][A-Za-z0-9_]*\.groovy|[A-Za-z][A-Za-z0-9_.-]*\.xslt?)$/
     const STEP_TYPES = {
       contentModifier: 'Content Modifier',
       groovyScript: 'Groovy Script',
@@ -72,7 +74,8 @@ sap.ui.define(
             active: null,
             packages: [],
             pkg: { editing: false },
-            defaults: { ...NO_DEFAULTS }
+            defaults: { ...NO_DEFAULTS },
+            files: [] // attached files: { fileName, pending, content? } (pending: sent with the next message) or stored { ID, fileName, lines, origin }
           }),
           'chat'
         )
@@ -140,6 +143,7 @@ sap.ui.define(
           c.setProperty('/messages', [])
           c.setProperty('/proposals', [])
           c.setProperty('/defaults', { ...NO_DEFAULTS })
+          c.setProperty('/files', [])
           this.setActive(null)
           return
         }
@@ -159,6 +163,8 @@ sap.ui.define(
           }
           c.setProperty('/messages', messages)
           c.setProperty('/defaults', { ...NO_DEFAULTS, ...(session.defaults ? JSON.parse(session.defaults) : {}) })
+          c.setProperty('/files', [])
+          this.loadAttachments(sessionId)
           c.setProperty('/proposals', proposals)
           this.setActive(proposals[0] ? proposals[0].ID : null)
           this.scrollChat()
@@ -289,8 +295,11 @@ sap.ui.define(
         const sessionId = c.getProperty('/sessionId')
         try {
           // the defaults go with every message as structured context; the server stores them on the session
-          const started = await api.post('/chat', { ...(sessionId && { sessionId }), message, defaults })
+          const pending = c.getProperty('/files').filter((f) => f.pending)
+          const attachments = pending.map((f) => ({ fileName: f.fileName, content: f.content }))
+          const started = await api.post('/chat', { ...(sessionId && { sessionId }), message, defaults, ...(attachments.length && { attachments }) })
           this.startTurnPolling(started.turnId, Date.now(), [])
+          if (attachments.length) this.loadAttachments(started.sessionId)
           if (!sessionId) {
             this._skipLoad = started.sessionId
             c.setProperty('/sessionId', started.sessionId)
@@ -320,6 +329,59 @@ sap.ui.define(
 
       defaultsPackageState(packageId) {
         return packageId && !PACKAGE_ID.test(packageId.trim()) ? 'Error' : 'None'
+      },
+
+      // --- attached files (.groovy, .xsl): the model sees their names, the builder uses their content ---
+
+      async loadAttachments(sessionId) {
+        try {
+          const stored = await api.get(`/Attachments${api.q({ $filter: `session_ID eq ${sessionId}`, $select: 'ID,fileName,lines,origin', $orderby: 'fileName' })}`)
+          if (this.chat().getProperty('/sessionId') !== sessionId) return
+          this.chat().setProperty('/files', stored.map((f) => ({ ...f, pending: false })))
+        } catch (e) {
+          // the list is informational
+        }
+      },
+
+      async onAttach(e) {
+        const chosen = Array.from(e.getParameter('files') || [])
+        e.getSource().clear()
+        const c = this.chat()
+        for (const file of chosen) {
+          if (!ATTACHMENT_NAME.test(file.name))
+            return this.showError({
+              message: `${file.name}: attach .groovy or .xsl/.xslt files named like mapUsers.groovy or transform.xsl.`,
+              hint: 'The name of a Groovy file (without .groovy) becomes the script fileName in the iFlow: a letter, then letters, digits or underscore.'
+            })
+          if (file.size > MAX_ATTACHMENT_KB * 1024) return this.showError({ message: `${file.name} is larger than ${MAX_ATTACHMENT_KB} KB.` })
+          const content = await file.text()
+          const others = c.getProperty('/files').filter((f) => !(f.pending && f.fileName === file.name))
+          c.setProperty('/files', [...others, { fileName: file.name, pending: true, content }])
+        }
+      },
+
+      onAttachTypeMismatch() {
+        this.showError({ message: 'Attach Groovy (.groovy) or XSLT (.xsl, .xslt) files.' })
+      },
+
+      fileTokenText(fileName, pending, lines, origin) {
+        if (pending) return `${fileName} · sent with your next message`
+        return `${fileName} · ${lines} lines${origin === 'iflow' ? ' · from the iFlow' : ''}`
+      },
+
+      async onFileDelete(e) {
+        const c = this.chat()
+        for (const token of e.getParameter('tokens') || []) {
+          const f = token.getBindingContext('chat').getObject()
+          if (f.pending) c.setProperty('/files', c.getProperty('/files').filter((x) => x !== f))
+          else
+            try {
+              await api.post(`/Attachments/${api.seg(f.ID)}/remove`)
+              c.setProperty('/files', c.getProperty('/files').filter((x) => x.ID !== f.ID))
+            } catch (err) {
+              this.showError(err, `Could not remove ${f.fileName}`)
+            }
+        }
       },
 
       // --- async turn: poll GET /api/chat/turns/{id} every 2s --------------------------------------
@@ -492,6 +554,7 @@ sap.ui.define(
           stepCards: [],
           params: [],
           scripts: [],
+          resourcesText: '',
           hasHttpReceiver: false
         }
 
@@ -510,7 +573,7 @@ sap.ui.define(
               : s.type === 'requestReplyHttp'
                 ? `${s.method} ${s.url}`
                 : s.type === 'groovyScript'
-                  ? `script/${s.fileName}.groovy`
+                  ? `script/${s.fileName}.groovy${s.code == null ? ' (attached file)' : ''}`
                   : ''
         })
 
@@ -528,9 +591,16 @@ sap.ui.define(
               : [])
           ]
           active.params = Object.entries(spec.parameters || {}).map(([key, value]) => ({ key, value }))
+          const attached = p.attachments || {}
           active.scripts = [...spec.steps, ...((spec.exceptionSubprocess && spec.exceptionSubprocess.steps) || [])]
             .filter((s) => s.type === 'groovyScript')
-            .map((s) => ({ fileName: `${s.fileName}.groovy`, code: s.code }))
+            .map((s) => ({
+              fileName: `${s.fileName}.groovy${s.code == null ? ' (attached file)' : ''}`,
+              code: s.code != null ? s.code : attached[`${s.fileName}.groovy`] || ''
+            }))
+          active.resourcesText = (spec.resources || []).length
+            ? `XSLT files added as src/main/resources/mapping/: ${spec.resources.join(', ')}. v1 has no XSLT step — add an XSLT Mapping step for them in the CPI web editor.`
+            : ''
           active.hasHttpReceiver = spec.end.type === 'httpReceiver' || spec.steps.some((s) => s.type === 'requestReplyHttp')
         }
 

@@ -169,7 +169,7 @@ function walk(container, include = () => true) {
 
 /**
  * @param {Buffer|string} input - zip as Buffer or base64 string
- * @returns {Promise<{ id, name, description, trigger, steps, end, exceptionSubprocess, adapters, parameters, scripts, files, linear }>}
+ * @returns {Promise<{ id, name, description, trigger, steps, end, exceptionSubprocess, adapters, parameters, scripts, mappings, files, linear }>}
  */
 async function parse(input) {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(String(input), 'base64')
@@ -273,6 +273,9 @@ async function parse(input) {
   const scripts = Object.keys(files)
     .filter((f) => f.startsWith(root + 'src/main/resources/script/'))
     .map((f) => ({ fileName: f.split('/').pop(), path: f.slice(root.length), content: files[f] }))
+  const mappings = Object.keys(files)
+    .filter((f) => f.startsWith(root + 'src/main/resources/mapping/') && /\.xslt?$/i.test(f))
+    .map((f) => ({ fileName: f.split('/').pop(), path: f.slice(root.length), content: files[f] }))
 
   for (const a of adapters) delete a.node
   return {
@@ -285,6 +288,7 @@ async function parse(input) {
     adapters,
     parameters,
     scripts,
+    mappings,
     linear,
     exceptionSubprocess: exceptionSubprocesses[0] || null,
     localProcesses: processes.filter((p) => p !== main).map((p) => p.getAttribute('name')),

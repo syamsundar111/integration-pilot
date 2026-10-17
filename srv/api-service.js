@@ -178,9 +178,15 @@ module.exports = class ApiService extends cds.ApplicationService {
     this.on('llmHealth', () => llm.health())
 
     this.on('chat', (req) => {
-      const { sessionId, message, defaults } = req.data
+      const { sessionId, message, defaults, attachments } = req.data
       if (!message?.trim()) req.reject(400, 'message is required')
-      return agent.startTurn({ sessionId, message, defaults, user: req.user })
+      return agent.startTurn({ sessionId, message, defaults, attachments, user: req.user })
+    })
+
+    this.on('remove', 'Attachments', async (req) => {
+      const id = keyOf(req)
+      const n = await DELETE.from('iflowpilot.Attachment', id)
+      if (!n) req.reject(404, `Attachment ${id} not found`)
     })
 
     this.on('remove', 'ChatSessions', (req) => {
@@ -202,7 +208,13 @@ module.exports = class ApiService extends cds.ApplicationService {
     })
 
     // Proposals are returned with spec/result parsed, so clients get objects, not JSON strings
-    const parseProposal = (p) => p && { ...p, ...('spec' in p && { spec: parseJson(p.spec) }), ...('result' in p && { result: parseJson(p.result) }) }
+    const parseProposal = (p) =>
+      p && {
+        ...p,
+        ...('spec' in p && { spec: parseJson(p.spec) }),
+        ...('result' in p && { result: parseJson(p.result) }),
+        ...('attachments' in p && { attachments: parseJson(p.attachments) })
+      }
     this.on('READ', 'Proposals', async (req, next) => {
       const result = await next()
       return Array.isArray(result) ? result.map(parseProposal) : parseProposal(result)

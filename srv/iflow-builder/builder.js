@@ -159,14 +159,25 @@ function chain(nodes, nextId) {
 
 // --- build -------------------------------------------------------------------------
 
+/** Copy of the spec with the code of attached scripts filled in (groovyScript steps without code) */
+function injectAttachments(spec, attachments = {}) {
+  const fillCode = (s) => (s?.type === 'groovyScript' && s.code == null && attachments[`${s.fileName}.groovy`] != null ? { ...s, code: attachments[`${s.fileName}.groovy`] } : s)
+  return {
+    ...spec,
+    ...(Array.isArray(spec.steps) && { steps: spec.steps.map(fillCode) }),
+    ...(spec.exceptionSubprocess && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: (spec.exceptionSubprocess.steps || []).map(fillCode) } })
+  }
+}
+
 /**
  * @param {object} spec - iFlow spec v1 (see spec-schema.json)
- * @param {{ now?: Date }} [options]
+ * @param {{ now?: Date, attachments?: Object<string, string> }} [options] - attachments: attached
+ *   files by name, injected for groovyScript steps without code and for spec.resources
  * @returns {Promise<{ zipBase64: string, files: {path: string, content: string}[], summary: object }>}
  * @throws Error with code INVALID_SPEC and errors[] if the spec is invalid
  */
-async function build(spec, { now = new Date() } = {}) {
-  const { valid, errors } = validate(spec)
+async function build(spec, { now = new Date(), attachments = {} } = {}) {
+  const { valid, errors } = validate(spec, { attachments: Object.keys(attachments) })
   if (!valid) {
     const err = new Error(`Invalid iFlow spec:\n- ${errors.join('\n- ')}`)
     Object.assign(err, { code: 'INVALID_SPEC', status: 400, errors })
@@ -329,8 +340,10 @@ async function build(spec, { now = new Date() } = {}) {
   const add = (p, content) => files.push({ path: p, content })
 
   add(`src/main/resources/scenarioflows/integrationflow/${spec.id}.iflw`, iflw)
-  for (const s of [...spec.steps, ...(spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript'))
+  const withCode = injectAttachments(spec, attachments)
+  for (const s of [...withCode.steps, ...(withCode.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript'))
     add(`src/main/resources/script/${s.fileName}.groovy`, s.code)
+  for (const r of spec.resources || []) add(`src/main/resources/mapping/${r}`, attachments[r])
   add(
     'src/main/resources/parameters.prop',
     `#${date}\n` + [...paramNames].sort().map((k) => `${propEscape(k, true)}=${propEscape(params[k])}\n`).join('')
@@ -426,4 +439,4 @@ function nodeToXml(n) {
   }
 }
 
-module.exports = { build, javaDate, propEscape, manifestHeader }
+module.exports = { build, injectAttachments, javaDate, propEscape, manifestHeader }

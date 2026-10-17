@@ -3,9 +3,24 @@ namespace iflowpilot;
 using { cuid, managed } from '@sap/cds/common';
 
 entity ChatSession : cuid, managed {
-  title    : String(200);
-  defaults : LargeString; // JSON { packageId?, timer?, authNote? }: session defaults from the chat panel
-  messages : Composition of many ChatMessage on messages.session = $self;
+  title       : String(200);
+  defaults    : LargeString; // JSON { packageId?, timer?, authNote? }: session defaults from the chat panel
+  messages    : Composition of many ChatMessage on messages.session = $self;
+  attachments : Composition of many Attachment on attachments.session = $self;
+}
+
+/**
+ * A Groovy or XSLT file of a conversation. Specs reference it by file name and the builder
+ * injects the content; the model only ever sees the name and size.
+ */
+entity Attachment : cuid, managed {
+  session  : Association to ChatSession;
+  fileName : String(255); // with extension, unique per session: mapUsers.groovy, transform.xsl
+  kind     : String(10) enum { groovy; xsl };
+  origin   : String(10) enum { upload; iflow; import } default 'upload'; // iflow: script of an existing iFlow (getIflowSpec)
+  content  : LargeString;
+  size     : Integer; // bytes
+  lines    : Integer;
 }
 
 entity ChatMessage : cuid, managed {
@@ -39,6 +54,7 @@ entity Proposal : cuid, managed {
   iflowId   : String(255);
   packageId : String(255);
   packageName : String(255); // name for the package if it is created on approval (chosen by the user)
+  attachments : LargeString; // JSON { fileName: content }: attached files the spec references, as proposed
   result    : LargeString; // JSON execution result (steps, deploy status)
   error     : LargeString;
 }

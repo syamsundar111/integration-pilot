@@ -87,7 +87,8 @@ sap.ui.define([], () => {
     if (found.length)
       warn(
         'unsupported',
-        `Not supported in v1: ${found.join(', ')}. Flows are linear (Content Modifier, Groovy Script, JSON/XML converters, HTTP request-reply). Use a Groovy script, or add the step in the CPI web editor after creation.`
+        `Not supported in v1: ${found.join(', ')}. Flows are linear (Content Modifier, Groovy Script, JSON/XML converters, HTTP request-reply). Use a Groovy script, or add the step in the CPI web editor after creation.` +
+          (found.includes('XSLT') ? ' Attach the .xsl file to include it in the iFlow, ready for an XSLT Mapping step.' : '')
       )
 
     const steps = estimateSteps(message)

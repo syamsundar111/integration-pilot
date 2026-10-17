@@ -643,3 +643,80 @@ describe('validate, then propose', () => {
     expect(turn.events.map((e) => e.type)).toContain('validation')
   })
 })
+
+describe('attached files', () => {
+  const { GROOVY } = require('./helpers')
+  const MARKER = 'X-Attached-Marker'
+  const script = GROOVY.replace("'X-Test'", `'${MARKER}'`)
+
+  test('the model sees names only; the proposal builds with the attached content', async () => {
+    const spec = {
+      ...sample,
+      id: 'Agent_Attached_1',
+      name: 'Agent Attached 1',
+      steps: [sample.steps[0], { type: 'groovyScript', name: 'Map Users', fileName: 'mapUsers' }]
+    }
+    llm.chat
+      .mockResolvedValueOnce(toolCall('validateSpec', { spec }))
+      .mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true }))
+      .mockResolvedValueOnce(answer('Ready.'))
+    const turn = await chat({ message: 'Use the attached script', attachments: [{ fileName: 'mapUsers.groovy', content: script }] })
+    const [proposal] = turn.proposals
+    expect(proposal).toMatchObject({ iflowId: 'Agent_Attached_1', status: 'PENDING' })
+
+    const sent = JSON.stringify(llm.chat.mock.calls.map((c) => c[0].messages))
+    expect(sent).toContain('mapUsers.groovy (Groovy,')
+    expect(sent).not.toContain(MARKER)
+
+    const { data: files } = await GET(`/api/Attachments?$filter=session_ID eq ${turn.sessionId}`)
+    expect(files).toEqual([expect.objectContaining({ fileName: 'mapUsers.groovy', kind: 'groovy', origin: 'upload' })])
+    expect(files[0].content).toBeUndefined()
+
+    const { data: stored } = await GET(`/api/Proposals/${proposal.ID}`)
+    expect(stored.attachments).toEqual({ 'mapUsers.groovy': script })
+    await POST(`/api/Proposals/${proposal.ID}/approve`, { deploy: false })
+    expect((await waitFor(proposal.ID)).status).toBe('DONE')
+    const { zipBase64 } = cpi.createIflow.mock.calls.at(-1)[0]
+    const zip = await require('jszip').loadAsync(Buffer.from(zipBase64, 'base64'))
+    expect(await zip.file('src/main/resources/script/mapUsers.groovy').async('string')).toBe(script)
+  })
+
+  test('getIflowSpec attaches the scripts of an existing iFlow instead of returning them', async () => {
+    const { build } = require('../srv/iflow-builder/builder')
+    const existing = { ...sample, id: 'Existing_Groovy', steps: [sample.steps[0], { ...sample.steps[1], code: script }] }
+    const zip = Buffer.from((await build(existing)).zipBase64, 'base64')
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (id === existing.id) return { id, name: existing.name, packageId: 'PilotReference' }
+      throw Object.assign(new Error('not found'), { status: 404 })
+    })
+    cpi.downloadIflowZip.mockImplementation(async () => zip)
+    try {
+      const changed = (spec) => ({ ...spec, steps: [{ ...spec.steps[0], name: 'Set Headers' }, spec.steps[1]] })
+      llm.chat.mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: existing.id })).mockResolvedValueOnce(answer('read'))
+      const first = await chat({ message: 'show it' })
+      const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+      expect(result).toMatchObject({ editable: true, attachedFiles: ['addLengthHeader.groovy'] })
+      expect(result.spec.steps[1]).toEqual({ type: 'groovyScript', name: 'Add Length Header', fileName: 'addLengthHeader' })
+      expect(JSON.stringify(llm.chat.mock.calls.at(-1)[0].messages)).not.toContain(MARKER)
+
+      llm.chat
+        .mockResolvedValueOnce(toolCall('validateSpec', { spec: changed(result.spec) }))
+        .mockResolvedValueOnce(toolCall('proposeIflowUpdate', { useValidatedSpec: true }))
+        .mockResolvedValueOnce(answer('ok'))
+      const turn = await chat({ sessionId: first.sessionId, message: 'rename the first step' })
+      const update = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+      // the script is unchanged: only the renamed step counts as a change
+      expect(update).toMatchObject({ valid: true, operation: 'UPDATE', changes: [expect.stringMatching(/^steps: Set Pilot Headers → Add Length Header {2}⇒ {2}Set Headers → Add Length Header$/)] })
+      const { data: proposal } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
+      expect(proposal.attachments).toEqual({ 'addLengthHeader.groovy': script })
+    } finally {
+      cpi.getIflow.mockImplementation(async () => {
+        throw Object.assign(new Error('not found'), { status: 404 })
+      })
+    }
+  })
+
+  test('invalid attachments are rejected before a session is created', async () => {
+    await expect(POST('/api/chat', { message: 'x', attachments: [{ fileName: 'notes.txt', content: 'x' }] })).rejects.toMatchObject({ response: { status: 400 } })
+  })
+})

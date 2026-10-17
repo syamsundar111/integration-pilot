@@ -153,6 +153,16 @@
       "additionalProperties": {
         "type": "string"
       }
+    },
+    "resources": {
+      "type": "array",
+      "description": "Attached XSLT files (with extension) added to the iFlow as src/main/resources/mapping/<file>. v1 has no XSLT step: the user wires an XSLT Mapping step to the file in the CPI web editor.",
+      "uniqueItems": true,
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9_.-]*\\.xslt?$"
+      }
     }
   },
   "definitions": {
@@ -279,8 +289,7 @@
       "type": "object",
       "required": [
         "type",
-        "fileName",
-        "code"
+        "fileName"
       ],
       "additionalProperties": false,
       "properties": {
@@ -293,11 +302,12 @@
         "fileName": {
           "type": "string",
           "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
-          "description": "Without extension; stored as script/<fileName>.groovy"
+          "description": "Without extension; stored as script/<fileName>.groovy. If the user attached <fileName>.groovy, omit code: the attached file is used."
         },
         "code": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Groovy source. Omit it when <fileName>.groovy is an attached file."
         }
       }
     },

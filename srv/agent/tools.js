@@ -7,7 +7,8 @@
 const cds = require('@sap/cds')
 const cpi = require('../lib/cpi-client')
 const { validate, schema } = require('../iflow-builder/validator')
-const { build } = require('../iflow-builder/builder')
+const { build, injectAttachments } = require('../iflow-builder/builder')
+const attachmentStore = require('../lib/attachments')
 const { parse } = require('../iflow-builder/parser')
 const { specFromParsed, describeChanges } = require('../iflow-builder/to-spec')
 
@@ -141,11 +142,31 @@ async function similarPackages(requested) {
     .map(({ id, name }) => ({ id, name }))
 }
 
+/** Attached files of the conversation, { fileName: content } (cached for the turn) */
+async function attachmentsOf(ctx) {
+  ctx.attachments ??= ctx.sessionId ? await attachmentStore.contents(ctx.user, ctx.sessionId) : {}
+  return ctx.attachments
+}
+
 /** Stores a PENDING proposal in its own transaction, so it survives a failing chat turn */
-async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, operation = 'CREATE' }) {
+async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, operation = 'CREATE', attachments = {} }) {
   const ID = cds.utils.uuid()
+  // the attached files the spec uses, as they are now: approval and retry build from this snapshot
+  const used = Object.fromEntries(attachmentStore.referencedBy(spec).map((f) => [f, attachments[f]]))
   await cds.tx({ user: ctx.user }, (tx) =>
-    tx.run(INSERT.into('iflowpilot.Proposal').entries({ ID, session_ID: ctx.sessionId, kind, operation, spec: JSON.stringify(spec), status: 'PENDING', iflowId, packageId }))
+    tx.run(
+      INSERT.into('iflowpilot.Proposal').entries({
+        ID,
+        session_ID: ctx.sessionId,
+        kind,
+        operation,
+        spec: JSON.stringify(spec),
+        status: 'PENDING',
+        iflowId,
+        packageId,
+        attachments: Object.keys(used).length ? JSON.stringify(used) : null
+      })
+    )
   )
   ctx.proposals.push(ID)
   return ID
@@ -159,6 +180,24 @@ async function currentSpec(iflowId) {
   const result = specFromParsed(await parse(zip), { packageId: iflow.packageId, configurations })
   if (result.spec) Object.assign(result.spec, { id: iflowId, name: iflow.name || result.spec.name }) // CPI's id and display name win over the bundle headers
   return { ...result, packageId: iflow.packageId }
+}
+
+/**
+ * Moves the scripts and XSLT files of an existing iFlow's spec into the conversation's
+ * attachments and returns the spec without code, so the model never receives script bodies.
+ * An upload of the user with the same name is kept: it replaces the iFlow's file.
+ */
+async function detachFiles(ctx, spec, resources = {}) {
+  const steps = [...spec.steps, ...(spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript' && s.code != null)
+  const files = [...steps.map((s) => ({ fileName: `${s.fileName}.groovy`, content: s.code })), ...Object.entries(resources).map(([fileName, content]) => ({ fileName, content }))]
+  const stored = new Set(files.length ? await attachmentStore.save(ctx.user, ctx.sessionId, files, 'iflow') : [])
+  ctx.attachments = undefined // reload: new files
+  const strip = (s) => (s.type === 'groovyScript' && s.code != null ? (({ code, ...rest }) => rest)(s) : s)
+  return {
+    spec: { ...spec, steps: spec.steps.map(strip), ...(spec.exceptionSubprocess && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: spec.exceptionSubprocess.steps.map(strip) } }) },
+    attachedFiles: files.map((f) => f.fileName).filter((f) => stored.has(f)),
+    keptUploads: files.map((f) => f.fileName).filter((f) => !stored.has(f))
+  }
 }
 
 // --- handlers ----------------------------------------------------------------------
@@ -213,10 +252,11 @@ const handlers = {
   },
 
   async validateSpec({ spec }, ctx) {
-    const { valid, issues } = validate(spec)
+    const attachments = await attachmentsOf(ctx)
+    const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix every error and call validateSpec again.')
     try {
-      await build(spec) // the builder's own checks: the spec must turn into an iFlow zip
+      await build(spec, { attachments }) // the builder's own checks: the spec must turn into an iFlow zip
     } catch (e) {
       return compactInvalid(e.errors ? e.errors.map((m) => ({ code: 'BUILD', message: m })) : [{ code: 'BUILD', message: `spec: cannot be built — ${e.message}` }])
     }
@@ -234,7 +274,8 @@ const handlers = {
   async proposeIflow(args, ctx) {
     const { spec, error } = specToPropose(args, ctx)
     if (error) return error
-    const { valid, issues } = validate(spec)
+    const attachments = await attachmentsOf(ctx)
+    const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix these errors, call validateSpec, then propose again.')
 
     // Fail early on things the user could not approve successfully
@@ -248,8 +289,8 @@ const handlers = {
       }
     const pkgExists = await packageExists(spec.packageId)
 
-    const { summary } = await build(spec) // proves the spec builds into a zip
-    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId })
+    const { summary } = await build(spec, { attachments }) // proves the spec builds into a zip
+    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, attachments })
     return {
       valid: true,
       proposalId,
@@ -264,7 +305,7 @@ const handlers = {
     }
   },
 
-  async getIflowSpec({ iflowId }) {
+  async getIflowSpec({ iflowId }, ctx) {
     const current = await currentSpec(iflowId)
     if (!current) return { error: { code: 'IFLOW_NOT_FOUND', message: `iFlow '${iflowId}' does not exist. Use listIflows to find the id.` } }
     if (current.blockers.length)
@@ -274,13 +315,23 @@ const handlers = {
         instruction:
           'This iFlow cannot be updated here: an update rebuilds it from the spec and would lose the blockers. Tell the user, list the blockers, and suggest changing it in the CPI web editor or creating a new iFlow.'
       }
-    return { editable: true, spec: current.spec, instruction: 'Change only what the user asked for, keep everything else as it is, and call proposeIflowUpdate with the complete spec.' }
+    const { spec, attachedFiles, keptUploads } = await detachFiles(ctx, current.spec, current.resources)
+    return {
+      editable: true,
+      spec,
+      ...(attachedFiles.length && { attachedFiles }),
+      ...(keptUploads.length && { keptUploads }),
+      instruction:
+        'Change only what the user asked for, keep everything else as it is, validate the complete spec with validateSpec and call proposeIflowUpdate. Scripts and XSLT files are attached files: keep their steps without code' +
+        (keptUploads.length ? `; the user's uploads ${keptUploads.join(', ')} replace the iFlow's current files.` : '.')
+    }
   },
 
   async proposeIflowUpdate(args, ctx) {
     const { spec, error } = specToPropose(args, ctx)
     if (error) return error
-    const { valid, issues } = validate(spec)
+    const attachments = await attachmentsOf(ctx)
+    const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix these errors, call validateSpec, then propose again.')
     const current = await currentSpec(spec.id)
     if (!current) return { valid: false, errors: [`id: iFlow '${spec.id}' does not exist — use proposeIflow to create a new iFlow`] }
@@ -288,10 +339,13 @@ const handlers = {
       return { valid: false, errors: [`packageId: iFlow '${spec.id}' is in package '${current.packageId}' — an update keeps the package, set packageId to '${current.packageId}'`] }
     if (current.blockers.length) return { valid: false, errors: current.blockers.map((b) => `not updatable: ${b}`), instruction: 'Tell the user this iFlow cannot be updated here, and why.' }
 
-    const changes = describeChanges(current.spec, spec)
-    if (!changes.length) return { valid: false, errors: ['spec: nothing changed compared to the current iFlow'] }
-    const { summary } = await build(spec)
-    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId })
+    // compare with the scripts filled in: the current spec has code, the proposed one references attachments
+    const changes = describeChanges({ ...current.spec, resources: undefined }, { ...injectAttachments(spec, attachments), resources: undefined })
+    if (JSON.stringify(current.spec.resources || []) !== JSON.stringify(spec.resources || [])) changes.push('XSLT files changed')
+    for (const f of spec.resources || []) if (current.resources?.[f] != null && current.resources[f] !== attachments[f]) changes.push(`${f} replaced`)
+    if (!changes.length) return { valid: false, errors: ['NO_CHANGE spec: nothing changed compared to the current iFlow'] }
+    const { summary } = await build(spec, { attachments })
+    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments })
     return {
       valid: true,
       proposalId,

@@ -224,6 +224,12 @@ service ApiService {
     authNote  : String; // receiver authentication to set up after creation
   }
 
+  /** A .groovy or .xsl/.xslt file sent with a chat message (UTF-8 text) */
+  type AttachmentInput {
+    fileName : String;
+    content  : LargeString;
+  }
+
   type TurnStarted {
     turnId    : UUID;
     sessionId : UUID;
@@ -231,11 +237,12 @@ service ApiService {
   }
 
   /**
-   * POST /api/chat { sessionId?, message, defaults? } — starts a turn and returns at once
+   * POST /api/chat { sessionId?, message, defaults?, attachments? } — starts a turn and returns at once
    * (omit sessionId to start a new conversation). Poll GET /api/chat/turns/{turnId}.
    * defaults replace the session's stored defaults; omit them to keep the stored ones.
+   * attachments are stored in the session (same name: replaced); specs reference them by file name.
    */
-  action chat(sessionId : UUID, message : String, defaults : SessionDefaults) returns TurnStarted;
+  action chat(sessionId : UUID, message : String, defaults : SessionDefaults, attachments : many AttachmentInput) returns TurnStarted;
 
   /**
    * GET /api/chat/turns/{id} (alias of /api/ChatTurns/{id}): status RUNNING|DONE|FAILED|CANCELLED,
@@ -258,6 +265,15 @@ service ApiService {
 
   @readonly
   entity ChatMessages as projection on db.ChatMessage;
+
+  /**
+   * GET /api/Attachments?$filter=session_ID eq <id> — attached files without content,
+   * POST /api/Attachments/{id}/remove
+   */
+  @readonly
+  entity Attachments  as projection on db.Attachment excluding { content } actions {
+    action remove();
+  };
 
   /**
    * GET /api/Proposals/{id} (poll during execution: status + result.steps),

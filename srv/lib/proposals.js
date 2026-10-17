@@ -201,7 +201,7 @@ async function execute(proposal, result, user) {
 
       let zip
       await step('build', async () => {
-        zip = await build(spec)
+        zip = await build(spec, { attachments: proposal.attachments ? JSON.parse(proposal.attachments) : {} })
         return `${zip.files.length} files, ${zip.summary.sizeBytes} bytes`
       })
 

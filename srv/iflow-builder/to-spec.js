@@ -46,7 +46,8 @@ function toStep(s, scripts, where) {
 /**
  * @param {object} parsed - result of parser.parse()
  * @param {{ packageId: string, configurations?: {key: string, value: string}[] }} options
- * @returns {{ spec: object|null, blockers: string[] }}
+ * @returns {{ spec: object|null, blockers: string[], resources?: Object<string, string> }} resources:
+ *   content of the XSLT files listed in spec.resources
  */
 function specFromParsed(parsed, { packageId, configurations = [] }) {
   const blockers = []
@@ -97,13 +98,16 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   } else blockers.push(`end: ${e.adapter || e.type} receiver (only HTTP receiver or none)`)
 
   // Resources the builder does not write (mappings, schemas, other scripts) would be deleted
+  // XSLT files are kept as spec.resources (their content comes back in `resources`)
   const scripts = new Set([...(parsed.steps || []), ...(parsed.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript').map((s) => `script/${s.fileName}.groovy`))
+  const mappings = Object.fromEntries((parsed.mappings || []).filter((m) => /^[A-Za-z][A-Za-z0-9_.-]*\.xslt?$/.test(m.fileName)).map((m) => [`mapping/${m.fileName}`, m]))
   for (const f of parsed.files || []) {
     if (!f.startsWith(RESOURCES)) continue
     const rel = f.slice(RESOURCES.length)
-    if (rel.startsWith('scenarioflows/') || rel === 'parameters.prop' || rel === 'parameters.propdef' || scripts.has(rel)) continue
+    if (rel.startsWith('scenarioflows/') || rel === 'parameters.prop' || rel === 'parameters.propdef' || scripts.has(rel) || mappings[rel]) continue
     blockers.push(`resource ${rel} (would be deleted by an update)`)
   }
+  const resources = Object.fromEntries(Object.values(mappings).map((m) => [m.fileName, m.content]))
 
   // Current configured values win over the defaults in parameters.prop
   const parameters = { ...(parsed.parameters || {}) }
@@ -120,11 +124,12 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     steps,
     end,
     ...(exceptionSubprocess && { exceptionSubprocess }),
-    ...(Object.keys(parameters).length && { parameters })
+    ...(Object.keys(parameters).length && { parameters }),
+    ...(Object.keys(resources).length && { resources: Object.keys(resources) })
   }
-  const { valid, errors } = validate(spec)
+  const { valid, errors } = validate(spec, { attachments: Object.keys(resources) })
   if (!valid) return { spec: null, blockers: errors.map((err) => `not representable as a spec: ${err}`) }
-  return { spec, blockers: [] }
+  return { spec, blockers: [], resources }
 }
 
 /** Short, human-readable list of differences between two specs (for the update proposal) */

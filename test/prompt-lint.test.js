@@ -37,6 +37,7 @@ describe('prompt linter', () => {
     const w = lint('Build an iFlow on a timer in package P: use a router, then a General Splitter, an XSLT, a message mapping and an SFTP receiver, a Write Variables step and a Process Call. No auth.')
     expect(keys(w)).toEqual(['unsupported'])
     expect(w[0].message).toMatch(/router, splitter, XSLT, mapping, SFTP, write variables, process call/)
+    expect(w[0].message).toMatch(/Attach the .xsl file/)
     expect(lint('Build an iFlow on a timer in package P that sets property Kind = "router mapping". No auth.')).toEqual([])
     expect(keys(lint('Add a multicast after step 2, then gather and join the branches'))).toEqual(['unsupported'])
   })

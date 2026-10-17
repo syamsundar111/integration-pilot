@@ -14,6 +14,7 @@ const fs = require('fs')
 const path = require('path')
 const cds = require('@sap/cds')
 const llm = require('../lib/llm')
+const attachmentStore = require('../lib/attachments')
 const tools = require('./tools')
 
 const LOG = cds.log('agent')
@@ -57,6 +58,16 @@ function normalizeDefaults(d) {
     out.authNote = authNote
   }
   return out
+}
+
+/** Attached files as context: names, sizes and how to reference them — never their content */
+function attachmentsContext(files) {
+  if (!files.length) return ''
+  const line = (f) =>
+    f.kind === 'groovy'
+      ? `- ${f.fileName} (Groovy, ${f.lines} lines${f.origin === 'iflow' ? ', from the existing iFlow' : ''}): groovyScript step with "fileName": "${f.fileName.replace(/\.groovy$/, '')}" and no "code"`
+      : `- ${f.fileName} (XSLT, ${f.lines} lines${f.origin === 'iflow' ? ', from the existing iFlow' : ''}): list it in "resources"`
+  return `Attached files (stored on the server; reference them by name, never write their content):\n${files.map(line).join('\n')}`
 }
 
 /** Session defaults as structured context for the model, '' without defaults */
@@ -163,7 +174,8 @@ async function systemMessage(user, sessionId) {
     lines.length
       ? `Proposals in this conversation (current status; it overrides anything said earlier in the conversation):\n${lines.join('\n')}`
       : 'No proposals in this conversation yet.',
-    defaultsContext(session?.defaults ? JSON.parse(session.defaults) : null)
+    defaultsContext(session?.defaults ? JSON.parse(session.defaults) : null),
+    attachmentsContext(await attachmentStore.list(user, sessionId))
   ].filter(Boolean)
   return { role: 'system', content: `${SYSTEM_PROMPT}\n\n## Context\n${context.join('\n')}` }
 }
@@ -200,13 +212,15 @@ function completeExchanges(turn) {
  * Starts a turn and returns immediately; the agent runs in the background.
  * @returns {Promise<{ turnId: string, sessionId: string, status: 'RUNNING' }>}
  */
-async function startTurn({ sessionId, message, defaults, user }) {
+async function startTurn({ sessionId, message, defaults, attachments = [], user }) {
   if (!message || !String(message).trim()) throw fail(400, 'EMPTY_MESSAGE', 'Message is empty')
   const sessionDefaults = normalizeDefaults(defaults)
+  ;(attachments || []).forEach(attachmentStore.check) // fail before a new session is created
   sessionId = await ensureSession(user, sessionId, message)
   const { ChatTurn, ChatSession } = E()
   if (sessionDefaults)
     await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ defaults: Object.keys(sessionDefaults).length ? JSON.stringify(sessionDefaults) : null })))
+  if (attachments?.length) await attachmentStore.save(user, sessionId, attachments)
 
   const turnId = cds.utils.uuid()
   await db(user, async (tx) => {
@@ -333,7 +347,7 @@ async function cancelTurn(turnId, user) {
  * Refused while a turn is running or a proposal is executing.
  */
 async function deleteSession(sessionId, user) {
-  const { ChatSession, ChatMessage, ChatTurn, Proposal } = E()
+  const { ChatSession, ChatMessage, ChatTurn, Proposal, Attachment } = E()
   await db(user, async (tx) => {
     if (!(await tx.run(SELECT.one.from(ChatSession, sessionId)))) throw fail(404, 'SESSION_NOT_FOUND', `Chat session ${sessionId} not found`)
     if (await tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' })))
@@ -344,6 +358,7 @@ async function deleteSession(sessionId, user) {
     await tx.run(UPDATE(Proposal).set({ session_ID: null }).where({ session_ID: sessionId }))
     await tx.run(DELETE.from(ChatTurn).where({ session_ID: sessionId }))
     await tx.run(DELETE.from(ChatMessage).where({ session_ID: sessionId }))
+    await tx.run(DELETE.from(Attachment).where({ session_ID: sessionId }))
     await tx.run(DELETE.from(ChatSession, sessionId))
   })
 }

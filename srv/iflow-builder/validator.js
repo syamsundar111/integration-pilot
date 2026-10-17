@@ -129,9 +129,11 @@ const PARAM_FIELDS = /^(steps\[\d+\]|end)\.url$/
 
 /**
  * @param {object} spec
- * @returns {{ valid: boolean, errors: string[] }}
+ * @param {{ attachments?: string[] }} [options] - file names (with extension) attached in the
+ *   conversation; a groovyScript without code uses <fileName>.groovy, resources name .xsl files
+ * @returns {{ valid: boolean, errors: string[], issues: { code: string, message: string }[] }}
  */
-function validate(spec) {
+function validate(spec, { attachments = [] } = {}) {
   if (!spec || typeof spec !== 'object' || Array.isArray(spec))
     return { valid: false, errors: ['spec: must be a JSON object'], issues: [{ code: 'NOT_OBJECT', message: 'spec: must be a JSON object' }] }
   const issues = []
@@ -206,6 +208,20 @@ function validate(spec) {
     err('DUPLICATE_SYSTEM', `receiver system name '${d}' is used more than once — give each receiver a unique 'system'`)
   for (const d of dupes(allSteps.filter(([s]) => s?.type === 'groovyScript').map(([s]) => s.fileName)))
     err('DUPLICATE_FILENAME', `steps: Groovy fileName '${d}' is used more than once — each script needs its own file`)
+
+  // --- attached files: scripts without code, XSLT resources --------------------------
+  const attached = new Set(attachments)
+  for (const [s, where] of allSteps) {
+    if (s?.type !== 'groovyScript' || typeof s.fileName !== 'string') continue
+    const file = `${s.fileName}.groovy`
+    if (s.code == null && !attached.has(file))
+      err('ATTACHMENT_MISSING', `${where}: no code and no attached file '${file}' — give the code, or ask the user to attach ${file}`)
+    if (s.code != null && attached.has(file))
+      err('ATTACHED_CODE', `${where}.code: '${file}' is an attached file — omit code to use it (or choose another fileName for a new script)`)
+  }
+  ;(Array.isArray(spec.resources) ? spec.resources : []).forEach((r, i) => {
+    if (typeof r === 'string' && !attached.has(r)) err('ATTACHMENT_MISSING', `resources[${i}]: '${r}' is not an attached file — ask the user to attach it`)
+  })
 
   for (const [s, where] of allSteps) {
     if (s?.type === 'groovyScript' && typeof s.code === 'string') {

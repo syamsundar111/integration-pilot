@@ -5,6 +5,7 @@
   xmlns:f="sap.f"
   xmlns:core="sap.ui.core"
   xmlns:ce="sap.ui.codeeditor"
+  xmlns:u="sap.ui.unified"
   height="100%"
 >
   <f:DynamicPage id="page" toggleHeaderOnTitleClick="false" fitContent="true">
@@ -140,7 +141,27 @@
             </HBox>
           </Panel>
 
+          <!-- attached files: the model sees the names, the builder injects the content -->
+          <Tokenizer tokens="{chat>/files}" visible="{= ${chat>/files}.length > 0 }" tokenDelete=".onFileDelete" width="100%" class="ipFiles">
+            <Token
+              key="{chat>fileName}"
+              text="{parts: ['chat>fileName', 'chat>pending', 'chat>lines', 'chat>origin'], formatter: '.fileTokenText'}"
+              tooltip="Remove"
+            />
+          </Tokenizer>
+
           <HBox class="ipComposer ipGapS" renderType="Bare">
+            <u:FileUploader
+              buttonOnly="true"
+              iconOnly="true"
+              icon="sap-icon://attachment"
+              multiple="true"
+              fileType="groovy,xsl,xslt"
+              sameFilenameAllowed="true"
+              change=".onAttach"
+              typeMissmatch=".onAttachTypeMismatch"
+              tooltip="Attach Groovy (.groovy) or XSLT (.xsl) files — the iFlow uses them by file name"
+            />
             <TextArea
               id="input"
               value="{chat>/input}"
@@ -296,6 +317,8 @@
                       <ce:CodeEditor type="groovy" value="{chat>code}" editable="false" height="260px" syntaxHints="false" />
                     </VBox>
                   </VBox>
+
+                  <MessageStrip text="{chat>/active/resourcesText}" type="Information" showIcon="true" visible="{= !!${chat>/active/resourcesText} }" />
 
                   <MessageStrip
                     text="Receivers are created without authentication. If a target system needs authentication, open the iFlow in the CPI web editor after creation and set the authentication method and credentials on its receiver adapter before deploying."
