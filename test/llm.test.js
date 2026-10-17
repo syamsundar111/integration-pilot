@@ -148,3 +148,16 @@ describe('health', () => {
     expect(await llm.health()).toMatchObject({ ok: false, error: { code: 'LLM_NOT_FOUND' } })
   })
 })
+
+describe('usage', () => {
+  test('is returned in a provider-neutral shape', async () => {
+    executeHttpRequest.mockResolvedValue(ok({ content: 'x' }, { usage: { prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500 } }))
+    const res = await llm.chat({ messages: [] })
+    expect(res.usage).toEqual({ inputTokens: 1200, outputTokens: 300, totalTokens: 1500, durationMs: expect.any(Number) })
+  })
+
+  test('missing numbers stay null; a missing total is the sum', () => {
+    expect(llm.normalizeUsage({}, 5)).toEqual({ inputTokens: null, outputTokens: null, totalTokens: null, durationMs: 5 })
+    expect(llm.normalizeUsage({ prompt_tokens: 10, completion_tokens: 2 }, 1)).toMatchObject({ totalTokens: 12 })
+  })
+})

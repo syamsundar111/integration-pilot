@@ -6,6 +6,7 @@ const proposals = require('./lib/proposals')
 const { audited } = require('./lib/audit')
 const { getStats } = require('./lib/stats')
 const { explain, parsedIflow } = require('./lib/explain')
+const { usageSummary } = require('./lib/usage')
 
 /** Key of the n-th entity in the URL path, e.g. /Packages/{id}/iflows -> keyOf(req) = id */
 const keyOf = (req, i = 0) => Object.values(req.params.at(i) ?? {})[0]
@@ -176,6 +177,7 @@ module.exports = class ApiService extends cds.ApplicationService {
     // --- AI agent -----------------------------------------------------------
 
     this.on('llmHealth', () => llm.health())
+    this.on('usage', (req) => usageSummary({ days: req.data.days, user: req.user }))
 
     this.on('chat', (req) => {
       const { sessionId, message, defaults, attachments } = req.data

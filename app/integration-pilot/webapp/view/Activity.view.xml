@@ -5,11 +5,72 @@
         <f:heading><Title text="Activity" level="H2" /></f:heading>
         <f:expandedContent><Text text="Every write — from the UI and from approved proposals — successful or not." /></f:expandedContent>
         <f:actions>
-          <Button text="Refresh" icon="sap-icon://refresh" press=".load" />
+          <Button text="Refresh" icon="sap-icon://refresh" press=".onRefresh" />
         </f:actions>
       </f:DynamicPageTitle>
     </f:title>
     <f:content>
+      <VBox renderType="Bare" class="ipGapM">
+      <!-- AI usage of chat requests (GET /api/usage) -->
+      <Panel headerText="AI usage" expandable="true" expanded="true" class="ipCard" busy="{view>/usageBusy}" busyIndicatorDelay="0">
+        <headerToolbar>
+          <Toolbar style="Clear">
+            <Title text="AI usage" level="H5" />
+            <ToolbarSpacer />
+            <SegmentedButton selectedKey="{view>/usageDays}" selectionChange=".loadUsage">
+              <items>
+                <SegmentedButtonItem key="7" text="7 days" />
+                <SegmentedButtonItem key="30" text="30 days" />
+                <SegmentedButtonItem key="90" text="90 days" />
+              </items>
+            </SegmentedButton>
+          </Toolbar>
+        </headerToolbar>
+        <HBox wrap="Wrap" class="ipGapM" renderType="Bare">
+          <VBox renderType="Bare"><Label text="Requests" /><Title text="{view>/usage/totals/requests}" level="H3" /><Text text="{= ${view>/usage/totals/failed} + ' failed' }" class="ipSubtle" /></VBox>
+          <VBox renderType="Bare"><Label text="Model calls" /><Title text="{view>/usage/totals/modelCalls}" level="H3" /></VBox>
+          <VBox renderType="Bare"><Label text="Input tokens" /><Title text="{path: 'view>/usage/totals/inputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
+          <VBox renderType="Bare"><Label text="Output tokens" /><Title text="{path: 'view>/usage/totals/outputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
+          <VBox renderType="Bare"><Label text="Tokens per request" /><Title text="{path: 'view>/usage/totals/avgTokensPerRequest', formatter: '.formatter.tokens'}" level="H3" /></VBox>
+        </HBox>
+        <HBox wrap="Wrap" class="ipGapM sapUiSmallMarginTop" renderType="Bare">
+          <Table items="{view>/usage/byDay}" width="32rem" noDataText="No chat requests in this period" headerText="Per day">
+            <columns>
+              <Column><Text text="Day" /></Column>
+              <Column hAlign="End"><Text text="Requests" /></Column>
+              <Column hAlign="End"><Text text="Model calls" /></Column>
+              <Column hAlign="End"><Text text="Tokens (in / out)" /></Column>
+            </columns>
+            <items>
+              <ColumnListItem>
+                <cells>
+                  <Text text="{view>day}" />
+                  <Text text="{view>requests}" />
+                  <Text text="{view>modelCalls}" />
+                  <Text text="{parts: ['view>inputTokens', 'view>outputTokens'], formatter: '.inOut'}" />
+                </cells>
+              </ColumnListItem>
+            </items>
+          </Table>
+          <Table items="{view>/usage/byModel}" width="28rem" noDataText="No model calls in this period" headerText="Per model">
+            <columns>
+              <Column><Text text="Model" /></Column>
+              <Column hAlign="End"><Text text="Requests" /></Column>
+              <Column hAlign="End"><Text text="Tokens (in / out)" /></Column>
+            </columns>
+            <items>
+              <ColumnListItem>
+                <cells>
+                  <Text text="{view>model}" class="ipMono" />
+                  <Text text="{view>requests}" />
+                  <Text text="{parts: ['view>inputTokens', 'view>outputTokens'], formatter: '.inOut'}" />
+                </cells>
+              </ColumnListItem>
+            </items>
+          </Table>
+        </HBox>
+      </Panel>
+
       <Table items="{view>/filtered}" busy="{view>/busy}" busyIndicatorDelay="0" growing="true" growingThreshold="50" class="ipCard" sticky="ColumnHeaders,HeaderToolbar">
         <headerToolbar>
           <OverflowToolbar>
@@ -51,6 +112,7 @@
           </ColumnListItem>
         </items>
       </Table>
+      </VBox>
     </f:content>
   </f:DynamicPage>
 </mvc:View>

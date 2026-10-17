@@ -5,8 +5,30 @@ sap.ui.define(
 
     return BaseController.extend('integration.pilot.controller.Activity', {
       onInit() {
-        this.setModel(new JSONModel({ entries: [], filtered: [], actions: [], action: '', status: '', search: '', busy: true }), 'view')
-        this.getRouter().getRoute('activity').attachPatternMatched(() => this.load())
+        this.setModel(
+          new JSONModel({ entries: [], filtered: [], actions: [], action: '', status: '', search: '', busy: true, usage: { totals: {}, byDay: [], byModel: [] }, usageDays: '30', usageBusy: false }),
+          'view'
+        )
+        this.getRouter()
+          .getRoute('activity')
+          .attachPatternMatched(() => this.onRefresh())
+      },
+
+      /** AI usage of chat requests for the selected period */
+      async loadUsage() {
+        const m = this.getModel('view')
+        m.setProperty('/usageBusy', true)
+        try {
+          m.setProperty('/usage', await api.get(`/usage(days=${Number(m.getProperty('/usageDays')) || 30})`))
+        } catch (e) {
+          // the audit log below still works without the usage summary
+        } finally {
+          m.setProperty('/usageBusy', false)
+        }
+      },
+
+      inOut(input, output) {
+        return `${this.formatter.tokens(input)} / ${this.formatter.tokens(output)}`
       },
 
       async load() {
@@ -23,6 +45,11 @@ sap.ui.define(
         } finally {
           m.setProperty('/busy', false)
         }
+      },
+
+      onRefresh() {
+        this.load()
+        this.loadUsage()
       },
 
       applyFilter() {

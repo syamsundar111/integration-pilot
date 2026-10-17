@@ -12,7 +12,12 @@
     <f:title>
       <f:DynamicPageTitle>
         <f:heading><Title text="Generate" level="H2" /></f:heading>
-        <f:expandedContent><Text text="Describe an integration; review and approve the proposed iFlow." /></f:expandedContent>
+        <f:expandedContent>
+          <VBox renderType="Bare">
+            <Text text="Describe an integration; review and approve the proposed iFlow." />
+            <Text text="{path: 'chat>/messages', formatter: '.sessionUsageText'}" class="ipSubtle sapUiTinyMarginTop" />
+          </VBox>
+        </f:expandedContent>
         <f:actions>
           <u:FileUploader
             buttonOnly="true"
@@ -79,6 +84,7 @@
                 />
                 <VBox renderType="Bare" class="ipBubble">
                   <FormattedText htmlText="{chat>html}" />
+                  <Text text="{chat>usageText}" visible="{= !!${chat>usageText} }" class="ipSubtle ipUsage sapUiTinyMarginTop" />
                 </VBox>
               </HBox>
             </VBox>

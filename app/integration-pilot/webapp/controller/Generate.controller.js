@@ -157,7 +157,9 @@ sap.ui.define(
             api.get(`/Proposals${api.q({ $filter: `session_ID eq ${sessionId}`, $orderby: 'createdAt desc' })}`),
             api.get(`/ChatTurns${api.q({ $filter: `session_ID eq ${sessionId} and status eq 'RUNNING'`, $top: 1 })}`)
           ])
-          const messages = msgs.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content).map((m) => this.toMessage(m.role, m.content))
+          const messages = msgs
+            .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content)
+            .map((m) => this.toMessage(m.role, m.content, m.usage ? JSON.parse(m.usage) : null))
           if (running[0]) {
             // the running turn's messages are stored when it finishes; show its question meanwhile
             messages.push(this.toMessage('user', running[0].message))
@@ -220,11 +222,13 @@ sap.ui.define(
 
       // --- messages ------------------------------------------------------------------------------
 
-      toMessage(role, content) {
-        if (role === 'user') return { kind: 'user', html: userHtml(content) }
-        if (content.startsWith('⚠️')) return { kind: 'error', html: userHtml(content.replace(/^⚠️\s*/, '')) }
-        if (content === 'Cancelled.') return { kind: 'muted', html: userHtml(content) }
-        return { kind: 'assistant', html: markdown.toHtml(content) }
+      /** @param {object} [usage] AI usage of the turn this answer ends (shown under it) */
+      toMessage(role, content, usage) {
+        const extra = { usage: usage || null, usageText: this.formatter.usageLine(usage) }
+        if (role === 'user') return { kind: 'user', html: userHtml(content), usage: null, usageText: '' }
+        if (content.startsWith('⚠️')) return { kind: 'error', html: userHtml(content.replace(/^⚠️\s*/, '')), ...extra }
+        if (content === 'Cancelled.') return { kind: 'muted', html: userHtml(content), ...extra }
+        return { kind: 'assistant', html: markdown.toHtml(content), ...extra }
       },
 
       addMessage(msg) {
@@ -331,6 +335,18 @@ sap.ui.define(
 
       defaultsPackageState(packageId) {
         return packageId && !PACKAGE_ID.test(packageId.trim()) ? 'Error' : 'None'
+      },
+
+      // --- AI usage ---------------------------------------------------------------------------------
+
+      /** Session total over the answers' usage: "This conversation: 3 requests · 90.0k tokens · 10 model calls" */
+      sessionUsageText(messages) {
+        const used = (messages || []).map((m) => m.usage).filter((u) => u && u.modelCalls)
+        if (!used.length) return ''
+        const sum = (k) => used.reduce((n, u) => n + (u[k] || 0), 0)
+        return `This conversation: ${used.length} request${used.length === 1 ? '' : 's'} · ${this.formatter.tokens(sum('totalTokens'))} tokens (${this.formatter.tokens(
+          sum('inputTokens')
+        )} in / ${this.formatter.tokens(sum('outputTokens'))} out) · ${sum('modelCalls')} model calls`
       },
 
       // --- attached files (.groovy, .xsl): the model sees their names, the builder uses their content ---
@@ -458,11 +474,12 @@ sap.ui.define(
       finishTurn(t) {
         this.stopTurnPolling()
         const c = this.chat()
-        if (t.status === 'DONE') this.addMessage(this.toMessage('assistant', t.text || ''))
-        else if (t.status === 'CANCELLED') this.addMessage(this.toMessage('assistant', 'Cancelled.'))
+        const usage = { modelCalls: t.modelCalls, inputTokens: t.inputTokens, outputTokens: t.outputTokens, totalTokens: t.totalTokens, durationMs: t.durationMs, model: t.model }
+        if (t.status === 'DONE') this.addMessage(this.toMessage('assistant', t.text || '', usage))
+        else if (t.status === 'CANCELLED') this.addMessage(this.toMessage('assistant', 'Cancelled.', usage))
         else {
           const err = t.error || { message: 'The assistant failed.' }
-          this.addMessage({ kind: 'error', html: userHtml(err.message + (err.hint ? `\n${err.hint}` : '')) })
+          this.addMessage({ kind: 'error', html: userHtml(err.message + (err.hint ? `\n${err.hint}` : '')), usage, usageText: this.formatter.usageLine(usage) })
           if (err.code === 'LLM_RATE_LIMITED') this.toast('AI rate limit reached — wait a minute before the next message.')
         }
         const created = t.proposals || []

@@ -847,3 +847,36 @@ describe('Groovy syntax check', () => {
     expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).errors).toEqual(['GROOVY_SYNTAX addLengthHeader.groovy:1:1: bad'])
   })
 })
+
+describe('token usage', () => {
+  const withUsage = (res, inputTokens, outputTokens, model = 'test/model') => ({ ...res, model, usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, durationMs: 10 } })
+
+  test('is summed per turn, stored on the turn and its answer, and summarized for the Activity page', async () => {
+    llm.chat
+      .mockResolvedValueOnce(withUsage(toolCall('listPackages', {}), 1000, 50))
+      .mockResolvedValueOnce(withUsage(answer('Two packages.'), 1200, 80, 'test/fallback'))
+    const turn = await chat({ message: 'Which packages are there?' })
+    expect(turn).toMatchObject({ status: 'DONE', modelCalls: 2, inputTokens: 2200, outputTokens: 130, totalTokens: 2330, model: 'test/model, test/fallback' })
+    expect(turn.durationMs).toBeGreaterThanOrEqual(0)
+
+    const { data: messages } = await GET(`/api/ChatSessions/${turn.sessionId}/messages?$orderby=seq`)
+    const answerMessage = messages.at(-1)
+    expect(answerMessage.role).toBe('assistant')
+    expect(JSON.parse(answerMessage.usage)).toMatchObject({ modelCalls: 2, inputTokens: 2200, outputTokens: 130, totalTokens: 2330 })
+    expect(messages.filter((m) => m.usage).length).toBe(1) // only the final answer
+
+    const { data: usage } = await GET('/api/usage(days=7)')
+    expect(usage.days).toBe(7)
+    expect(usage.totals.totalTokens).toBeGreaterThanOrEqual(2330)
+    expect(usage.byDay[0]).toMatchObject({ day: new Date().toISOString().slice(0, 10) })
+    expect(usage.byModel.map((m) => m.model)).toEqual(expect.arrayContaining(['test/model', 'test/fallback']))
+  })
+
+  test('a failed turn keeps the usage of the calls that answered', async () => {
+    llm.chat
+      .mockResolvedValueOnce(withUsage(toolCall('listPackages', {}), 500, 20))
+      .mockRejectedValueOnce(Object.assign(new Error('The AI model did not answer within 120s.'), { status: 504, code: 'LLM_TIMEOUT' }))
+    const turn = await chat({ message: 'x' })
+    expect(turn).toMatchObject({ status: 'FAILED', modelCalls: 1, totalTokens: 520 })
+  })
+})

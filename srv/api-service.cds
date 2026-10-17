@@ -315,6 +315,38 @@ service ApiService {
   /** POST /api/explain { iflowId } or { zipBase64 } — parsed summary + AI explanation */
   action explain(iflowId : String, zipBase64 : LargeString) returns Explanation;
 
+  // --- AI usage -------------------------------------------------------------
+
+  type UsageTotals {
+    requests            : Integer;
+    failed              : Integer;
+    modelCalls          : Integer;
+    inputTokens         : Integer;
+    outputTokens        : Integer;
+    totalTokens         : Integer;
+    durationMs          : Integer;
+    avgTokensPerRequest : Integer;
+  }
+
+  type UsageDay : UsageTotals {
+    day : String;
+  }
+
+  type UsageModel : UsageTotals {
+    model : String;
+  }
+
+  type UsageSummary {
+    days    : Integer;
+    since   : String;
+    totals  : UsageTotals;
+    byDay   : many UsageDay;
+    byModel : many UsageModel;
+  }
+
+  /** GET /api/usage(days=30) — AI usage of chat requests (tokens, model calls) for the Activity page */
+  function usage(days : Integer) returns UsageSummary;
+
   // --- History --------------------------------------------------------------
 
   /** GET /api/AuditLog?$orderby=createdAt desc&$top=50 */

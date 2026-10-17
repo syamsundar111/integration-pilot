@@ -30,6 +30,7 @@ entity ChatMessage : cuid, managed {
   role      : String(20) enum { system; user; assistant; tool };
   content   : LargeString;
   toolCalls : LargeString; // JSON: OpenAI-style tool_calls (assistant) or tool_call_id (tool)
+  usage     : LargeString; // JSON TurnUsage of the turn this final answer ends (assistant answers only)
 }
 
 /** One user message and the agent's (background) work on it; polled by the UI */
@@ -42,6 +43,13 @@ entity ChatTurn : cuid, managed {
   proposals       : LargeString; // JSON proposals created in this turn
   error           : LargeString; // JSON { code, message, hint }
   cancelRequested : Boolean default false;
+  // AI usage of the turn (model calls that answered; provider-neutral, see srv/lib/llm.js)
+  modelCalls      : Integer default 0;
+  inputTokens     : Integer default 0;
+  outputTokens    : Integer default 0;
+  totalTokens     : Integer default 0;
+  durationMs      : Integer; // the whole turn, start to end
+  model           : String(255); // model(s) that answered, comma-separated
 }
 
 type ProposalStatus : String(20) enum { PENDING; APPROVED; REJECTED; DONE; FAILED };

@@ -71,6 +71,29 @@ sap.ui.define(['sap/ui/core/format/DateFormat'], (DateFormat) => {
 
     initials(id) {
       return String(id || '?').slice(0, 2).toUpperCase()
+    },
+
+    /** 1234 -> "1.2k", 1234567 -> "1.23M" */
+    tokens(n) {
+      const v = Number(n) || 0
+      if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`
+      if (v >= 1e3) return `${(v / 1e3).toFixed(1)}k`
+      return String(v)
+    },
+
+    /** One line of AI usage: "3 model calls · 12.4k in / 1.1k out tokens · 48 s · model" */
+    usageLine(u) {
+      if (!u || !u.modelCalls) return ''
+      const secs = Math.round((u.durationMs || 0) / 1000)
+      const time = secs >= 60 ? `${Math.floor(secs / 60)} min ${secs % 60} s` : `${secs} s`
+      return [
+        `${u.modelCalls} model call${u.modelCalls === 1 ? '' : 's'}`,
+        `${this.tokens(u.inputTokens)} in / ${this.tokens(u.outputTokens)} out tokens`,
+        time,
+        u.model
+      ]
+        .filter(Boolean)
+        .join(' · ')
     }
   }
 })

@@ -144,7 +144,8 @@ async function saveMessages(user, sessionId, messages) {
           seq: ++seq,
           role: m.role,
           content: m.content ?? null,
-          toolCalls: m.tool_calls ? JSON.stringify(m.tool_calls) : m.tool_call_id ? JSON.stringify({ tool_call_id: m.tool_call_id }) : null
+          toolCalls: m.tool_calls ? JSON.stringify(m.tool_calls) : m.tool_call_id ? JSON.stringify({ tool_call_id: m.tool_call_id }) : null,
+          usage: m.usage ? JSON.stringify(m.usage) : null
         }))
       )
     )
@@ -269,12 +270,30 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
     if (t?.cancelRequested) throw fail(499, 'CANCELLED', 'Cancelled')
   }
 
+  // AI usage of this turn, summed over the model calls that answered
+  const started = Date.now()
+  const usage = { modelCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, models: new Set() }
+  const count = (res) => {
+    const u = res.usage || {}
+    usage.modelCalls++
+    usage.inputTokens += u.inputTokens || 0
+    usage.outputTokens += u.outputTokens || 0
+    usage.totalTokens += u.totalTokens || 0
+    if (res.model) usage.models.add(res.model)
+  }
+  /** Usage as stored on the turn and on its final answer */
+  const usageNow = () => {
+    const { models, ...counts } = usage
+    return { ...counts, durationMs: Date.now() - started, model: [...models].join(', ') || null }
+  }
+
   const turn = [{ role: 'user', content: message }]
   const finish = async (text, messages = turn) => {
-    await saveMessages(user, sessionId, [...messages, { role: 'assistant', content: text }])
+    const u = usageNow()
+    await saveMessages(user, sessionId, [...messages, { role: 'assistant', content: text, usage: u }])
     const proposals = await loadProposals(user, ctx.proposals)
     events.push(event('done', 'Answer ready'))
-    await update({ status: 'DONE', text, proposals: JSON.stringify(proposals) })
+    await update({ status: 'DONE', text, proposals: JSON.stringify(proposals), ...u })
   }
   try {
     const past = await loadHistory(user, sessionId)
@@ -285,6 +304,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
       await checkCancel()
       if (i > 0) await emit('thinking', 'Thinking…')
       const res = await llm.chat({ messages: [system, ...past, ...history.compactTurn(turn)], tools: tools.definitions, signal })
+      count(res)
       const { message: msg, finish_reason: finish } = res.choices[0]
       if (res.fallbackUsed) await emit('info', `Answered by fallback model ${res.model}`)
 
@@ -331,11 +351,13 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
       if (done) return
     }
     const note = wasCancelled ? 'Cancelled.' : `⚠️ ${e.message}`
+    const u = usageNow()
     // Keep the conversation readable and consistent: user message + a note, no partial tool exchange
-    await saveMessages(user, sessionId, [turn[0], { role: 'assistant', content: note }]).catch((err) => LOG.error('Could not save failed turn', err))
+    await saveMessages(user, sessionId, [turn[0], { role: 'assistant', content: note, usage: u }]).catch((err) => LOG.error('Could not save failed turn', err))
     const proposals = await loadProposals(user, ctx.proposals).catch(() => [])
     events.push(wasCancelled ? event('cancelled', 'Cancelled') : event('error', e.message))
     await update({
+      ...u,
       status: wasCancelled ? 'CANCELLED' : 'FAILED',
       proposals: JSON.stringify(proposals),
       error: wasCancelled ? null : JSON.stringify({ code: e.code || 'AGENT_ERROR', message: e.message, hint: e.hint })

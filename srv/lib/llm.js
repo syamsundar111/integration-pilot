@@ -118,6 +118,21 @@ function cleanMessage(message = {}) {
   return rest
 }
 
+// --- usage ---------------------------------------------------------------------------------
+
+/**
+ * Token usage in a provider-neutral shape. This is the only place that knows the provider's
+ * field names (OpenAI-style prompt_tokens / completion_tokens here); null when not reported.
+ * @returns {{ inputTokens: number|null, outputTokens: number|null, totalTokens: number|null, durationMs: number }}
+ */
+function normalizeUsage(raw = {}, durationMs) {
+  const num = (v) => (Number.isFinite(v) ? v : null)
+  const inputTokens = num(raw.prompt_tokens)
+  const outputTokens = num(raw.completion_tokens)
+  const totalTokens = num(raw.total_tokens) ?? (inputTokens != null && outputTokens != null ? inputTokens + outputTokens : null)
+  return { inputTokens, outputTokens, totalTokens, durationMs }
+}
+
 // --- transport -------------------------------------------------------------------------
 
 function send(body, signal) {
@@ -149,6 +164,7 @@ async function callModel(body, { retries = true, signal } = {}) {
       const data = res.data
       const u = data.usage || {}
       LOG.info(`${body.model}: ${Date.now() - started}ms, tokens prompt=${u.prompt_tokens ?? '?'} completion=${u.completion_tokens ?? '?'} total=${u.total_tokens ?? '?'}`)
+      data.usage = normalizeUsage(u, Date.now() - started)
       if (!Array.isArray(data.choices) || !data.choices.length) throw llmError(502, 'LLM_EMPTY', 'The AI model returned no answer.')
       const raw = data.choices[0].message?.content
       if (typeof raw === 'string' && GARBLED.test(raw)) throw Object.assign(new Error('garbled model output'), { garbled: true })
@@ -180,7 +196,8 @@ async function callModel(body, { retries = true, signal } = {}) {
  * all retries, the same request is sent once to LLM_FALLBACK_MODEL (if set).
  * @param {{ messages: object[], tools?: object[], toolChoice?: string|object, temperature?: number, maxTokens?: number, signal?: AbortSignal }} req
  * @returns {Promise<object>} response with choices[0].message cleaned (no reasoning);
- *   `model` is the model that answered, `fallbackUsed` tells whether it was the fallback
+ *   `model` is the model that answered, `fallbackUsed` tells whether it was the fallback,
+ *   `usage` = { inputTokens, outputTokens, totalTokens, durationMs } (provider-neutral)
  */
 async function chat({ messages, tools, toolChoice, temperature = 0.3, maxTokens, signal } = {}) {
   if (!model()) throw llmError(500, 'LLM_NOT_CONFIGURED', 'LLM_MODEL is not set.', 'Set LLM_MODEL (e.g. in .env for local runs, or as an app environment variable).')
@@ -215,4 +232,4 @@ async function health() {
   }
 }
 
-module.exports = { chat, health, stripThinking, cleanMessage, RATE_LIMIT_MESSAGE }
+module.exports = { chat, health, stripThinking, cleanMessage, normalizeUsage, RATE_LIMIT_MESSAGE }
