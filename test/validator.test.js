@@ -141,4 +141,11 @@ describe('validator', () => {
     const { files } = await build(baseSpec({ steps: steps(50) }))
     expect(files.find((f) => f.path.endsWith('.iflw')).content.match(/<bpmn2:callActivity /g)).toHaveLength(50)
   })
+
+  test('{{…}} in a step description is documentation, not a parameter', () => {
+    const spec = baseSpec({ steps: [{ type: 'contentModifier', name: 'Note', description: 'Manual: schedule {{Scheduler}} every 2 minutes' }] })
+    expect(validate(spec).errors).toEqual([])
+    const inValue = baseSpec({ steps: [{ type: 'contentModifier', name: 'Note', headers: [{ name: 'X', type: 'constant', value: '{{Scheduler}}' }] }] })
+    expect(validate(inValue).issues.map((i) => i.code)).toEqual(['PARAM_NOT_URL'])
+  })
 })

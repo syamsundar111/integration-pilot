@@ -279,7 +279,8 @@ sap.ui.define(
             contentWidth: '32rem',
             content: new VBox({
               renderType: 'Bare',
-              items: warnings.map((w) => new MessageStrip({ text: w.message, type: 'Warning', showIcon: true }))
+              // setText, not the constructor: '{{Scheduler}}' in a constructor string is parsed as a data binding
+              items: warnings.map((w) => new MessageStrip({ type: 'Warning', showIcon: true }).setText(w.message))
             }).addStyleClass('ipGapS'),
             beginButton: new Button({ text: 'Send anyway', type: 'Emphasized', press: () => close(true) }),
             endButton: new Button({ text: 'Edit', press: () => close(false) }),

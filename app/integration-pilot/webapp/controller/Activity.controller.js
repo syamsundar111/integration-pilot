@@ -93,7 +93,7 @@ sap.ui.define(
         const dialog = new Dialog({
           title: `${this.formatter.humanize(a.action)} · ${a.targetId}`,
           contentWidth: '36rem',
-          content: [new Text({ text: pretty, renderWhitespace: true }).addStyleClass('ipPre')],
+          content: [new Text({ renderWhitespace: true }).setText(pretty).addStyleClass('ipPre')], // JSON: setText, no binding parsing
           endButton: new Button({ text: this.text('close'), press: () => dialog.close() }),
           afterClose: () => dialog.destroy()
         }).addStyleClass('sapUiContentPadding')

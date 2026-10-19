@@ -83,8 +83,9 @@ sap.ui.define(
               }
             }
           })
-          const content = [new Text({ text: message })]
-          if (warning) content.push(new MessageStrip({ type: 'Warning', text: warning, showIcon: true }))
+          // setText: a constructor string with { } would be parsed as a data binding
+          const content = [new Text().setText(message)]
+          if (warning) content.push(new MessageStrip({ type: 'Warning', showIcon: true }).setText(warning))
           content.push(new Label({ text: `Type "${confirmText}" to confirm`, labelFor: input }), input, error)
           const dialog = new Dialog({
             title,

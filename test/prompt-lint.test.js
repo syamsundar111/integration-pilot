@@ -58,4 +58,19 @@ describe('prompt linter', () => {
     expect(lint('Which iFlows are in error right now, and why?')).toEqual([])
     expect(lint('Explain the mapping in iFlow Pilot_Test_1.')).toEqual([])
   })
+
+  test('placeholder descriptions spanning lines and {{…}} inside quotes are not flagged', () => {
+    const request = [
+      'Create an iFlow on a timer, run once (description: "Manual: schedule {{Scheduler}}, every 2 minutes"), package P, all receivers no authentication.',
+      '1. contentModifier "CM_Set". Properties (constant): A = x.',
+      '2. PH "PH_Router3": "REPLACE WITH Router \'Router 3\': Route 1 continues;',
+      '   Route 2 (default) -> Write Variables WV_LastRunTime -> End 6."',
+      '3. PH "PH_Split": "REPLACE WITH General Splitter \'GSPL\': XPath /root/result,',
+      '   parallel off, then a Message Mapping and a Process Call."',
+      '4. requestReplyHttp "RR", GET, url {{Target_URL}}, default https://example.org/x'
+    ].join('\n')
+    expect(lint(request)).toEqual([])
+    // outside quotes they are still found
+    expect(keys(lint(`${request}\n5. Add a router after step 4. Set header X = {{Other}}.`))).toEqual(['unsupported', 'params'])
+  })
 })

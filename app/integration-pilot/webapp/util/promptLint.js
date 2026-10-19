@@ -48,7 +48,8 @@ sap.ui.define([], () => {
   const CALLS_RECEIVER = /https?:\/\/|\{\{|\breceivers?\b|\brequest[- ]reply\b|\b(post|put|patch|send)s?\b[^.\n]{0,60}\b(to|url|endpoint|api)\b/i
   const AUTH = /\b(auth\w*|oauth\w*|basic|credentials?|certificates?|api[- ]?keys?|saml|bearer|no auth)\b/i
 
-  const stripQuoted = (text) => text.replace(/`[^`\n]*`/g, ' ').replace(/"[^"\n]*"/g, ' ').replace(/'[^'\n]*'/g, ' ')
+  // Quoted text is data or a description, not a step: "REPLACE WITH Router ..." may span lines (up to 600 characters)
+  const stripQuoted = (text) => text.replace(/`[^`]{0,600}`/g, ' ').replace(/"[^"]{0,600}"/g, ' ').replace(/'[^'\n]*'/g, ' ')
 
   /** Rough main-flow step count: numbered list items, minus start/end events */
   function estimateSteps(text) {
@@ -94,7 +95,7 @@ sap.ui.define([], () => {
     const steps = estimateSteps(message)
     if (steps > MAX_STEPS) warn('steps', `About ${steps} steps — v1 allows at most ${MAX_STEPS} in the main flow. Merge Content Modifiers or move logic into one Groovy script.`)
 
-    const outside = message
+    const outside = stripQuoted(message)
       .split('\n')
       .filter((l) => /\{\{[^}]*\}\}/.test(l) && !/\burls?\b|https?:\/\//i.test(l))
       .flatMap((l) => l.match(/\{\{[^}]*\}\}/g))

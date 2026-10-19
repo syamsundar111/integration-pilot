@@ -270,8 +270,8 @@ function validate(spec, { attachments = [] } = {}) {
   walkStrings({ trigger: spec.trigger, steps, end: spec.end, exceptionSubprocess: spec.exceptionSubprocess }, '', (value, path) => {
     const refs = [...value.matchAll(PARAM_REF)]
     if (!refs.length) return
-    // Groovy code and body may legitimately contain {{ }} text
-    if (/\.(code|body)$/.test(path)) return
+    // Groovy code, body and descriptions (documentation, not configuration) may contain {{ }} text
+    if (/\.(code|body|description)$/.test(path)) return
     if (!PARAM_FIELDS.test(path)) {
       err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as an HTTP receiver url in v1`)
       return
