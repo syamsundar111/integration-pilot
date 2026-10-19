@@ -35,13 +35,19 @@ if (!LOG) {
 }
 
 const DIR = path.join(__dirname, 'measure')
+const FOLLOW_UP = 'Use sensible defaults for anything still open and propose the iFlow now.'
 // A unique iFlow id per run, so the proposal never clashes with an existing iFlow
 const suffix = `M${Date.now().toString(36)}`
-const unique = (text) => text.replace(/Employee_Data_Replication_V1/g, `Employee_Data_Replication_${suffix}`).replace(/Employee Data Replication_V1/g, `Employee Data Replication_${suffix}`)
+const unique = (text) =>
+  text
+    .replace(/Employee_Data_Replication_V1/g, `Employee_Data_Replication_${suffix}`)
+    .replace(/Employee Data Replication_V1/g, `Employee Data Replication_${suffix}`)
+    .replace(/RUNID/g, suffix) // generic requests mark the id with RUNID
 const REQUEST = unique(fs.readFileSync(opt('request', path.join(DIR, 'sf-entra-request.md')), 'utf8'))
 const ATTACH = (opt('attach', '') || '').split(',').filter(Boolean).map((f) => ({ fileName: path.basename(f), content: fs.readFileSync(f, 'utf8') }))
-const ANSWERS = fs.readFileSync(path.join(DIR, 'sf-entra-answers.md'), 'utf8')
-const FOLLOW_UP = 'Use sensible defaults for anything still open and propose the iFlow now.'
+// answers to clarifying questions: the SF -> Directory answers for the default request, else the generic follow-up
+const ANSWERS = opt('request') ? FOLLOW_UP : fs.readFileSync(path.join(DIR, 'sf-entra-answers.md'), 'utf8')
+
 const DEFAULTS = {
   packageId: 'DEV.SF.SourceApp.EC.to.Microsoft.Directory.ID',
   timer: 'once',
