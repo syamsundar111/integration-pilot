@@ -85,7 +85,11 @@ Locally every request runs as `local-dev` with the `Admin` role (`srv/lib/dev-au
 sidecar in `groovy-check/` (Groovy 4 parser, CONVERSION phase only: no SAP classpath, nothing is
 executed, `@Grab` is off) and returns errors as `GROOVY_SYNTAX file:line:column: message`. Run it next
 to the app with `npm run groovy-check` (port 4010) and set `GROOVY_CHECK_URL=http://localhost:4010`
-in `.env`. Without it, scripts are proposed with a "not checked" warning; `GROOVY_CHECK_REQUIRED=true`
+in `.env` (a `GROOVY_CHECK_URL` exported in the shell or by the editor wins over `.env`; failed checks
+log the URL used, the network cause and the sidecar's `/health` at that moment). Without it, scripts
+are proposed with a "not checked" warning shown in the proposal panel; approving checks them again —
+a syntax error blocks approval, and an unreachable check must be confirmed explicitly (audit log).
+`GROOVY_CHECK_TIMEOUT_MS` (default 15000) is the timeout per check. `GROOVY_CHECK_REQUIRED=true`
 blocks proposals instead (set in the MTA files, where the sidecar is the module
 `integration-pilot-groovy-check` with a generated shared token).
 

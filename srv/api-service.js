@@ -228,19 +228,24 @@ module.exports = class ApiService extends cds.ApplicationService {
         ...('spec' in p && { spec: parseJson(p.spec) }),
         ...('result' in p && { result: parseJson(p.result) }),
         ...('attachments' in p && { attachments: parseJson(p.attachments) }),
-        ...('backup' in p && { backup: parseJson(p.backup) })
+        ...('backup' in p && { backup: parseJson(p.backup) }),
+        ...('scriptChecks' in p && { scriptChecks: parseJson(p.scriptChecks) })
       }
     this.on('READ', 'Proposals', async (req, next) => {
       const result = await next()
       return Array.isArray(result) ? result.map(parseProposal) : parseProposal(result)
     })
 
-    this.on('approve', 'Proposals', async (req) => parseProposal(await proposals.approve(keyOf(req), { deploy: !!req.data.deploy }, req.user)))
+    this.on('approve', 'Proposals', async (req) =>
+      parseProposal(await proposals.approve(keyOf(req), { deploy: !!req.data.deploy, acceptUnchecked: !!req.data.acceptUnchecked }, req.user))
+    )
     this.on('reject', 'Proposals', async (req) => parseProposal(await proposals.reject(keyOf(req), { reason: req.data.reason }, req.user)))
     this.on('setPackage', 'Proposals', async (req) =>
       parseProposal(await proposals.setPackage(keyOf(req), { packageId: req.data.packageId, packageName: req.data.packageName }, req.user))
     )
-    this.on('retry', 'Proposals', async (req) => parseProposal(await proposals.retry(keyOf(req), { deploy: req.data.deploy ?? undefined }, req.user)))
+    this.on('retry', 'Proposals', async (req) =>
+      parseProposal(await proposals.retry(keyOf(req), { deploy: req.data.deploy ?? undefined, acceptUnchecked: !!req.data.acceptUnchecked }, req.user))
+    )
 
     return super.init()
   }

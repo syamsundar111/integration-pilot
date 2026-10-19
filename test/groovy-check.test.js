@@ -20,21 +20,57 @@ const withEnv = async (vars, fn) => {
 
 describe('groovy-check client', () => {
   let server, url, lastRequest
+  let mode = 'ok' // ok | slow | intermittent
+  let checks = 0
   beforeAll(async () => {
     server = http.createServer((req, res) => {
+      if (req.url === '/health') return res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"status":"UP","uptimeMs":5000,"checksRunning":0,"checksTotal":3}')
       let body = ''
       req.on('data', (c) => (body += c))
       req.on('end', () => {
+        checks++
+        if (mode === 'intermittent' && checks % 2 === 1) return req.socket.destroy() // every other connection drops
         lastRequest = { headers: req.headers, body: JSON.parse(body) }
         if (req.headers['x-check-token'] !== 'secret') return res.writeHead(401).end('{"error":"missing or wrong x-check-token"}')
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ results: lastRequest.body.scripts.map((s) => ({ fileName: s.fileName, errors: s.code.includes('oops') ? [{ line: 2, column: 3, message: 'Unexpected input' }] : [] })) }))
+        const answer = () => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ results: lastRequest.body.scripts.map((s) => ({ fileName: s.fileName, errors: s.code.includes('oops') ? [{ line: 2, column: 3, message: 'Unexpected input' }] : [] })) }))
+        }
+        if (mode === 'slow') setTimeout(answer, 500)
+        else answer()
       })
     })
     await new Promise((r) => server.listen(0, r))
     url = `http://localhost:${server.address().port}`
   })
   afterAll(() => server.close())
+  afterEach(() => {
+    mode = 'ok'
+    checks = 0
+  })
+
+  test('sidecar down: not checked, with the URL and the network cause', async () => {
+    const down = http.createServer()
+    await new Promise((r) => down.listen(0, r))
+    const port = down.address().port
+    await new Promise((r) => down.close(r)) // nothing listens on this port any more
+    const result = await withEnv({ GROOVY_CHECK_URL: `http://localhost:${port}` }, () => checkScripts([{ fileName: 'a.groovy', code: 'x' }]))
+    expect(result).toEqual({ checked: false, errors: [], reason: `fetch failed (ECONNREFUSED) at http://localhost:${port}` })
+  })
+
+  test('sidecar slow: not checked after GROOVY_CHECK_TIMEOUT_MS, no retry', async () => {
+    mode = 'slow'
+    const result = await withEnv({ GROOVY_CHECK_URL: url, GROOVY_CHECK_TOKEN: 'secret', GROOVY_CHECK_TIMEOUT_MS: '100' }, () => checkScripts([{ fileName: 'a.groovy', code: 'x' }]))
+    expect(result).toMatchObject({ checked: false, reason: expect.stringMatching(/timeout|aborted/i) })
+    expect(checks).toBe(1)
+  })
+
+  test('sidecar failing intermittently: the retry gets the result', async () => {
+    mode = 'intermittent'
+    const result = await withEnv({ GROOVY_CHECK_URL: url, GROOVY_CHECK_TOKEN: 'secret' }, () => checkScripts([{ fileName: 'b.groovy', code: 'x\noops' }]))
+    expect(result).toEqual({ checked: true, errors: [{ fileName: 'b.groovy', line: 2, column: 3, message: 'Unexpected input' }] })
+    expect(checks).toBe(2)
+  })
 
   test('a dropped connection is retried once', async () => {
     const realFetch = global.fetch
@@ -63,7 +99,7 @@ describe('groovy-check client', () => {
       expect(await checkScripts([{ fileName: 'a.groovy', code: 'x' }])).toMatchObject({ checked: false, reason: expect.stringMatching(/HTTP 401/) })
     )
     await withEnv({ GROOVY_CHECK_URL: 'http://localhost:1' }, async () =>
-      expect(await checkScripts([{ fileName: 'a.groovy', code: 'x' }])).toMatchObject({ checked: false, reason: expect.stringMatching(/^fetch failed \(.+\)$/) }) // the network cause is named
+      expect(await checkScripts([{ fileName: 'a.groovy', code: 'x' }])).toMatchObject({ checked: false, reason: expect.stringMatching(/^fetch failed \(.+\) at http:\/\/localhost:1$/) }) // cause and URL
     )
     expect(await checkScripts([])).toEqual({ checked: true, errors: [] })
     await withEnv({ GROOVY_CHECK_REQUIRED: 'true' }, () => expect(required()).toBe(true))

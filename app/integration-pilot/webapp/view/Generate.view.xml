@@ -227,6 +227,7 @@
 
               <VBox class="ipPanelBody ipGapM" renderType="Bare">
                 <MessageStrip text="Validated against spec v1 — nothing is created until you approve." type="Success" showIcon="true" visible="{chat>/active/pending}" />
+                <MessageStrip text="{chat>/active/groovyText}" type="{chat>/active/groovyState}" showIcon="true" visible="{= !!${chat>/active/groovyText} }" class="ipGroovyStrip" />
 
                 <!-- target package (pending iFlow proposals) -->
                 <VBox class="ipPackageBox" visible="{chat>/active/showPackage}" renderType="Bare">

@@ -139,24 +139,21 @@ function compactInvalid(issues, instruction) {
 
 /**
  * Groovy syntax check of every script the spec builds (written in the spec or attached):
- * { issues } on syntax errors, { warning } when the checker is unavailable and not required
+ * { issues } on syntax errors, { warning } when the checker is unavailable and not required, and
+ * the status per file (stored with the proposal, shown in the proposal panel)
  */
 async function groovySyntax(spec, attachments) {
-  const own = new Set([...spec.steps, ...(spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript' && s.code != null).map((s) => s.fileName))
-  const filled = injectAttachments(spec, attachments)
-  const scripts = [...filled.steps, ...(filled.exceptionSubprocess?.steps || [])]
-    .filter((s) => s.type === 'groovyScript' && typeof s.code === 'string')
-    .map((s) => ({ fileName: `${s.fileName}.groovy`, code: s.code, attached: !own.has(s.fileName) }))
-  const { checked, errors, reason } = await groovyCheck.checkScripts(scripts.map(({ fileName, code }) => ({ fileName, code })))
+  const own = new Set([...spec.steps, ...(spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript' && s.code != null).map((s) => `${s.fileName}.groovy`))
+  const { checked, failed, reason, files } = await groovyCheck.checkSpecScripts(spec, attachments)
   if (!checked)
     return groovyCheck.required()
-      ? { issues: [{ code: 'GROOVY_NOT_CHECKED', message: `scripts: the Groovy syntax check is unavailable (${reason}); try again later` }] }
-      : { issues: [], warning: `Groovy syntax not checked: ${reason}` }
-  const attached = new Set(scripts.filter((s) => s.attached).map((s) => s.fileName))
+      ? { files, issues: [{ code: 'GROOVY_NOT_CHECKED', message: `scripts: the Groovy syntax check is unavailable (${reason}); try again later` }] }
+      : { files, issues: [], warning: `Groovy syntax not checked: ${reason}` }
   return {
-    issues: errors.map((e) => ({
+    files,
+    issues: failed.map((e) => ({
       code: 'GROOVY_SYNTAX',
-      message: `${e.fileName}:${e.line}:${e.column}: ${e.message}${attached.has(e.fileName) ? ' (attached file: tell the user to fix it and attach it again)' : ''}`
+      message: `${e.fileName}:${e.line}:${e.column}: ${e.message}${own.has(e.fileName) ? '' : ' (attached file: tell the user to fix it and attach it again)'}`
     }))
   }
 }
@@ -266,7 +263,7 @@ async function saveDraft(ctx, spec, { source, valid = false }) {
 }
 
 /** Stores a PENDING proposal in its own transaction, so it survives a failing chat turn */
-async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, operation = 'CREATE', attachments = {} }) {
+async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, operation = 'CREATE', attachments = {}, scriptChecks = null }) {
   const ID = cds.utils.uuid()
   // the attached files the spec uses, as they are now: approval and retry build from this snapshot
   const used = Object.fromEntries(attachmentStore.referencedBy(spec).map((f) => [f, attachments[f]]))
@@ -281,7 +278,8 @@ async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null
         status: 'PENDING',
         iflowId,
         packageId,
-        attachments: Object.keys(used).length ? JSON.stringify(used) : null
+        attachments: Object.keys(used).length ? JSON.stringify(used) : null,
+        scriptChecks: scriptChecks && Object.keys(scriptChecks).length ? JSON.stringify(scriptChecks) : null
       })
     )
   )
@@ -552,7 +550,7 @@ const handlers = {
     const { summary } = await build(spec, { attachments }) // proves the spec builds into a zip
     const groovy = await groovySyntax(spec, attachments)
     if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts with writeScript and propose again.')
-    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, attachments })
+    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, attachments, scriptChecks: groovy.files })
     return {
       valid: true,
       proposalId,
@@ -614,7 +612,7 @@ const handlers = {
     const { summary } = await build(spec, { attachments })
     const groovy = await groovySyntax(spec, attachments)
     if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts with writeScript and propose again.')
-    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments })
+    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments, scriptChecks: groovy.files })
     return {
       valid: true,
       proposalId,

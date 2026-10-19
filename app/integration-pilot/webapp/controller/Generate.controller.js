@@ -631,6 +631,8 @@ sap.ui.define(
           params: [],
           scripts: [],
           resourcesText: '',
+          groovyText: '',
+          groovyState: 'None',
           hasHttpReceiver: false
         }
 
@@ -675,6 +677,17 @@ sap.ui.define(
               fileName: `${s.fileName}.groovy${s.code == null ? ' (attached file)' : ''}`,
               code: s.code != null ? s.code : attached[`${s.fileName}.groovy`] || ''
             }))
+          // Groovy check: a prominent strip when a script failed or could not be checked
+          const checks = Object.values(p.scriptChecks || {})
+          const failed = checks.filter((c) => c.status === 'failed').length
+          const unchecked = checks.filter((c) => c.status === 'unchecked')
+          if (failed) {
+            active.groovyText = `${failed} Groovy script(s) have syntax errors — see Generated Groovy below. Ask the assistant to fix them; approval is blocked until then.`
+            active.groovyState = 'Error'
+          } else if (unchecked.length) {
+            active.groovyText = `${unchecked.length} Groovy script(s) were not syntax-checked (${unchecked[0].reason || 'check unavailable'}). They are checked again when you approve; if the check is still unreachable you must confirm creating the iFlow without it.`
+            active.groovyState = 'Warning'
+          }
           active.resourcesText = (spec.resources || []).length
             ? `XSLT files added as src/main/resources/mapping/: ${spec.resources.join(', ')}. v1 has no XSLT step — add an XSLT Mapping step for them in the CPI web editor.`
             : ''
@@ -762,12 +775,36 @@ sap.ui.define(
           action: deploy ? 'Approve, create & deploy' : 'Approve & create'
         })
         if (!ok) return
+        await this.runChecked(p, 'approve', { deploy }, deploy ? 'Approved — creating and deploying…' : 'Approved — creating…', 'Approval failed')
+      },
+
+      /**
+       * Approve or retry. The server checks the Groovy scripts again: a syntax error blocks (shown in
+       * the panel); an unreachable check needs an explicit "approve without the check".
+       */
+      async runChecked(p, action, body, okText, failTitle) {
+        const post = (extra) => api.post(`/Proposals/${api.seg(p.ID)}/${action}`, { ...body, ...extra })
         try {
-          this.updateProposal(await api.post(`/Proposals/${api.seg(p.ID)}/approve`, { deploy }))
-          this.toast(deploy ? 'Approved — creating and deploying…' : 'Approved — creating…')
+          let res
+          try {
+            res = await post({})
+          } catch (e) {
+            if (e.code !== 'GROOVY_NOT_CHECKED') throw e
+            const accept = await this.confirm({
+              title: 'Groovy scripts not checked',
+              message: `${e.message}\n\nThe scripts may contain syntax errors that only show up when the iFlow runs. Create the iFlow anyway? This is recorded in the audit log.`,
+              action: 'Approve without the check',
+              danger: true
+            })
+            if (!accept) return this.fetchProposal(p.ID)
+            res = await post({ acceptUnchecked: true })
+          }
+          this.updateProposal(res)
+          if (okText) this.toast(okText)
           this.startProposalPolling(p.ID)
         } catch (e) {
-          this.showError(e, 'Approval failed')
+          this.showError(e, failTitle)
+          this.fetchProposal(p.ID) // shows the scripts' check status found at approval
         }
       },
 
@@ -783,12 +820,7 @@ sap.ui.define(
         const p = this.currentProposal()
         const ok = await this.confirm({ title: 'Retry execution?', message: 'All steps run again. An iFlow already created by the earlier attempt is updated, not duplicated.', action: 'Retry' })
         if (!ok) return
-        try {
-          this.updateProposal(await api.post(`/Proposals/${api.seg(p.ID)}/retry`, {}))
-          this.startProposalPolling(p.ID)
-        } catch (e) {
-          this.showError(e, 'Retry failed')
-        }
+        await this.runChecked(p, 'retry', {}, null, 'Retry failed')
       },
 
       onRequestChanges() {

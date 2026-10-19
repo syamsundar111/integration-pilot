@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -25,7 +26,7 @@ import groovy.json.JsonSlurper;
 /**
  * HTTP API of the Groovy syntax check:
  *
- * GET  /health -> {"status":"UP"}
+ * GET  /health -> {"status":"UP","uptimeMs":…,"checksRunning":…,"checksTotal":…} (no token needed)
  * POST /check  {"scripts":[{"fileName":"mapUsers.groovy","code":"..."}]}
  *           -> {"results":[{"fileName":"mapUsers.groovy","errors":[{"line":3,"column":5,"message":"..."}]}]}
  *
@@ -40,6 +41,9 @@ public final class Server {
     static final long TIMEOUT_SECONDS = 10;
 
     private static final ExecutorService WORKERS = Executors.newFixedThreadPool(2);
+    private static final long STARTED = System.currentTimeMillis();
+    private static final AtomicInteger RUNNING = new AtomicInteger();
+    private static final AtomicInteger TOTAL = new AtomicInteger();
 
     private Server() {
     }
@@ -47,7 +51,9 @@ public final class Server {
     public static void main(String[] args) throws IOException {
         int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "4010"));
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/health", (ex) -> send(ex, 200, Map.of("status", "UP")));
+        // health with the load at this moment, so a client can log it next to a failed check
+        server.createContext("/health", (ex) -> send(ex, 200,
+                Map.of("status", "UP", "uptimeMs", System.currentTimeMillis() - STARTED, "checksRunning", RUNNING.get(), "checksTotal", TOTAL.get())));
         server.createContext("/check", Server::check);
         server.setExecutor(Executors.newFixedThreadPool(4));
         server.start();
@@ -55,6 +61,8 @@ public final class Server {
     }
 
     static void check(HttpExchange ex) throws IOException {
+        RUNNING.incrementAndGet();
+        TOTAL.incrementAndGet();
         try {
             if (!"POST".equals(ex.getRequestMethod())) {
                 send(ex, 405, Map.of("error", "use POST"));
@@ -93,6 +101,8 @@ public final class Server {
             send(ex, 200, Map.of("results", results));
         } catch (Exception e) {
             send(ex, 400, Map.of("error", String.valueOf(e.getMessage())));
+        } finally {
+            RUNNING.decrementAndGet();
         }
     }
 

@@ -12,6 +12,7 @@ const cds = require('@sap/cds')
 const cpi = require('./cpi-client')
 const { audit, audited } = require('./audit')
 const { build } = require('../iflow-builder/builder')
+const groovyCheck = require('./groovy-check')
 
 const LOG = cds.log('proposals')
 const POLL_INTERVAL_MS = Number(process.env.DEPLOY_POLL_INTERVAL_MS || 5_000)
@@ -32,6 +33,7 @@ function plan(kind, deploy, operation) {
     kind === 'PACKAGE'
       ? [{ key: 'package', label: 'Create package' }]
       : [
+          { key: 'check', label: 'Check Groovy scripts' },
           { key: 'package', label: 'Ensure package exists' },
           ...(operation === 'UPDATE' ? [{ key: 'backup', label: 'Back up current iFlow' }] : []),
           { key: 'build', label: 'Build iFlow' },
@@ -57,24 +59,65 @@ async function claimAndRun(id, fromStatus, action, makeResult, user) {
     if (!claimed) throw fail(409, `PROPOSAL_NOT_${fromStatus}`, `Proposal is ${p.status}; only ${fromStatus} proposals can be ${action === 'RETRY_PROPOSAL' ? 'retried' : 'approved'}.`)
     return { p, r }
   })
-  await audit({ user }, { action, targetType: 'Proposal', targetId: id, status: 'SUCCESS', details: { kind: p.kind, deploy: r.deploy, attempt: r.attempt } })
+  await audit({ user }, { action, targetType: 'Proposal', targetId: id, status: 'SUCCESS', details: { kind: p.kind, deploy: r.deploy, attempt: r.attempt, ...(r.acceptedUnchecked && { acceptedUncheckedGroovy: true }) } })
 
   execute(p, r, user).catch((e) => LOG.error(`Proposal ${id} execution crashed`, e))
   return db(user, (tx) => tx.run(SELECT.one.from(Proposal, id)))
 }
 
 /**
+ * Checks the Groovy scripts of an iFlow proposal again before it is executed and stores the status
+ * per file. A syntax error blocks; an unreachable checker blocks unless the approver accepted that
+ * (acceptUnchecked). Returns the result of the 'check' execution step.
+ */
+async function recheckScripts(id, fromStatus, acceptUnchecked, user) {
+  const Proposal = entity()
+  const p = await db(user, (tx) => tx.run(SELECT.one.from(Proposal, id).columns('ID', 'kind', 'status', 'spec', 'attachments')))
+  if (!p) throw fail(404, 'PROPOSAL_NOT_FOUND', `Proposal ${id} not found`)
+  if (p.kind !== 'IFLOW' || p.status !== fromStatus) return null // the claim reports a wrong status
+  const r = await groovyCheck.checkSpecScripts(JSON.parse(p.spec), parse(p.attachments))
+  if (!r.scripts) return { status: 'skipped', detail: 'No Groovy scripts' }
+  await db(user, (tx) => tx.run(UPDATE(Proposal, id).set({ scriptChecks: JSON.stringify(r.files) })))
+  if (r.failed.length) {
+    const list = r.failed.map((e) => `${e.fileName}:${e.line}:${e.column}: ${e.message}`).join('; ')
+    throw Object.assign(fail(409, 'GROOVY_SYNTAX', `Approval blocked: ${r.failed.length} Groovy syntax error(s): ${list}`), {
+      hint: 'Ask the assistant to fix the script, or fix the attached file and attach it again.'
+    })
+  }
+  if (!r.checked) {
+    if (!acceptUnchecked)
+      throw Object.assign(fail(409, 'GROOVY_NOT_CHECKED', `${r.scripts} Groovy script(s) could not be checked: ${r.reason}.`), {
+        hint: 'Approve again and accept that the scripts are not checked, or try again when the Groovy check is reachable.'
+      })
+    return { status: 'warning', detail: `Not checked (${r.reason}); approved without the check` }
+  }
+  return { status: 'done', detail: `${r.scripts} script(s) checked, no syntax errors` }
+}
+
+/** The plan with the result of the approval-time Groovy check filled in */
+const withCheck = (steps, check) => steps.map((s) => (s.key === 'check' ? (check ? { ...s, ...check, finishedAt: new Date().toISOString() } : { ...s, status: 'skipped', detail: 'No Groovy scripts' }) : s))
+
+/**
  * @param {string} id
- * @param {{ deploy?: boolean }} options
+ * @param {{ deploy?: boolean, acceptUnchecked?: boolean }} options - acceptUnchecked: approve although
+ *   the Groovy check is unreachable (recorded in the audit log)
  * @param {{ id: string }} user - cds.User of the approver
  * @returns the proposal after claiming it (execution continues in the background)
  */
-function approve(id, { deploy = false } = {}, user) {
-  return claimAndRun(id, 'PENDING', 'APPROVE_PROPOSAL', (p) => ({ deploy: !!deploy, approvedBy: user?.id, attempt: 1, steps: plan(p.kind, deploy, p.operation) }), user)
+async function approve(id, { deploy = false, acceptUnchecked = false } = {}, user) {
+  const check = await recheckScripts(id, 'PENDING', acceptUnchecked, user)
+  return claimAndRun(
+    id,
+    'PENDING',
+    'APPROVE_PROPOSAL',
+    (p) => ({ deploy: !!deploy, approvedBy: user?.id, attempt: 1, ...(check?.status === 'warning' && { acceptedUnchecked: true }), steps: withCheck(plan(p.kind, deploy, p.operation), check) }),
+    user
+  )
 }
 
 /** Re-runs a FAILED proposal; `deploy` defaults to the choice of the previous attempt */
-function retry(id, { deploy } = {}, user) {
+async function retry(id, { deploy, acceptUnchecked = false } = {}, user) {
+  const check = await recheckScripts(id, 'FAILED', acceptUnchecked, user)
   return claimAndRun(
     id,
     'FAILED',
@@ -82,7 +125,15 @@ function retry(id, { deploy } = {}, user) {
     (p) => {
       const prev = parse(p.result)
       const d = deploy ?? !!prev.deploy
-      return { deploy: d, approvedBy: prev.approvedBy || user?.id, retriedBy: user?.id, attempt: (prev.attempt || 1) + 1, previousError: p.error, steps: plan(p.kind, d, p.operation) }
+      return {
+        deploy: d,
+        approvedBy: prev.approvedBy || user?.id,
+        retriedBy: user?.id,
+        attempt: (prev.attempt || 1) + 1,
+        previousError: p.error,
+        ...(check?.status === 'warning' && { acceptedUnchecked: true }),
+        steps: withCheck(plan(p.kind, d, p.operation), check)
+      }
     },
     user
   )

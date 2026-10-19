@@ -8,7 +8,13 @@ process.env.DEPLOY_POLL_INTERVAL_MS = '10'
 process.env.DEPLOY_POLL_TIMEOUT_MS = '300'
 
 jest.mock('../srv/lib/llm', () => ({ chat: jest.fn(), health: jest.fn() }))
-jest.mock('../srv/lib/groovy-check', () => ({ checkScripts: jest.fn(async () => ({ checked: true, errors: [] })), required: jest.fn(() => false) }))
+jest.mock('../srv/lib/groovy-check', () => {
+  const actual = jest.requireActual('../srv/lib/groovy-check')
+  const mock = { checkScripts: jest.fn(async () => ({ checked: true, errors: [] })), required: jest.fn(() => false) }
+  // the real per-file logic on top of the mocked sidecar call
+  mock.checkSpecScripts = (spec, attachments) => actual.checkSpecScripts(spec, attachments, { check: (s) => mock.checkScripts(s) })
+  return mock
+})
 jest.mock('../srv/lib/cpi-client', () => {
   const notFound = () => Object.assign(new Error('not found'), { status: 404, code: 'CPI_NOT_FOUND' })
   return {
@@ -323,7 +329,7 @@ describe('proposal execution', () => {
     expect(data.status).toBe('APPROVED')
     const done = await waitFor(proposalId)
     expect(done).toMatchObject({ status: 'DONE', error: null, result: { deploy: true, runtimeStatus: 'STARTED' } })
-    expect(done.result.steps.map((s) => `${s.key}:${s.status}`)).toEqual(['package:done', 'build:done', 'create:done', 'configure:done', 'deploy:done', 'runtime:done'])
+    expect(done.result.steps.map((s) => `${s.key}:${s.status}`)).toEqual(['check:done', 'package:done', 'build:done', 'create:done', 'configure:done', 'deploy:done', 'runtime:done'])
     expect(cpi.createPackage).toHaveBeenCalledWith({ id: 'NewPkg', name: 'New Package', shortText: 'New Package' })
     expect(cpi.createIflow).toHaveBeenCalledWith(expect.objectContaining({ id: 'Exec_Test_1', packageId: 'NewPkg', zipBase64: expect.any(String) }))
     expect(cpi.updateConfiguration).toHaveBeenCalledWith('Exec_Test_1', 'ReceiverURL', 'https://httpbin.org/post')
@@ -933,8 +939,8 @@ describe('backup before updates and restore', () => {
     await POST(`/api/Proposals/${proposalId}/approve`, { deploy: false })
     const done = await waitFor(proposalId)
     expect(done.status).toBe('DONE')
-    expect(done.result.steps.map((s) => s.key)).toEqual(['package', 'backup', 'build', 'create', 'configure'])
-    expect(done.result.steps[1]).toMatchObject({ status: 'done', detail: expect.stringMatching(/^Backup of version 1.0.4 stored \(\d+ KB\); saved as CPI version 1.0.5$/) })
+    expect(done.result.steps.map((s) => s.key)).toEqual(['check', 'package', 'backup', 'build', 'create', 'configure'])
+    expect(done.result.steps[2]).toMatchObject({ status: 'done', detail: expect.stringMatching(/^Backup of version 1.0.4 stored \(\d+ KB\); saved as CPI version 1.0.5$/) })
     expect(cpi.saveIflowAsVersion).toHaveBeenCalledWith(current.id, '1.0.5')
     // the version is saved before the content is replaced
     expect(cpi.saveIflowAsVersion.mock.invocationCallOrder[0]).toBeLessThan(cpi.updateIflowContent.mock.invocationCallOrder[0])
@@ -1189,5 +1195,51 @@ describe('token budget per message', () => {
     const { data: usage } = await GET('/api/usage(days=1)')
     expect(usage.budget).toMatchObject({ limit: 300000, stoppedAtBudget: expect.any(Number) })
     expect(usage.budget.stoppedAtBudget).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('Groovy check at proposal and approval', () => {
+  const down = async () => ({ checked: false, errors: [], reason: 'fetch failed (ECONNREFUSED) at http://localhost:4010' })
+  afterEach(() => groovyCheck.checkScripts.mockImplementation(async () => ({ checked: true, errors: [] })))
+  const propose = async (id) => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id } })).mockResolvedValueOnce(answer('ok'))
+    const turn = await chat({ message: 'Build it' })
+    return turn.proposals[0].ID
+  }
+
+  test('a script not checked at proposal time is marked; approval needs acceptUnchecked while the check is down', async () => {
+    groovyCheck.checkScripts.mockImplementation(down)
+    const id = await propose('Agent_Unchecked_1')
+    const { data: pending } = await GET(`/api/Proposals/${id}`)
+    expect(pending.scriptChecks).toEqual({ 'addLengthHeader.groovy': { status: 'unchecked', reason: 'fetch failed (ECONNREFUSED) at http://localhost:4010', at: expect.any(String) } })
+
+    await expect(POST(`/api/Proposals/${id}/approve`, { deploy: false })).rejects.toMatchObject({ response: { status: 409, data: { error: { code: 'GROOVY_NOT_CHECKED' } } } })
+    expect((await GET(`/api/Proposals/${id}`)).data.status).toBe('PENDING')
+
+    await POST(`/api/Proposals/${id}/approve`, { deploy: false, acceptUnchecked: true })
+    const done = await waitFor(id)
+    expect(done.status).toBe('DONE')
+    expect(done.result.steps[0]).toMatchObject({ key: 'check', status: 'warning', detail: expect.stringMatching(/^Not checked \(fetch failed/) })
+    const { data: log } = await GET(`/api/AuditLog?$filter=targetId eq '${id}' and action eq 'APPROVE_PROPOSAL'`)
+    expect(JSON.parse(log[0].details)).toMatchObject({ acceptedUncheckedGroovy: true })
+  })
+
+  test('a syntax error found at approval blocks it; the proposal stays pending with the error', async () => {
+    const id = await propose('Agent_Recheck_1')
+    expect((await GET(`/api/Proposals/${id}`)).data.scriptChecks['addLengthHeader.groovy'].status).toBe('ok')
+    groovyCheck.checkScripts.mockImplementation(async (scripts) => ({ checked: true, errors: [{ fileName: scripts[0].fileName, line: 4, column: 2, message: "Unexpected input: '}'" }] }))
+    await expect(POST(`/api/Proposals/${id}/approve`, { deploy: false, acceptUnchecked: true })).rejects.toMatchObject({
+      response: { status: 409, data: { error: { code: 'GROOVY_SYNTAX', message: "Approval blocked: 1 Groovy syntax error(s): addLengthHeader.groovy:4:2: Unexpected input: '}'" } } }
+    })
+    const { data } = await GET(`/api/Proposals/${id}`)
+    expect(data.status).toBe('PENDING')
+    expect(data.scriptChecks['addLengthHeader.groovy']).toMatchObject({ status: 'failed', errors: ["4:2: Unexpected input: '}'"] })
+  })
+
+  test('checked scripts: the approval step says so', async () => {
+    const id = await propose('Agent_Recheck_2')
+    await POST(`/api/Proposals/${id}/approve`, { deploy: false })
+    const done = await waitFor(id)
+    expect(done.result.steps[0]).toMatchObject({ key: 'check', status: 'done', detail: '1 script(s) checked, no syntax errors' })
   })
 })
