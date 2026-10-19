@@ -997,3 +997,47 @@ describe('streaming progress', () => {
     expect(seen).toMatchObject({ label: 'Thinking…', detail: '~1,200 tokens so far' })
   })
 })
+
+describe('writeScript', () => {
+  const { GROOVY } = require('./helpers')
+  afterEach(() => groovyCheck.checkScripts.mockImplementation(async () => ({ checked: true, errors: [] })))
+
+  test('scripts are written as plain code, checked, stored, and referenced by the spec without code', async () => {
+    groovyCheck.checkScripts.mockImplementationOnce(async () => ({ checked: true, errors: [{ fileName: 'mapUsers.groovy', line: 3, column: 9, message: "Unexpected input: '('" }] }))
+    const spec = { ...sample, id: 'Agent_Script_1', steps: [sample.steps[0], { type: 'groovyScript', name: 'Map Users', fileName: 'mapUsers' }] }
+    llm.chat
+      .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mapUsers', code: GROOVY.replace('return message', 'return message }') }))
+      .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mapUsers', code: 'println 1' }))
+      .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mapUsers', code: GROOVY }))
+      .mockResolvedValueOnce(toolCall('validateSpec', { spec }))
+      .mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true }))
+      .mockResolvedValueOnce(answer('Ready.'))
+    const turn = await chat({ message: 'Build it' })
+    const results = llm.chat.mock.calls.at(-1)[0].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))
+    expect(results[0]).toEqual({ valid: false, errors: ["GROOVY_SYNTAX mapUsers.groovy:3:9: Unexpected input: '('"], instruction: 'Fix the script and call writeScript again.' })
+    expect(results[1].errors.map((e) => e.split(' ')[0])).toEqual(['GROOVY_IMPORT', 'GROOVY_ENTRY'])
+    expect(results[2]).toEqual({ stored: 'mapUsers.groovy', lines: GROOVY.split('\n').length, next: 'Use it with { "type": "groovyScript", "fileName": "mapUsers" } and no "code".' })
+    expect(results[3]).toMatchObject({ valid: true })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Agent_Script_1' })])
+
+    const { data: proposal } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
+    expect(proposal.attachments).toEqual({ 'mapUsers.groovy': GROOVY })
+    const { data: files } = await GET(`/api/Attachments?$filter=session_ID eq ${turn.sessionId}`)
+    expect(files).toEqual([expect.objectContaining({ fileName: 'mapUsers.groovy', origin: 'ai' })])
+
+    // within the turn only the newest version of the script went back to the model
+    const sent = llm.chat.mock.calls.at(-1)[0].messages.filter((m) => m.tool_calls?.[0].function.name === 'writeScript').map((m) => JSON.parse(m.tool_calls[0].function.arguments).code)
+    expect(sent.slice(0, 2)).toEqual([expect.stringMatching(/^\(older version omitted/), expect.stringMatching(/^\(older version omitted/)])
+    expect(sent[2]).toBe(GROOVY)
+    // the next turn's context names the file as written by the model
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ sessionId: turn.sessionId, message: 'next' })
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toMatch(/mapUsers\.groovy \(Groovy, \d+ lines, written by you with writeScript\)/)
+  })
+
+  test("a file the user attached is not overwritten", async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mine', code: GROOVY })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'x', attachments: [{ fileName: 'mine.groovy', content: GROOVY }] })
+    expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).errors).toEqual([expect.stringMatching(/^ATTACHED_BY_USER mine.groovy/)])
+  })
+})

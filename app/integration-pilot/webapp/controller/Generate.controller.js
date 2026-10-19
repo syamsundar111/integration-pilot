@@ -355,7 +355,11 @@ sap.ui.define(
         try {
           const stored = await api.get(`/Attachments${api.q({ $filter: `session_ID eq ${sessionId}`, $select: 'ID,fileName,lines,origin', $orderby: 'fileName' })}`)
           if (this.chat().getProperty('/sessionId') !== sessionId) return
-          this.chat().setProperty('/files', stored.map((f) => ({ ...f, pending: false })))
+          // files picked but not sent yet stay in the list
+          const pending = this.chat()
+            .getProperty('/files')
+            .filter((f) => f.pending)
+          this.chat().setProperty('/files', [...stored.map((f) => ({ ...f, pending: false })), ...pending])
         } catch (e) {
           // the list is informational
         }
@@ -384,7 +388,8 @@ sap.ui.define(
 
       fileTokenText(fileName, pending, lines, origin) {
         if (pending) return `${fileName} · sent with your next message`
-        return `${fileName} · ${lines} lines${origin === 'iflow' ? ' · from the iFlow' : ''}`
+        const from = { iflow: ' · from the iFlow', import: ' · from the import', ai: ' · written by the assistant' }[origin] || ''
+        return `${fileName} · ${lines} lines${from}`
       },
 
       async onFileDelete(e) {
@@ -491,6 +496,7 @@ sap.ui.define(
         }
         c.setProperty('/turn', null)
         this.loadSessions()
+        this.loadAttachments(c.getProperty('/sessionId')) // the assistant may have written scripts
         setTimeout(() => this.byId('input').focus(), 50)
       },
 

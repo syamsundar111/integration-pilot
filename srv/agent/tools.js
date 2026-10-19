@@ -6,7 +6,7 @@
  */
 const cds = require('@sap/cds')
 const cpi = require('../lib/cpi-client')
-const { validate, schema } = require('../iflow-builder/validator')
+const { validate, schema, GROOVY_IMPORT, GROOVY_ENTRY } = require('../iflow-builder/validator')
 const { build, injectAttachments } = require('../iflow-builder/builder')
 const attachmentStore = require('../lib/attachments')
 const groovyCheck = require('../lib/groovy-check')
@@ -49,6 +49,15 @@ const definitions = [
       spec: { type: 'object', description: 'Complete iFlow spec v1' },
       useDraftSpec: { type: 'boolean', description: "true: validate the conversation's draft spec (see Context) instead of sending one" }
     }
+  ),
+  fn(
+    'writeScript',
+    'Write or replace one Groovy script of this conversation as plain code (never put Groovy code into a spec). Its syntax is checked right away. A groovyScript step then uses it with { "fileName": "<name>" } and no "code".',
+    {
+      fileName: { type: 'string', description: 'Without extension, e.g. mapUsers (letters, digits, underscore; starts with a letter)' },
+      code: { type: 'string', description: 'The complete Groovy script' }
+    },
+    ['fileName', 'code']
   ),
   fn('getDraftSpec', "The conversation's draft spec (e.g. an imported iFlow), to change it. Scripts are attached files: keep their steps without code."),
   fn('explainIflow', 'Parse an existing iFlow (trigger, steps, adapters, parameters, scripts) to explain it.', { iflowId: { type: 'string' } }, ['iflowId']),
@@ -313,7 +322,8 @@ const handlers = {
         'HTTP receivers always use authType "None". If authentication is needed, say the user must set it in the CPI web editor after creation.',
         'Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs; define each in "parameters".',
         'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).',
-        'validateSpec checks the syntax of every Groovy script (GROOVY_SYNTAX file:line:column: message); fix written scripts, ask the user to fix attached ones.'
+        'Write every Groovy script with writeScript (plain code), then reference it in the spec by fileName without code; never put Groovy code into a spec.',
+        'validateSpec checks the syntax of every Groovy script (GROOVY_SYNTAX file:line:column: message); fix your scripts with writeScript, ask the user to fix attached ones.'
       ]
     }
   },
@@ -345,6 +355,33 @@ const handlers = {
     ctx.validatedSpec = spec
     await saveDraft(ctx, spec, { source, valid: true })
     return { valid: true, ...(groovy.warning && { warnings: [groovy.warning] }), next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
+  },
+
+  async writeScript({ fileName, code }, ctx) {
+    fileName = String(fileName || '').replace(/\.groovy$/, '')
+    const errors = []
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(fileName)) errors.push({ code: 'BAD_FORMAT', message: 'fileName: use a letter, then letters, digits or underscore (no extension)' })
+    if (typeof code !== 'string' || !code.trim()) errors.push({ code: 'MISSING_FIELD', message: 'code: the complete Groovy script is missing' })
+    else {
+      if (!GROOVY_IMPORT.test(code)) errors.push({ code: 'GROOVY_IMPORT', message: `${fileName}.groovy: must import com.sap.gateway.ip.core.customdev.util.Message` })
+      if (!GROOVY_ENTRY.test(code)) errors.push({ code: 'GROOVY_ENTRY', message: `${fileName}.groovy: must define 'def Message processData(Message message)' and return the message` })
+    }
+    if (errors.length) return compactInvalid(errors, 'Fix the script and call writeScript again.')
+    const file = `${fileName}.groovy`
+    const existing = await attachmentStore.list(ctx.user, ctx.sessionId)
+    if (existing.some((f) => f.fileName === file && f.origin === 'upload'))
+      return compactInvalid([{ code: 'ATTACHED_BY_USER', message: `${file}: the user attached this file — use it as it is, or write your script under another fileName` }])
+    const { checked, errors: syntax, reason } = await groovyCheck.checkScripts([{ fileName: file, code }])
+    if (syntax.length) return compactInvalid(syntax.map((e) => ({ code: 'GROOVY_SYNTAX', message: `${e.fileName}:${e.line}:${e.column}: ${e.message}` })), 'Fix the script and call writeScript again.')
+    if (!checked && groovyCheck.required()) return compactInvalid([{ code: 'GROOVY_NOT_CHECKED', message: `${file}: the Groovy syntax check is unavailable (${reason}); try again later` }])
+    await attachmentStore.save(ctx.user, ctx.sessionId, [{ fileName: file, content: code }], 'ai')
+    ctx.attachments = undefined // reload: new content
+    return {
+      stored: file,
+      lines: code.split('\n').length,
+      ...(!checked && { warnings: [`Groovy syntax not checked: ${reason}`] }),
+      next: `Use it with { "type": "groovyScript", "fileName": "${fileName}" } and no "code".`
+    }
   },
 
   async getDraftSpec(_args, ctx) {

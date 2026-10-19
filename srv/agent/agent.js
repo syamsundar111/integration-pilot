@@ -62,14 +62,16 @@ function normalizeDefaults(d) {
   return out
 }
 
+const ORIGIN_NOTE = { iflow: ', from the existing iFlow', import: ', from the imported iFlow', ai: ', written by you with writeScript' }
+
 /** Attached files as context: names, sizes and how to reference them — never their content */
 function attachmentsContext(files) {
   if (!files.length) return ''
   const line = (f) =>
     f.kind === 'groovy'
-      ? `- ${f.fileName} (Groovy, ${f.lines} lines${f.origin === 'iflow' ? ', from the existing iFlow' : ''}): groovyScript step with "fileName": "${f.fileName.replace(/\.groovy$/, '')}" and no "code"`
-      : `- ${f.fileName} (XSLT, ${f.lines} lines${f.origin === 'iflow' ? ', from the existing iFlow' : ''}): list it in "resources"`
-  return `Attached files (stored on the server; reference them by name, never write their content):\n${files.map(line).join('\n')}`
+      ? `- ${f.fileName} (Groovy, ${f.lines} lines${ORIGIN_NOTE[f.origin] || ''}): groovyScript step with "fileName": "${f.fileName.replace(/\.groovy$/, '')}" and no "code"`
+      : `- ${f.fileName} (XSLT, ${f.lines} lines${ORIGIN_NOTE[f.origin] || ''}): list it in "resources"`
+  return `Files of this conversation (stored on the server; reference them by name; change your own scripts with writeScript; never retype the others):\n${files.map(line).join('\n')}`
 }
 
 /** The latest spec as context: what it is and how to use it, never the spec itself */
@@ -204,6 +206,7 @@ const event = (type, label, detail) => ({ at: new Date().toISOString(), type, la
 function toolLabel(name, args) {
   if (name === 'proposeIflow' || name === 'proposeIflowUpdate' || name === 'validateSpec') return 'Validating spec'
   if (name === 'proposePackage') return 'Validating package proposal'
+  if (name === 'writeScript') return `Writing script ${args?.fileName || ''}.groovy`
   const id = args?.iflowId || args?.packageId
   return `Calling ${name}${id ? ` (${id})` : ''}`
 }

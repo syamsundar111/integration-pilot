@@ -224,7 +224,7 @@ function validate(spec, { attachments = [] } = {}) {
     if (s.code == null && !attached.has(file))
       err('ATTACHMENT_MISSING', `${where}: no code and no attached file '${file}' — give the code, or ask the user to attach ${file}`)
     if (s.code != null && attached.has(file))
-      err('ATTACHED_CODE', `${where}.code: '${file}' is an attached file — omit code to use it (or choose another fileName for a new script)`)
+      err('ATTACHED_CODE', `${where}.code: '${file}' is a file of this conversation — omit code to use it (change it with writeScript, or choose another fileName)`)
   }
   ;(Array.isArray(spec.resources) ? spec.resources : []).forEach((r, i) => {
     if (typeof r === 'string' && !attached.has(r)) err('ATTACHMENT_MISSING', `resources[${i}]: '${r}' is not an attached file — ask the user to attach it`)
@@ -288,4 +288,4 @@ function validate(spec, { attachments = [] } = {}) {
   return { valid: unique.length === 0, errors: unique.map((i) => i.message), issues: unique }
 }
 
-module.exports = { validate, effectiveNames, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, DEFAULT_STEP_NAMES, schema }
+module.exports = { validate, effectiveNames, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }

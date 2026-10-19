@@ -70,7 +70,8 @@ them again.
 ## Attach scripts instead of describing them
 
 Every Groovy script, written by the assistant or attached, is syntax-checked before it can be
-proposed; errors come back with file, line and column.
+proposed; errors come back with file, line and column. Scripts the assistant writes are stored as
+files of the conversation (shown as "written by the assistant" above the input), not inside the spec.
 
 Describing a long Groovy script in prose is the most expensive thing a request can contain.
 The model has to write the whole script into the spec, which is slow, can time out, and is
