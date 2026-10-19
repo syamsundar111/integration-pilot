@@ -42,6 +42,8 @@ modules:
       LLM_TIMEOUT_MS: 900000 # cap for one streamed model call
       LLM_IDLE_TIMEOUT_MS: 60000 # longest pause in a streamed answer
       LLM_MAX_TOKENS: 16000
+      AGENT_MAX_MODEL_CALLS: 20 # model calls per chat message
+      AGENT_MAX_TOKENS_PER_MESSAGE: 300000 # token budget per chat message
     provides:
       - name: srv-api
         properties:
@@ -63,7 +65,9 @@ modules:
       buildpack: java_buildpack
       memory: 256M
       disk-quota: 512M
-      check-token: ${generated-password}
+      check-token: ${generated-password} # one value per deploy, shared with the srv module via groovy-check-api
+      health-check-type: http
+      health-check-http-endpoint: /health
     build-parameters:
       builder: maven
       build-result: target/groovy-check.jar
