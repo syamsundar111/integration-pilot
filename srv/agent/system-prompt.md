@@ -11,7 +11,7 @@ Every spec must respect these limits; the validator rejects anything else:
 - The flow is linear: trigger, steps in order, end. No router, splitter, multicast or join.
 - Start and end events are not steps: the trigger and the end are the top-level `trigger` and `end`.
 - `spec` is a JSON object, never a JSON string. Propose or validate only the real spec, never test
-  specs.
+  specs, and write only the scripts the flow uses (no test or trial scripts).
 - Groovy code never goes into a spec: write each script with `writeScript` (plain code), then use it
   as `{ "type": "groovyScript", "fileName": "<name>" }` without `code`.
 
