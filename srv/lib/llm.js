@@ -9,6 +9,12 @@
  * Reasoning models (e.g. moonshotai/kimi-k2.6) may return their chain of thought in
  * `reasoning_content`/`reasoning` or inside <think> tags; it is always stripped, so
  * callers only see the final content and tool_calls.
+ *
+ * Answers are streamed (server-sent events) unless LLM_STREAM=false: a long answer is not cut
+ * off by a fixed timeout as long as data keeps arriving. LLM_IDLE_TIMEOUT_MS (default 60s) is
+ * the longest pause allowed, LLM_TIMEOUT_MS (default 15 min) the cap for one model call. The
+ * streamed pieces are put back together here, so callers get the same response as without
+ * streaming.
  */
 const cds = require('@sap/cds')
 const { executeHttpRequest } = require('@sap-cloud-sdk/http-client')
@@ -16,7 +22,9 @@ const { executeHttpRequest } = require('@sap-cloud-sdk/http-client')
 const LOG = cds.log('llm')
 
 const DESTINATION = 'NVIDIA_LLM'
-const TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 120_000) // reasoning models can think for a while; large specs need more
+const TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 900_000) // cap for one model call (streamed: data keeps arriving)
+const idleTimeoutMs = () => Number(process.env.LLM_IDLE_TIMEOUT_MS || 60_000) // longest pause in a streamed answer
+const streaming = () => process.env.LLM_STREAM !== 'false'
 const MAX_RETRIES = 3 // for 429, 5xx and garbled output
 const MAX_TIMEOUT_RETRIES = 1
 const BASE_DELAY_MS = Number(process.env.LLM_RETRY_BASE_MS || 2_000)
@@ -62,6 +70,8 @@ function normalizeError(e, modelName = model()) {
   const data = e.response?.data
   const detail = (typeof data === 'string' ? data : data?.error?.message || data?.detail || data?.message || data?.title) || e.message
   if (!status) {
+    if (e.idle)
+      return llmError(504, 'LLM_TIMEOUT', `The AI model stopped sending its answer (no data for ${idleTimeoutMs() / 1000}s).`, 'Retry; the model endpoint may be overloaded.')
     if (e.code === 'ECONNABORTED' || /timeout/i.test(e.message))
       return llmError(504, 'LLM_TIMEOUT', `The AI model did not answer within ${TIMEOUT_MS / 1000}s.`, 'Retry; reasoning models can be slow under load.')
     return llmError(502, 'LLM_UNREACHABLE', String(detail),
@@ -135,12 +145,124 @@ function normalizeUsage(raw = {}, durationMs) {
 
 // --- transport -------------------------------------------------------------------------
 
-function send(body, signal) {
-  return executeHttpRequest(
-    { destinationName: DESTINATION },
-    { method: 'POST', url: '/chat/completions', data: body, timeout: TIMEOUT_MS, signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } },
-    { fetchCsrfToken: false }
-  )
+/**
+ * Sends one request; returns the response body in the non-streamed OpenAI shape
+ * ({ choices: [{ message, finish_reason }], usage }), streamed or not.
+ * @param {(p: { outputChars: number, reasoningChars: number }) => void} [onProgress] called per streamed piece
+ */
+async function send(body, signal, onProgress) {
+  if (!streaming()) {
+    const res = await executeHttpRequest(
+      { destinationName: DESTINATION },
+      { method: 'POST', url: '/chat/completions', data: body, timeout: TIMEOUT_MS, signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } },
+      { fetchCsrfToken: false }
+    )
+    return res.data
+  }
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    const res = await executeHttpRequest(
+      { destinationName: DESTINATION },
+      {
+        method: 'POST',
+        url: '/chat/completions',
+        data: { ...body, stream: true, stream_options: { include_usage: true } },
+        timeout: TIMEOUT_MS,
+        signal: controller.signal,
+        responseType: 'stream',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }
+      },
+      { fetchCsrfToken: false }
+    )
+    // a provider that ignores "stream" answers with plain JSON
+    if (!res.data || typeof res.data.on !== 'function') return res.data
+    return await readStream(res.data, onProgress)
+  } finally {
+    signal?.removeEventListener('abort', abort)
+  }
+}
+
+/**
+ * Collects a server-sent-events answer (OpenAI chat.completion.chunk format) into one
+ * response: content, reasoning (dropped later), tool calls merged by index, finish reason, usage.
+ * Fails when no data arrives for LLM_IDLE_TIMEOUT_MS or the call takes longer than LLM_TIMEOUT_MS.
+ */
+function readStream(stream, onProgress) {
+  return new Promise((resolve, reject) => {
+    const message = { role: 'assistant', content: '', reasoning_content: '' }
+    const calls = []
+    let finish = null
+    let usage
+    let buffer = ''
+    let done = false
+    const fail = (err) => {
+      if (done) return
+      done = true
+      clearTimeout(idle)
+      clearTimeout(cap)
+      stream.destroy()
+      reject(err)
+    }
+    const timeoutError = (idleTimeout) => Object.assign(new Error(idleTimeout ? 'idle timeout' : 'timeout'), { code: 'ETIMEDOUT', idle: idleTimeout })
+    let idle = setTimeout(() => fail(timeoutError(true)), idleTimeoutMs())
+    const cap = setTimeout(() => fail(timeoutError(false)), TIMEOUT_MS)
+
+    const take = (line) => {
+      if (!line.startsWith('data:')) return
+      const payload = line.slice(5).trim()
+      if (!payload || payload === '[DONE]') return
+      let chunk
+      try {
+        chunk = JSON.parse(payload)
+      } catch {
+        return // keep-alive or a partial line the provider repeats
+      }
+      if (chunk.error) {
+        const err = new Error(chunk.error.message || 'The model service reported an error in the stream')
+        err.response = { status: Number(chunk.error.code) || 502, data: chunk, headers: {} }
+        return fail(err)
+      }
+      if (chunk.usage) usage = chunk.usage
+      const choice = chunk.choices?.[0]
+      if (!choice) return
+      const delta = choice.delta || {}
+      if (typeof delta.content === 'string') message.content += delta.content
+      const reasoning = delta.reasoning_content ?? delta.reasoning
+      if (typeof reasoning === 'string') message.reasoning_content += reasoning
+      for (const tc of delta.tool_calls || []) {
+        const call = (calls[tc.index ?? calls.length] ??= { id: tc.id, type: tc.type || 'function', function: { name: '', arguments: '' } })
+        if (tc.id) call.id = tc.id
+        if (tc.function?.name) call.function.name += tc.function.name
+        if (tc.function?.arguments) call.function.arguments += tc.function.arguments
+      }
+      if (choice.finish_reason) finish = choice.finish_reason
+    }
+
+    stream.on('data', (data) => {
+      clearTimeout(idle)
+      idle = setTimeout(() => fail(timeoutError(true)), idleTimeoutMs())
+      buffer += data.toString('utf8')
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop()
+      for (const line of lines) take(line)
+      onProgress?.({ outputChars: message.content.length + calls.reduce((n, c) => n + c.function.arguments.length, 0), reasoningChars: message.reasoning_content.length })
+    })
+    stream.on('error', fail)
+    stream.on('end', () => {
+      if (done) return
+      take(buffer)
+      done = true
+      clearTimeout(idle)
+      clearTimeout(cap)
+      const toolCalls = calls.filter(Boolean)
+      resolve({
+        choices: [{ index: 0, finish_reason: finish, message: { ...message, content: message.content || null, ...(toolCalls.length && { tool_calls: toolCalls }) } }],
+        ...(usage && { usage })
+      })
+    })
+  })
 }
 
 // Errors where another model would not help (same key, same destination, missing config)
@@ -153,15 +275,14 @@ const cancelled = () => Object.assign(new Error('Cancelled'), { code: 'CANCELLED
  * One model, with retries for 429/5xx/garbled output (3x) and timeouts (1x) unless retries=false.
  * @returns {Promise<object>} response with cleaned messages
  */
-async function callModel(body, { retries = true, signal } = {}) {
+async function callModel(body, { retries = true, signal, onProgress } = {}) {
   let timeouts = 0
   for (let attempt = 0; ; attempt++) {
     await throttle()
     if (signal?.aborted) throw cancelled()
     const started = Date.now()
     try {
-      const res = await send(body, signal)
-      const data = res.data
+      const data = await send(body, signal, onProgress)
       const u = data.usage || {}
       LOG.info(`${body.model}: ${Date.now() - started}ms, tokens prompt=${u.prompt_tokens ?? '?'} completion=${u.completion_tokens ?? '?'} total=${u.total_tokens ?? '?'}`)
       data.usage = normalizeUsage(u, Date.now() - started)
@@ -194,12 +315,13 @@ async function callModel(body, { retries = true, signal } = {}) {
 /**
  * OpenAI-compatible chat completion. If the primary model (LLM_MODEL) still fails after
  * all retries, the same request is sent once to LLM_FALLBACK_MODEL (if set).
- * @param {{ messages: object[], tools?: object[], toolChoice?: string|object, temperature?: number, maxTokens?: number, signal?: AbortSignal }} req
+ * @param {{ messages: object[], tools?: object[], toolChoice?: string|object, temperature?: number, maxTokens?: number, signal?: AbortSignal,
+ *   onProgress?: (p: { outputChars: number, reasoningChars: number }) => void }} req - onProgress: while a streamed answer arrives
  * @returns {Promise<object>} response with choices[0].message cleaned (no reasoning);
  *   `model` is the model that answered, `fallbackUsed` tells whether it was the fallback,
  *   `usage` = { inputTokens, outputTokens, totalTokens, durationMs } (provider-neutral)
  */
-async function chat({ messages, tools, toolChoice, temperature = 0.3, maxTokens, signal } = {}) {
+async function chat({ messages, tools, toolChoice, temperature = 0.3, maxTokens, signal, onProgress } = {}) {
   if (!model()) throw llmError(500, 'LLM_NOT_CONFIGURED', 'LLM_MODEL is not set.', 'Set LLM_MODEL (e.g. in .env for local runs, or as an app environment variable).')
   const body = {
     model: model(),
@@ -210,12 +332,12 @@ async function chat({ messages, tools, toolChoice, temperature = 0.3, maxTokens,
   }
 
   try {
-    return { ...(await callModel(body, { signal })), fallbackUsed: false }
+    return { ...(await callModel(body, { signal, onProgress })), fallbackUsed: false }
   } catch (e) {
     const fallback = process.env.LLM_FALLBACK_MODEL
     if (!fallback || fallback === body.model || NO_FALLBACK.has(e.code)) throw e
     LOG.warn(`${body.model} failed (${e.code}); retrying once with fallback model ${fallback}`)
-    return { ...(await callModel({ ...body, model: fallback }, { retries: false, signal })), fallbackUsed: true }
+    return { ...(await callModel({ ...body, model: fallback }, { retries: false, signal, onProgress })), fallbackUsed: true }
   }
 }
 

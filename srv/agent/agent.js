@@ -303,7 +303,15 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
     for (let i = 0; i < MAX_ITERATIONS && text === null; i++) {
       await checkCancel()
       if (i > 0) await emit('thinking', 'Thinking…')
-      const res = await llm.chat({ messages: [system, ...past, ...history.compactTurn(turn)], tools: tools.definitions, signal })
+      // while the answer streams in: "~1,200 tokens so far" on the current progress line, every 3s at most
+      let shownAt = 0
+      const onProgress = ({ outputChars, reasoningChars }) => {
+        if (Date.now() - shownAt < 3000) return
+        shownAt = Date.now()
+        events[events.length - 1].detail = `~${Math.round((outputChars + reasoningChars) / 4).toLocaleString('en-US')} tokens so far`
+        update().catch(() => {})
+      }
+      const res = await llm.chat({ messages: [system, ...past, ...history.compactTurn(turn)], tools: tools.definitions, signal, onProgress })
       count(res)
       const { message: msg, finish_reason: finish } = res.choices[0]
       if (res.fallbackUsed) await emit('info', `Answered by fallback model ${res.model}`)

@@ -1,5 +1,6 @@
 process.env.LLM_MODEL = 'test/model'
 process.env.LLM_RETRY_BASE_MS = '1'
+process.env.LLM_MAX_RPM = '10000' // the client-side rate limit would make later tests wait a minute
 
 jest.mock('@sap-cloud-sdk/http-client', () => ({ executeHttpRequest: jest.fn() }))
 const { executeHttpRequest } = require('@sap-cloud-sdk/http-client')
@@ -128,8 +129,10 @@ describe('cancellation', () => {
     process.env.LLM_FALLBACK_MODEL = 'test/fallback'
     const controller = new AbortController()
     executeHttpRequest.mockImplementation((_d, req) => {
-      expect(req.signal).toBe(controller.signal)
+      // the request's signal follows the caller's (streaming links its own idle/total timers to it)
+      expect(req.signal.aborted).toBe(false)
       controller.abort()
+      expect(req.signal.aborted).toBe(true)
       return Promise.reject(Object.assign(new Error('canceled'), { code: 'ERR_CANCELED' }))
     })
     await expect(llm.chat({ messages: [], signal: controller.signal })).rejects.toMatchObject({ code: 'CANCELLED' })
@@ -159,5 +162,62 @@ describe('usage', () => {
   test('missing numbers stay null; a missing total is the sum', () => {
     expect(llm.normalizeUsage({}, 5)).toEqual({ inputTokens: null, outputTokens: null, totalTokens: null, durationMs: 5 })
     expect(llm.normalizeUsage({ prompt_tokens: 10, completion_tokens: 2 }, 1)).toMatchObject({ totalTokens: 12 })
+  })
+})
+
+describe('streaming', () => {
+  const { Readable } = require('stream')
+  const sse = (...chunks) => Readable.from(chunks.map((c) => (typeof c === 'string' ? c : `data: ${JSON.stringify(c)}\n\n`)))
+  const delta = (d, finish = null) => ({ choices: [{ index: 0, delta: d, finish_reason: finish }] })
+  afterEach(() => {
+    delete process.env.LLM_IDLE_TIMEOUT_MS
+    delete process.env.LLM_STREAM
+  })
+
+  test('streamed pieces become one answer: content, tool calls by index, usage; reasoning is dropped', async () => {
+    executeHttpRequest.mockImplementation(async (_d, req) => {
+      expect(req).toMatchObject({ responseType: 'stream', data: { stream: true, stream_options: { include_usage: true } } })
+      return {
+        data: sse(
+          delta({ reasoning_content: 'let me think' }),
+          delta({ content: 'Validating' }),
+          delta({ tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'validate', arguments: '{"spec":' } }] }),
+          delta({ tool_calls: [{ index: 0, function: { name: 'Spec', arguments: '{"id":"X"}}' } }] }),
+          delta({ content: ' now' }, 'tool_calls'),
+          { choices: [], usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 } },
+          'data: [DONE]\n\n'
+        )
+      }
+    })
+    const progress = []
+    const res = await llm.chat({ messages: [], onProgress: (p) => progress.push(p) })
+    expect(res.choices[0]).toMatchObject({
+      finish_reason: 'tool_calls',
+      message: { content: 'Validating now', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'validateSpec', arguments: '{"spec":{"id":"X"}}' } }] }
+    })
+    expect(res.choices[0].message.reasoning_content).toBeUndefined()
+    expect(res.usage).toMatchObject({ inputTokens: 10, outputTokens: 20, totalTokens: 30 })
+    expect(progress.at(-1)).toEqual({ outputChars: 'Validating now'.length + '{"spec":{"id":"X"}}'.length, reasoningChars: 'let me think'.length })
+  })
+
+  test('a pause longer than LLM_IDLE_TIMEOUT_MS is a timeout (retried once)', async () => {
+    process.env.LLM_IDLE_TIMEOUT_MS = '50'
+    const stalled = () => ({ data: new Readable({ read() {} }) }) // sends nothing
+    executeHttpRequest.mockImplementation(async () => stalled())
+    await expect(llm.chat({ messages: [] })).rejects.toMatchObject({ code: 'LLM_TIMEOUT', message: expect.stringMatching(/no data for 0.05s/) })
+    expect(executeHttpRequest).toHaveBeenCalledTimes(2)
+  })
+
+  test('an error inside the stream is reported like an HTTP error', async () => {
+    executeHttpRequest.mockImplementation(async () => ({ data: sse(delta({ content: 'x' }), { error: { message: 'model overloaded', code: 503 } }) }))
+    await expect(llm.chat({ messages: [] })).rejects.toMatchObject({ code: 'LLM_ERROR', message: 'model overloaded' })
+    expect(executeHttpRequest).toHaveBeenCalledTimes(4) // 503 is retried like an HTTP 503
+  })
+
+  test('LLM_STREAM=false sends a plain request', async () => {
+    process.env.LLM_STREAM = 'false'
+    executeHttpRequest.mockResolvedValue(ok({ content: 'plain' }))
+    expect((await llm.chat({ messages: [] })).choices[0].message.content).toBe('plain')
+    expect(executeHttpRequest.mock.calls[0][1].responseType).toBeUndefined()
   })
 })

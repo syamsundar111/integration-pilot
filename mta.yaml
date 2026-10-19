@@ -40,7 +40,8 @@ modules:
       CDS_ENV: hana # DB: HANA Cloud HDI container
       LLM_MODEL: nvidia/nemotron-3-super-120b-a12b
       LLM_FALLBACK_MODEL: z-ai/glm-5.3
-      LLM_TIMEOUT_MS: 300000
+      LLM_TIMEOUT_MS: 900000 # cap for one streamed model call
+      LLM_IDLE_TIMEOUT_MS: 60000 # longest pause in a streamed answer
       LLM_MAX_TOKENS: 16000
     provides:
       - name: srv-api

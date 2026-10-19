@@ -52,9 +52,10 @@ npm run db:deploy        # creates db.sqlite (git-ignored) for the local profile
 npm run groovy-check:build  # Groovy syntax check sidecar (needs JDK 17+ and Maven)
 ```
 
-`.env` holds `LLM_MODEL` and `LLM_FALLBACK_MODEL`, plus optional `LLM_TIMEOUT_MS` (per model call,
-default 120000) and `LLM_MAX_TOKENS` (default 8192); large iFlow specs with Groovy scripts need more of
-both. `.cdsrc-private.json` binds the hybrid profile
+`.env` holds `LLM_MODEL` and `LLM_FALLBACK_MODEL`, plus optional `LLM_MAX_TOKENS` (default 8192;
+large specs need more). Model answers are streamed: `LLM_IDLE_TIMEOUT_MS` (default 60000) is the
+longest pause allowed in an answer and `LLM_TIMEOUT_MS` (default 900000) the cap for one model
+call; `LLM_STREAM=false` switches streaming off for a provider that does not support it. `.cdsrc-private.json` binds the hybrid profile
 to the destination service `iflowpilot-dest`. Both files were copied from iflow-pilot and are
 git-ignored. See iflow-pilot's README for setting up the destinations `CPI_API` and `NVIDIA_LLM`.
 

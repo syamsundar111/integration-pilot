@@ -982,3 +982,18 @@ describe('backup before updates and restore', () => {
     expect(done.result.steps.find((s) => s.key === 'backup')).toMatchObject({ status: 'warning', detail: expect.stringMatching(/the CPI version could not be saved: Forbidden/) })
   })
 })
+
+describe('streaming progress', () => {
+  test('the running turn shows how much of the answer has arrived', async () => {
+    let seen
+    llm.chat.mockImplementationOnce(async ({ onProgress }) => {
+      onProgress({ outputChars: 4000, reasoningChars: 800 })
+      await new Promise((r) => setTimeout(r, 50))
+      const { data } = await GET(`/api/ChatTurns?$filter=status eq 'RUNNING'&$top=1`)
+      seen = data[0]?.events.at(-1)
+      return answer('done')
+    })
+    await chat({ message: 'Hello' })
+    expect(seen).toMatchObject({ label: 'Thinking…', detail: '~1,200 tokens so far' })
+  })
+})
