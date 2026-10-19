@@ -1134,3 +1134,28 @@ describe('one call instead of parts', () => {
     expect(llm.chat).toHaveBeenCalledTimes(3)
   })
 })
+
+describe('fewer and smaller model inputs', () => {
+  test('getSupportedSteps is compact and names every field of the schema', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', {})).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'what can you build?' })
+    const content = llm.chat.mock.calls.at(-1)[0].messages.at(-1).content
+    expect(content.length).toBeLessThan(5000) // the full schema result was ~11k characters
+    const { format } = JSON.parse(content)
+    const schema = require('../srv/iflow-builder/spec-schema.json')
+    for (const field of Object.keys(schema.properties)) expect(format.spec).toContain(field)
+    for (const type of schema.definitions.step.properties.type.enum) {
+      const def = schema.definitions[type === 'jsonToXml' || type === 'xmlToJson' ? 'converter' : type]
+      for (const field of Object.keys(def.properties).filter((f) => f !== 'code')) expect(format.steps[type]).toContain(field)
+    }
+  })
+
+  test('the default package is checked on the tenant, so the model need not list packages', async () => {
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'x', defaults: { packageId: 'PilotReference' } })
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('It exists on the tenant: do not call listPackages or listIflows to check it.')
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'x', defaults: { packageId: 'Not.There' } })
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('It does not exist on the tenant yet')
+  })
+})

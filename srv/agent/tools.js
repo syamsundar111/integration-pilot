@@ -43,7 +43,11 @@ const definitions = [
       top: { type: 'integer', minimum: 1, maximum: 50 }
     }
   ),
-  fn('getSupportedSteps', 'The iFlow spec v1 JSON schema with examples: what can be built and how to write a spec. Call before proposing an iFlow.'),
+  fn(
+    'getSupportedSteps',
+    'The iFlow spec v1 format in short: what can be built and how to write a spec, with one example. Call once before proposing an iFlow. { "full": true } returns the complete JSON schema (rarely needed).',
+    { full: { type: 'boolean' } }
+  ),
   fn(
     'validateSpec',
     'Check a spec with the same checks as proposing, without proposing it. proposeIflow validates too, so use this only after a failed proposal. Returns { valid: true } or compact errors "CODE path: message".',
@@ -107,6 +111,24 @@ At most ${MAX_STEPS_PER_EDIT} steps added or replaced per call. Returns the draf
 ]
 
 // --- helpers -----------------------------------------------------------------------
+
+/** The spec format in short (getSupportedSteps); test/agent.test.js keeps it in line with spec-schema.json */
+const SPEC_FORMAT = {
+  spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50), end, exceptionSubprocess?, parameters?, resources? }',
+  trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "timer", "mode": "once" }'],
+  steps: {
+    contentModifier: '{ type, name?, description?, headers?: [entry], properties?: [entry], body?: string }; entry = { name, type: "constant"|"expression", value, datatype? }',
+    groovyScript: '{ type, name?, description?, fileName } — code written with writeScript (or attached), never in the spec',
+    jsonToXml: '{ type, name?, description? }',
+    xmlToJson: '{ type, name?, description? }',
+    requestReplyHttp: '{ type, name?, description?, system?, url: "https://…" | "{{Param}}", method: GET|POST|PUT|PATCH|DELETE, authType: "None" }'
+  },
+  end: ['{ "type": "none" }', '{ "type": "httpReceiver", system?, url, method, authType: "None" }'],
+  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson }',
+  parameters: '{ "Name": "default value" } — used only as a whole receiver url "{{Name}}"',
+  resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
+  names: 'id: letters, digits, _ · packageId: letters, digits, dots · fileName, system: letter first, then letters, digits, _ · step names unique'
+}
 
 /** Validation result for the model: codes and short messages, never the spec itself */
 function compactInvalid(issues, instruction) {
@@ -331,10 +353,12 @@ const handlers = {
     return cpi.listMessageLogs({ status, sinceHours, top })
   },
 
-  async getSupportedSteps() {
+  async getSupportedSteps({ full } = {}) {
+    // The compact format is enough to write a spec and is about a quarter of the schema's size; it is
+    // re-sent with every later model call of the message, so its size counts several times.
     return {
-      schema: { ...schema, examples: undefined },
-      examples: schema.examples,
+      ...(full ? { schema: { ...schema, examples: undefined } } : { format: SPEC_FORMAT }),
+      example: schema.examples[0],
       notes: [
         'Flows are linear: trigger -> steps in order -> end. Error handling goes into the optional top-level exceptionSubprocess (not into steps).',
         'exceptionSubprocess runs when a step fails; its result is returned to the HTTPS sender. ${exception.message} holds the error text; set header CamelHttpResponseCode to return an HTTP error status.',

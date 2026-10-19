@@ -18,6 +18,7 @@ const llm = require('../lib/llm')
 const attachmentStore = require('../lib/attachments')
 const { importIflow } = require('../iflow-builder/import')
 const tools = require('./tools')
+const cpi = require('../lib/cpi-client')
 const history = require('./history')
 
 const LOG = cds.log('agent')
@@ -93,7 +94,7 @@ function draftContext(draft) {
 }
 
 /** Session defaults as structured context for the model, '' without defaults */
-function defaultsContext(defaults) {
+function defaultsContext(defaults, packageExists) {
   if (!defaults || !Object.keys(defaults).length) return ''
   const structured = {
     ...(defaults.packageId && { packageId: defaults.packageId }),
@@ -101,12 +102,29 @@ function defaultsContext(defaults) {
     ...(defaults.authNote && { receiverAuthentication: defaults.authNote })
   }
   const rules = [
-    defaults.packageId && '- Use packageId as the spec\'s packageId.',
+    defaults.packageId &&
+      `- Use packageId as the spec's packageId. ${
+        packageExists === true
+          ? 'It exists on the tenant: do not call listPackages or listIflows to check it.'
+          : packageExists === false
+            ? 'It does not exist on the tenant yet; the proposal panel lets the user create it. Do not call listPackages to look for it.'
+            : 'Whether it exists was not checked.'
+      }`,
     defaults.timer && '- Use this trigger.',
     defaults.authNote &&
       '- Create every receiver with authType "None", and tell the user in your summary to set up this authentication in the CPI web editor after creation.'
   ].filter(Boolean)
   return `Session defaults (set by the user for this conversation; they override earlier messages; use them and never ask about them):\n${JSON.stringify(structured)}\n${rules.join('\n')}`
+}
+
+/** Whether a package exists on the tenant; undefined when CPI could not be asked */
+async function packageExists(id) {
+  try {
+    await cpi.getPackage(id)
+    return true
+  } catch (e) {
+    return e.status === 404 ? false : undefined
+  }
 }
 
 // --- persistence -------------------------------------------------------------------
@@ -187,6 +205,7 @@ async function systemMessage(user, sessionId) {
     proposals: await tx.run(SELECT.from(Proposal).where({ session_ID: sessionId }).orderBy('createdAt')),
     session: await tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults', 'draftSpec'))
   }))
+  const defaults = session?.defaults ? JSON.parse(session.defaults) : null
   const lines = proposals.map((p) => {
     const result = p.result ? JSON.parse(p.result) : {}
     const detail = p.status === 'REJECTED' ? ` — reason: ${result.reason || 'none given'}` : p.status === 'FAILED' ? ` — error: ${p.error}` : ''
@@ -197,7 +216,7 @@ async function systemMessage(user, sessionId) {
     lines.length
       ? `Proposals in this conversation (current status; it overrides anything said earlier in the conversation):\n${lines.join('\n')}`
       : 'No proposals in this conversation yet.',
-    defaultsContext(session?.defaults ? JSON.parse(session.defaults) : null),
+    defaultsContext(defaults, defaults?.packageId ? await packageExists(defaults.packageId) : undefined),
     draftContext(session?.draftSpec ? JSON.parse(session.draftSpec) : null),
     attachmentsContext(await attachmentStore.list(user, sessionId))
   ].filter(Boolean)

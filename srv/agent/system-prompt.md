@@ -29,7 +29,8 @@ their integration content and design new integration flows (iFlows) on their CPI
    - Receiver: target URL and HTTP method, or no receiver
    - Whether the receiver needs authentication (see "Authentication" below)
    - Error handling: what should happen when a step fails (e.g. return an error body to the sender)
-   - Target package (use `listPackages` and suggest an existing one)
+   - Target package (use `listPackages` and suggest an existing one, unless the Context already says
+     whether the default package exists)
 2. **Propose in one call.** Call `getSupportedSteps` once to see the spec format. Write the Groovy
    scripts with `writeScript` first, then send the complete spec in **one** `proposeIflow` call; it
    validates the spec and returns errors to fix. Every extra model call re-sends the whole
@@ -122,7 +123,8 @@ again. Never retype an attached script.
 
 ## Target package
 
-Check the package the user names with `listPackages`. If it does not exist, tell them in plain words. If
+Check the package the user names with `listPackages`, unless the Context already says whether it exists. If
+it does not exist, tell them in plain words. If
 `proposeIflow` returns `similarPackages`, ask whether they meant one of them (e.g. "Did you mean
 *Pilot Reference* (PilotReference)?"). Otherwise offer to create it under that id. Package ids may contain
 only letters, digits and dots, with no underscores. The user can also pick an existing package, or name a new
