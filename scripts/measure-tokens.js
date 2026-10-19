@@ -74,6 +74,31 @@ async function runTurn(sessionId, message) {
   }
 }
 
+/**
+ * Groovy check outcomes in a session, from its tool results: writeScript / validateSpec / propose
+ * results that checked scripts (ok), found syntax errors (failed) or could not check (notChecked),
+ * and the number of scripts in the proposal.
+ */
+async function scriptChecks(sessionId) {
+  const messages = await call('GET', `/ChatSessions/${sessionId}/messages?$orderby=seq`)
+  const toolName = {}
+  for (const m of messages) if (m.role === 'assistant' && m.toolCalls?.startsWith('[')) for (const tc of JSON.parse(m.toolCalls)) toolName[tc.id] = tc.function.name
+  const out = { ok: 0, failed: 0, notChecked: 0, scriptsInProposal: 0 }
+  for (const m of messages) {
+    if (m.role !== 'tool') continue
+    const name = toolName[JSON.parse(m.toolCalls || '{}').tool_call_id]
+    if (!['writeScript', 'validateSpec', 'proposeIflow', 'proposeIflowUpdate'].includes(name)) continue
+    const content = m.content || ''
+    if (content.includes('Groovy syntax not checked') || content.includes('GROOVY_NOT_CHECKED')) out.notChecked++
+    else if (content.includes('GROOVY_SYNTAX')) out.failed++
+    else if (name === 'writeScript' ? content.includes('"stored"') : content.includes('"valid":true')) out.ok++
+  }
+  const proposals = await call('GET', `/Proposals?$filter=${encodeURIComponent(`session_ID eq ${sessionId} and kind eq 'IFLOW'`)}`)
+  const last = proposals.at(-1)
+  if (last) out.scriptsInProposal = [...(last.spec?.steps || []), ...(last.spec?.exceptionSubprocess?.steps || [])].filter((st) => st.type === 'groovyScript').length
+  return out
+}
+
 /** Model calls logged since `offset`: [{ prompt, completion }] plus failure lines */
 function usageSince(offset) {
   const text = fs.readFileSync(LOG, 'utf8').slice(offset)
@@ -120,6 +145,8 @@ async function main() {
     maxPromptTokens: Math.max(0, ...calls.map((c) => c.prompt)),
     minutes: Math.round((Date.now() - startedAt) / 6000) / 10,
     sessionId,
+    groovyChecks: sessionId ? await scriptChecks(sessionId).catch((e) => ({ error: e.message })) : null,
+    groovyUnavailable: (fs.readFileSync(LOG, 'utf8').slice(offset).match(/Groovy syntax check unavailable: [^\n]*/g) || []).slice(0, 5),
     replies: texts
   }
   console.log(JSON.stringify(result))

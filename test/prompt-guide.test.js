@@ -66,4 +66,12 @@ describe('prompt guide: SF -> Directory worked example', () => {
     expect(sortParams(strip(r.spec))).toEqual(sortParams(strip(spec)))
     expect(r.attachments).toEqual(attachments)
   })
+
+  test('the SourceSystem -> S/4HANA example is the measured request, passes the check and has 25 steps', () => {
+    const request = example('SourceSystem-s4-request')
+    expect(read('scripts/measure/SourceSystem-s4-request.md')).toBe(request)
+    expect(lint(request)).toEqual([])
+    const { estimateSteps } = loadUi5Module(path.join(ROOT, 'app/integration-pilot/webapp/util/promptLint.js'))
+    expect(estimateSteps(request)).toBe(25)
+  })
 })

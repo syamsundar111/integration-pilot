@@ -185,3 +185,65 @@ The proposal panel lists what to finish in the CPI web editor. For this iFlow:
 - Configure the value mappings `SF_EmpType` → `Directory_EmpType` and `SF_EmpSubGroup` →
   `Directory_EmpSubGroup` on the tenant.
 - Set the production schedule on the timer when the flow goes live.
+
+## Worked example: SourceSystem to S/4HANA (25 steps)
+
+A larger flow between two non-SAP-SourceApp systems: active hardware incidents from SourceSystem
+become S/4HANA maintenance notifications, and the notification numbers are written back. The request
+gives everything up front: package, trigger, the authentication to set up after creation, 25
+numbered steps with names, every URL as a parameter with a default, and the error handling.
+`RUNID` stands for a unique suffix (the measurement script replaces it); use your own ID and name.
+
+<!-- example:SourceSystem-s4-request -->
+```text
+Create an iFlow.
+Name: SourceSystem to S4HANA Maintenance Notifications RUNID
+ID: SourceSystem_to_S4HANA_Notifications_RUNID
+Package: PilotReference
+Trigger: timer, run once after deployment.
+Authentication: SourceSystem receivers use Basic with credential SNOW_API_USER; S/4HANA receivers use
+OAuth2 Client Credentials with credential S4_OAUTH. Create them with None; I set them up in the CPI
+web editor after creation.
+Purpose: read active hardware incidents from SourceSystem, create S/4HANA maintenance notifications for
+them, and write the notification numbers back to SourceSystem.
+
+Steps (in order):
+1. Content Modifier "Set Properties": constant properties sourceSystem = SourceSystem, targetSystem = S4HANA, plant = 1010, notificationType = M1, batchSize = 50
+2. Request-Reply "Get Incidents": GET, receiver RCVR_SourceSystem, URL {{SNOW_Incidents_URL}}, default https://source.example.com/api/now/table/incident?sysparm_query=active%3Dtrue%5Ecategory%3Dhardware&sysparm_limit=50
+3. Content Modifier "Store Incidents": property IncidentsJson = expression ${in.body}
+4. Groovy Script "Filter Incidents": from IncidentsJson.result keep incidents with priority 1, 2 or 3 and a non-empty assignment_group; set property IncidentCount; set the body to the kept incidents as a JSON array.
+5. Content Modifier "Store Filtered Incidents": property FilteredJson = expression ${in.body}
+6. Request-Reply "Get Equipment": GET, receiver RCVR_S4_Equipment, URL {{S4_Equipment_URL}}, default https://s4.example.com/sap/opu/odata/sap/API_EQUIPMENT/Equipment?$format=json&$top=500
+7. Content Modifier "Store Equipment": property EquipmentJson = expression ${in.body}
+8. Request-Reply "Get Functional Locations": GET, receiver RCVR_S4_FuncLoc, URL {{S4_FuncLoc_URL}}, default https://s4.example.com/sap/opu/odata/sap/API_FUNCTIONALLOCATION/FunctionalLocation?$format=json&$top=500
+9. Content Modifier "Store Functional Locations": property FuncLocJson = expression ${in.body}
+10. Groovy Script "Map to Notifications": for each incident in FilteredJson build an S/4HANA maintenance notification: NotificationText = short_description cut to 40 characters, MaintNotifLongText = description, MaintPriority = the incident priority, TechnicalObject = the Equipment whose SerialNumber equals the incident's cmdb_ci serial number (empty if none), FunctionalLocation = the functional location whose description equals the incident location (empty if none), NotificationType and MaintenancePlant from the properties notificationType and plant, and keep the incident sys_id; body = {"notifications": [...]}.
+11. Content Modifier "Store Notifications": property NotificationsJson = expression ${in.body}
+12. Content Modifier "Set CSRF Fetch Header": header x-csrf-token = constant Fetch
+13. Request-Reply "Fetch CSRF Token": GET, receiver RCVR_S4_Token, URL {{S4_Notification_Service_URL}}, default https://s4.example.com/sap/opu/odata/sap/API_MAINTNOTIFICATION
+14. Content Modifier "Keep CSRF Token": property CsrfToken = expression ${header.x-csrf-token}
+15. Groovy Script "Prepare Batch": set the body to property NotificationsJson, header x-csrf-token to property CsrfToken and header Content-Type to application/json.
+16. Request-Reply "Create Notifications": POST, receiver RCVR_S4_Notification, URL {{S4_Notification_Batch_URL}}, default https://s4.example.com/sap/opu/odata/sap/API_MAINTNOTIFICATION/MaintenanceNotification
+17. Content Modifier "Store S4 Response": property S4Response = expression ${in.body}
+18. Groovy Script "Read Notification Numbers": parse S4Response; build a list of {sys_id, notification} pairs from the created notifications; set property CreatedCount; body = the list as JSON.
+19. Content Modifier "Store Mapping": property MappingJson = expression ${in.body}
+20. Groovy Script "Build SourceSystem Updates": for each pair build {"sys_id": ..., "u_s4_notification": ..., "work_notes": "Created S/4HANA notification <number>"}; body = {"records": [...]}.
+21. Request-Reply "Update Incidents": POST, receiver RCVR_SourceSystem_Update, URL {{SNOW_Batch_Update_URL}}, default https://source.example.com/api/x_pilot/incident_batch_update
+22. Content Modifier "Store Update Response": property UpdateResponse = expression ${in.body}
+23. Groovy Script "Build Run Summary": set property Summary = "incidents read <n>, kept <IncidentCount>, notifications created <CreatedCount>".
+24. Content Modifier "Set Run Status": property RunStatus = constant Success, header SAP_ApplicationID = expression ${property.Summary}
+25. Groovy Script "Final Check": throw an exception if CreatedCount differs from IncidentCount.
+No receiver at the end.
+Error handling: exception subprocess with
+- Content Modifier "Set Error Properties": property ErrorMessage = expression ${exception.message}, property ErrorTime = expression ${date:now:yyyy-MM-dd'T'HH:mm:ss}
+- Groovy Script "Build Error Mail Body": body = plain text with ErrorTime, ErrorMessage and Summary (if set).
+```
+
+What to expect:
+
+- The assistant writes the 7 Groovy scripts with `writeScript` and builds the spec in parts.
+- Receivers are created with authentication None; the proposal panel reminds you to set Basic
+  (`SNOW_API_USER`) and OAuth2 Client Credentials (`S4_OAUTH`) on them in the CPI web editor.
+- The URL defaults are placeholders: set the real SourceSystem and S/4HANA addresses as externalized
+  parameters before deploying.
+
