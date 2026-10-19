@@ -57,7 +57,9 @@ large specs need more). Model answers are streamed: `LLM_IDLE_TIMEOUT_MS` (defau
 longest pause allowed in an answer and `LLM_TIMEOUT_MS` (default 900000) the cap for one model
 call; `LLM_STREAM=false` switches streaming off for a provider that does not support it.
 `AGENT_MAX_MODEL_CALLS` (default 20) caps the model calls per chat message; a 30-step flow with
-scripts needs about 15. `.cdsrc-private.json` binds the hybrid profile
+scripts needs about 15. `AGENT_MAX_TOKENS_PER_MESSAGE` (default 300000) caps the tokens (input +
+output) per message: the agent then stops with what is done and left, keeps the draft and the
+scripts, and "continue" resumes. The Activity page shows how close requests come to the budget. `.cdsrc-private.json` binds the hybrid profile
 to the destination service `iflowpilot-dest`. Both files were copied from iflow-pilot and are
 git-ignored. See iflow-pilot's README for setting up the destinations `CPI_API` and `NVIDIA_LLM`.
 

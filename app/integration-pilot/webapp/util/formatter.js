@@ -90,6 +90,7 @@ sap.ui.define(['sap/ui/core/format/DateFormat'], (DateFormat) => {
         `${u.modelCalls} model call${u.modelCalls === 1 ? '' : 's'}`,
         `${this.tokens(u.inputTokens)} in / ${this.tokens(u.outputTokens)} out tokens`,
         time,
+        u.tokenBudget ? `${Math.round(((u.totalTokens || 0) / u.tokenBudget) * 100)} % of budget${u.stoppedAtBudget ? ' (stopped)' : ''}` : null,
         u.model
       ]
         .filter(Boolean)

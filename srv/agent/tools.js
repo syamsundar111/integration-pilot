@@ -421,6 +421,7 @@ const handlers = {
     if (!checked && groovyCheck.required()) return compactInvalid([{ code: 'GROOVY_NOT_CHECKED', message: `${file}: the Groovy syntax check is unavailable (${reason}); try again later` }])
     await attachmentStore.save(ctx.user, ctx.sessionId, [{ fileName: file, content: code }], 'ai')
     ctx.attachments = undefined // reload: new content
+    ;(ctx.written ??= []).push(file)
     return {
       stored: file,
       lines: code.split('\n').length,

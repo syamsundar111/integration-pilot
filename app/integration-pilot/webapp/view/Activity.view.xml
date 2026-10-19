@@ -32,6 +32,11 @@
           <VBox renderType="Bare"><Label text="Input tokens" /><Title text="{path: 'view>/usage/totals/inputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
           <VBox renderType="Bare"><Label text="Output tokens" /><Title text="{path: 'view>/usage/totals/outputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
           <VBox renderType="Bare"><Label text="Tokens per request" /><Title text="{path: 'view>/usage/totals/avgTokensPerRequest', formatter: '.formatter.tokens'}" level="H3" /></VBox>
+          <VBox renderType="Bare">
+            <Label text="Budget per message" />
+            <Title text="{path: 'view>/usage/budget/limit', formatter: '.formatter.tokens'}" level="H3" />
+            <Text text="{parts: ['view>/usage/budget/maxPerRequest', 'view>/usage/budget/maxShare', 'view>/usage/budget/stoppedAtBudget'], formatter: '.budgetText'}" class="ipSubtle" />
+          </VBox>
         </HBox>
         <HBox wrap="Wrap" class="ipGapM sapUiSmallMarginTop" renderType="Bare">
           <Table items="{view>/usage/byDay}" width="32rem" noDataText="No chat requests in this period" headerText="Per day">

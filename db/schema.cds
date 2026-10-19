@@ -50,6 +50,8 @@ entity ChatTurn : cuid, managed {
   totalTokens     : Integer default 0;
   durationMs      : Integer; // the whole turn, start to end
   model           : String(255); // model(s) that answered, comma-separated
+  tokenBudget     : Integer; // AGENT_MAX_TOKENS_PER_MESSAGE when the turn ran
+  stoppedAtBudget : Boolean default false;
 }
 
 type ProposalStatus : String(20) enum { PENDING; APPROVED; REJECTED; DONE; FAILED };

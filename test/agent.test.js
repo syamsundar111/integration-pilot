@@ -1159,3 +1159,35 @@ describe('fewer and smaller model inputs', () => {
     expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('It does not exist on the tenant yet')
   })
 })
+
+describe('token budget per message', () => {
+  const { GROOVY } = require('./helpers')
+  const used = (res, tokens) => ({ ...res, model: 'test/model', usage: { inputTokens: tokens - 100, outputTokens: 100, totalTokens: tokens, durationMs: 5 } })
+  afterEach(() => delete process.env.AGENT_MAX_TOKENS_PER_MESSAGE)
+
+  test('stops at AGENT_MAX_TOKENS_PER_MESSAGE with what is done and left; "continue" resumes with the kept work', async () => {
+    process.env.AGENT_MAX_TOKENS_PER_MESSAGE = '2000'
+    llm.chat
+      .mockResolvedValueOnce(used(toolCall('writeScript', { fileName: 'mapUsers', code: GROOVY }), 1200))
+      .mockResolvedValueOnce(used(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Budget_1', name: 'Budget', packageId: 'PilotReference', trigger: { type: 'timer', mode: 'once' }, end: { type: 'none' } } }] }), 1200))
+    const turn = await chat({ message: 'Build a large flow' })
+    expect(llm.chat).toHaveBeenCalledTimes(2) // the third call would exceed the budget
+    expect(turn).toMatchObject({ status: 'DONE', stoppedAtBudget: true, tokenBudget: 2000, totalTokens: 2400 })
+    expect(turn.text).toMatch(/^I stopped because this message reached its token budget \(2k of 2k tokens\)\./)
+    expect(turn.text).toContain('Done so far: scripts written: mapUsers.groovy; draft spec Agent_Budget_1 with 0 steps.')
+    expect(turn.text).toContain('Left: complete the spec and propose the iFlow.')
+    expect(turn.text).toContain('send "continue" to resume')
+
+    // "continue": a new budget; the draft and the script are in the context, not redone
+    delete process.env.AGENT_MAX_TOKENS_PER_MESSAGE
+    llm.chat.mockResolvedValueOnce(used(answer('Resuming.'), 500))
+    await chat({ sessionId: turn.sessionId, message: 'continue' })
+    const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+    expect(system).toMatch(/Draft spec of this conversation \(built with editDraftSpec\): Agent_Budget_1/)
+    expect(system).toMatch(/mapUsers\.groovy \(Groovy, \d+ lines, written by you with writeScript\)/)
+
+    const { data: usage } = await GET('/api/usage(days=1)')
+    expect(usage.budget).toMatchObject({ limit: 300000, stoppedAtBudget: expect.any(Number) })
+    expect(usage.budget.stoppedAtBudget).toBeGreaterThanOrEqual(1)
+  })
+})

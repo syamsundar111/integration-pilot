@@ -213,7 +213,7 @@ describe('Generate page', () => {
     await newChat()
     await proposal('UITEST_PROPOSE')
     const answer = (await chat('/messages')).find((m) => m.kind === 'assistant')
-    expect(answer.usageText).toBe('3 model calls · 3.0k in / 300 out tokens · 0 s · fake/model')
+    expect(answer.usageText).toBe('3 model calls · 3.0k in / 300 out tokens · 0 s · 1 % of budget · fake/model')
     expect(await (await text('This conversation: 1 request · 3.3k tokens (3.0k in / 300 out) · 3 model calls')).getVisible()).toBe(true)
 
     await browser.goTo({ sHash: '#/activity' })

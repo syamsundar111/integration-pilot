@@ -27,6 +27,12 @@ sap.ui.define(
         }
       },
 
+      /** "largest 262k (87 %) · 0 stopped" */
+      budgetText(maxPerRequest, maxShare, stopped) {
+        if (maxPerRequest == null) return ''
+        return `largest ${this.formatter.tokens(maxPerRequest)} (${maxShare} %) · ${stopped || 0} stopped at the budget`
+      },
+
       inOut(input, output) {
         return `${this.formatter.tokens(input)} / ${this.formatter.tokens(output)}`
       },

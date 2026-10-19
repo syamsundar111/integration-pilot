@@ -486,7 +486,16 @@ sap.ui.define(
       finishTurn(t) {
         this.stopTurnPolling()
         const c = this.chat()
-        const usage = { modelCalls: t.modelCalls, inputTokens: t.inputTokens, outputTokens: t.outputTokens, totalTokens: t.totalTokens, durationMs: t.durationMs, model: t.model }
+        const usage = {
+          modelCalls: t.modelCalls,
+          inputTokens: t.inputTokens,
+          outputTokens: t.outputTokens,
+          totalTokens: t.totalTokens,
+          durationMs: t.durationMs,
+          model: t.model,
+          tokenBudget: t.tokenBudget,
+          stoppedAtBudget: t.stoppedAtBudget
+        }
         if (t.status === 'DONE') this.addMessage(this.toMessage('assistant', t.text || '', usage))
         else if (t.status === 'CANCELLED') this.addMessage(this.toMessage('assistant', 'Cancelled.', usage))
         else {

@@ -25,6 +25,7 @@ const LOG = cds.log('agent')
 const maxIterations = () => Number(process.env.AGENT_MAX_MODEL_CALLS || 20)
 const MIN_PROGRESS_TOKENS = 50 // the "~N tokens so far" line appears from this size on
 const MAX_CUT_OFFS = 2 // answers cut off for length per message before the agent gives up
+const tokenBudget = () => Number(process.env.AGENT_MAX_TOKENS_PER_MESSAGE || 300_000) // input + output tokens per user message
 const CUT_OFF_NOTE =
   'Your previous response was cut off because it reached the output limit; nothing of it was used. Build the spec in parts instead: ' +
   'write each Groovy script with writeScript, then editDraftSpec with {"op":"set",...} and addSteps (at most 8 steps per call), then proposeIflow with { "useDraftSpec": true }.'
@@ -311,9 +312,38 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
     if (res.model) usage.models.add(res.model)
   }
   /** Usage as stored on the turn and on its final answer */
+  const budget = tokenBudget()
+  let stoppedAtBudget = false
+  let lastErrors = null // errors of the last failed validation or proposal
   const usageNow = () => {
     const { models, ...counts } = usage
-    return { ...counts, durationMs: Date.now() - started, model: [...models].join(', ') || null }
+    return { ...counts, durationMs: Date.now() - started, model: [...models].join(', ') || null, tokenBudget: budget, stoppedAtBudget }
+  }
+
+  /** What is done and what is left when the token budget stops the message (no model call needed) */
+  const budgetStopText = async () => {
+    const { ChatSession } = E()
+    const s = await db(user, (tx) => tx.run(SELECT.one.from(ChatSession, sessionId).columns('draftSpec')))
+    const draft = s?.draftSpec ? JSON.parse(s.draftSpec).spec : null
+    const proposed = (await loadProposals(user, ctx.proposals)).filter((p) => p.kind === 'IFLOW')
+    const done = [
+      ...(ctx.written?.length ? [`scripts written: ${[...new Set(ctx.written)].join(', ')}`] : []),
+      ...(draft ? [`draft spec ${draft.id || ''} with ${draft.steps?.length || 0} steps`] : []),
+      ...proposed.map((p) => `proposal for ${p.iflowId} is ready for review`)
+    ]
+    const left = proposed.length
+      ? 'nothing for this request'
+      : lastErrors?.length
+        ? `fix ${lastErrors.length} error(s), e.g. ${lastErrors[0]}, and propose the iFlow`
+        : 'complete the spec and propose the iFlow'
+    return [
+      `I stopped because this message reached its token budget (${Math.round(usage.totalTokens / 1000)}k of ${Math.round(budget / 1000)}k tokens).`,
+      `Done so far: ${done.length ? done.join('; ') : 'nothing that is kept'}.`,
+      `Left: ${left}.`,
+      proposed.length ? '' : 'The draft and the scripts are kept: send "continue" to resume where I stopped.'
+    ]
+      .filter(Boolean)
+      .join('\n\n')
   }
 
   const turn = [{ role: 'user', content: message }]
@@ -332,6 +362,12 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
 
     for (let i = 0; i < maxIterations() && text === null; i++) {
       await checkCancel()
+      if (usage.totalTokens >= budget) {
+        stoppedAtBudget = true
+        await emit('info', `Token budget of ${Math.round(budget / 1000)}k reached — stopping`)
+        text = await budgetStopText()
+        break
+      }
       if (i > 0) await emit('thinking', 'Thinking…')
       // while the answer streams in: "~1,200 tokens so far" on the current progress line, every 3s at most
       let shownAt = 0
@@ -370,9 +406,11 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
           turn.push({ role: 'tool', tool_call_id: tc.id, content })
           if (name === 'validateSpec') {
             const r = parseArgs(content)
+            lastErrors = r.valid ? null : r.errors || lastErrors
             if (!r.valid) await emit('validation', 'Spec has errors — revising', r.errors ? `${r.errors.length} error(s)` : r.error?.message)
           } else if (name === 'proposeIflow' || name === 'proposeIflowUpdate' || name === 'proposePackage') {
             const r = parseArgs(content)
+            lastErrors = r.valid ? null : r.errors || lastErrors
             if (r.valid) await emit('proposal', name === 'proposeIflowUpdate' ? 'Update proposal ready' : 'Proposal ready', name === 'proposePackage' ? args.id : r.iflowId)
             else await emit('validation', 'Spec has errors — revising', r.errors ? `${r.errors.length} error(s)` : r.error?.message)
           }
@@ -380,11 +418,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
         continue
       }
 
-      text =
-        msg.content ||
-        (finish === 'length'
-          ? 'My answer was cut off because it got too long. Please ask again, maybe in smaller parts.'
-          : 'I could not produce an answer. Please rephrase your request.')
+      text = msg.content || 'I could not produce an answer. Please rephrase your request.'
     }
     if (text === null) text = `I stopped after ${maxIterations()} steps without finishing. Please tell me how to continue, or narrow down the request.`
     await finish(text)

@@ -358,9 +358,18 @@ service ApiService {
     model : String;
   }
 
+  type UsageBudget {
+    limit           : Integer; // AGENT_MAX_TOKENS_PER_MESSAGE
+    maxPerRequest   : Integer;
+    maxShare        : Integer; // % of the limit used by the largest request
+    avgPerRequest   : Integer;
+    stoppedAtBudget : Integer; // requests stopped by the budget
+  }
+
   type UsageSummary {
     days    : Integer;
     since   : String;
+    budget  : UsageBudget;
     totals  : UsageTotals;
     byDay   : many UsageDay;
     byModel : many UsageModel;

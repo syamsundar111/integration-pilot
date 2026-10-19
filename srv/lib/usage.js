@@ -16,7 +16,7 @@ async function usageSummary({ days = 30, user } = {}) {
   const turns = await cds.tx({ user }, (tx) =>
     tx.run(
       SELECT.from('iflowpilot.ChatTurn')
-        .columns('createdAt', 'status', 'modelCalls', 'inputTokens', 'outputTokens', 'totalTokens', 'durationMs', 'model')
+        .columns('createdAt', 'status', 'modelCalls', 'inputTokens', 'outputTokens', 'totalTokens', 'durationMs', 'model', 'stoppedAtBudget')
         .where({ createdAt: { '>=': since }, status: { '!=': 'RUNNING' } })
     )
   )
@@ -40,9 +40,20 @@ async function usageSummary({ days = 30, user } = {}) {
     for (const m of String(t.model || '').split(', ').filter(Boolean)) add((byModel[m] ??= empty()), t)
   }
   const avg = (acc) => ({ ...acc, avgTokensPerRequest: acc.requests ? Math.round(acc.totalTokens / acc.requests) : 0 })
+  // the token budget per message (AGENT_MAX_TOKENS_PER_MESSAGE): how close requests come to it
+  const limit = Number(process.env.AGENT_MAX_TOKENS_PER_MESSAGE || 300_000)
+  const maxPerRequest = Math.max(0, ...turns.map((t) => t.totalTokens || 0))
+  const budget = {
+    limit,
+    maxPerRequest,
+    maxShare: limit ? Math.round((maxPerRequest / limit) * 100) : 0,
+    avgPerRequest: totals.requests ? Math.round(totals.totalTokens / totals.requests) : 0,
+    stoppedAtBudget: turns.filter((t) => t.stoppedAtBudget).length
+  }
   return {
     days,
     since,
+    budget,
     totals: avg(totals),
     byDay: Object.entries(byDay)
       .map(([day, acc]) => ({ day, ...avg(acc) }))
