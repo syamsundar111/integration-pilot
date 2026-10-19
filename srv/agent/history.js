@@ -11,6 +11,8 @@
  */
 
 const SPEC_IN_ARGS = new Set(['validateSpec', 'proposeIflow', 'proposeIflowUpdate'])
+/** Notes the agent adds to a turn for the model (e.g. "your answer was cut off"); not shown again in later turns */
+const NOTE_PREFIX = '[Integration Pilot] '
 const SPEC_IN_RESULT = new Set(['getIflowSpec', 'getDraftSpec'])
 const OMITTED = '(older spec omitted: a newer version follows; getDraftSpec returns the latest)'
 const SCRIPT_OMITTED = '(older version omitted: a newer writeScript of this file follows)'
@@ -35,7 +37,9 @@ function omitSpecBlocks(text) {
 
 /** Earlier turns for the model: user messages and final answers, without tool exchanges */
 function pastTurns(messages) {
-  return messages.filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.tool_calls)).map((m) => (m.role === 'assistant' ? { ...m, content: omitSpecBlocks(m.content) } : m))
+  return messages
+    .filter((m) => !(m.role === 'user' && String(m.content).startsWith(NOTE_PREFIX)))
+    .filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.tool_calls)).map((m) => (m.role === 'assistant' ? { ...m, content: omitSpecBlocks(m.content) } : m))
 }
 
 /** The running turn with every spec copy and script version except the newest replaced (the turn itself is not changed) */
@@ -75,4 +79,4 @@ function compactTurn(turn) {
   return out
 }
 
-module.exports = { pastTurns, compactTurn, omitSpecBlocks, OMITTED, SCRIPT_OMITTED }
+module.exports = { pastTurns, compactTurn, omitSpecBlocks, OMITTED, SCRIPT_OMITTED, NOTE_PREFIX }

@@ -46,7 +46,7 @@ const definitions = [
   fn('getSupportedSteps', 'The iFlow spec v1 JSON schema with examples: what can be built and how to write a spec. Call before proposing an iFlow.'),
   fn(
     'validateSpec',
-    'Validate a complete iFlow spec with the same checks the builder runs. Always call it before proposeIflow/proposeIflowUpdate and fix every error first. Returns { valid: true } or compact errors "CODE path: message".',
+    'Check a spec with the same checks as proposing, without proposing it. proposeIflow validates too, so use this only after a failed proposal. Returns { valid: true } or compact errors "CODE path: message".',
     {
       spec: { type: 'object', description: 'Complete iFlow spec v1' },
       useDraftSpec: { type: 'boolean', description: "true: validate the conversation's draft spec (see Context) instead of sending one" }
@@ -76,8 +76,9 @@ At most ${MAX_STEPS_PER_EDIT} steps added or replaced per call. Returns the draf
   fn('explainIflow', 'Parse an existing iFlow (trigger, steps, adapters, parameters, scripts) to explain it.', { iflowId: { type: 'string' } }, ['iflowId']),
   fn(
     'proposeIflow',
-    'Propose a new iFlow for the user to approve. After validateSpec returned valid, call it with { "useValidatedSpec": true } instead of sending the spec again. Nothing is created until the user approves.',
+    'Propose a new iFlow for the user to approve. Validates the spec and returns errors to fix, so send the complete spec here directly (no validateSpec before). A draft built with editDraftSpec: { "useDraftSpec": true }. Nothing is created until the user approves.',
     {
+      useDraftSpec: { type: 'boolean', description: "true: propose the conversation's draft spec (built with editDraftSpec)" },
       useValidatedSpec: { type: 'boolean', description: 'true: propose the spec the last validateSpec call accepted' },
       spec: { type: 'object', description: 'Complete iFlow spec v1 (only if you did not validate it)' }
     }
@@ -90,8 +91,9 @@ At most ${MAX_STEPS_PER_EDIT} steps added or replaced per call. Returns the draf
   ),
   fn(
     'proposeIflowUpdate',
-    'Propose new content for an EXISTING iFlow (same id and package). Start from getIflowSpec, change only what the user asked for, validate the complete spec with validateSpec, then call this with { "useValidatedSpec": true }. Nothing changes until the user approves.',
+    'Propose new content for an EXISTING iFlow (same id and package). Start from getIflowSpec (its spec becomes the draft), change only what the user asked for with editDraftSpec, then call this with { "useDraftSpec": true }. Validates and returns errors to fix. Nothing changes until the user approves.',
     {
+      useDraftSpec: { type: 'boolean', description: "true: propose the conversation's draft spec (built with editDraftSpec)" },
       useValidatedSpec: { type: 'boolean', description: 'true: propose the spec the last validateSpec call accepted' },
       spec: { type: 'object', description: 'Complete iFlow spec v1 of the updated iFlow (only if you did not validate it)' }
     }
@@ -154,16 +156,21 @@ function unparsableSpec(spec) {
 }
 
 /**
- * The spec to propose: the one passed, or the one the last validateSpec call accepted (in this
- * turn, or kept as the conversation's draft spec from an earlier one)
+ * The spec to propose: the one passed, the conversation's draft spec (useDraftSpec), or the one
+ * the last validateSpec call accepted (in this turn, or kept as the draft from an earlier one)
  */
-async function specToPropose({ spec, useValidatedSpec }, ctx) {
+async function specToPropose({ spec, useValidatedSpec, useDraftSpec }, ctx) {
   if (spec) return { spec }
+  if (useDraftSpec) {
+    const draft = await draftOf(ctx)
+    if (draft?.spec) return { spec: draft.spec }
+    return { error: compactInvalid([{ code: 'NO_DRAFT', message: 'spec: this conversation has no draft spec — build it with editDraftSpec or send the complete spec' }]) }
+  }
   if (useValidatedSpec && ctx.validatedSpec) return { spec: ctx.validatedSpec }
   const draft = useValidatedSpec ? await draftOf(ctx) : null
   if (draft?.valid) return { spec: draft.spec }
   return {
-    error: compactInvalid([{ code: 'NO_VALIDATED_SPEC', message: 'spec: no validated spec — call validateSpec with the complete spec first, then propose with { "useValidatedSpec": true }' }])
+    error: compactInvalid([{ code: 'NO_VALIDATED_SPEC', message: 'spec: no validated spec — send the complete spec, or { "useDraftSpec": true } for a draft built with editDraftSpec' }])
   }
 }
 
@@ -336,8 +343,8 @@ const handlers = {
         'Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs; define each in "parameters".',
         'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).',
         'Write every Groovy script with writeScript (plain code), then reference it in the spec by fileName without code; never put Groovy code into a spec.',
-        'More than 8 steps: build the draft with editDraftSpec (set, then addSteps with at most 8 steps per call), validate it with validateSpec { useDraftSpec: true }, fix single steps with replaceStep.',
-        'validateSpec checks the syntax of every Groovy script (GROOVY_SYNTAX file:line:column: message); fix your scripts with writeScript, ask the user to fix attached ones.'
+        'Send the complete spec in one proposeIflow call (it validates). Only when an answer was cut off for length: build the draft with editDraftSpec (set, then addSteps with at most 8 steps per call) and propose { useDraftSpec: true }; fix single steps with replaceStep.',
+        'Proposing checks the syntax of every Groovy script (GROOVY_SYNTAX file:line:column: message); fix your scripts with writeScript, ask the user to fix attached ones.'
       ]
     }
   },
@@ -478,15 +485,15 @@ const handlers = {
       ...(draft.exceptionSubprocess && { exceptionSteps: outline(draft.exceptionSubprocess.steps) }),
       ...(open.length && { openIssues: compactInvalid(open).errors }),
       next: open.length
-        ? 'Continue with editDraftSpec; when the draft is complete, call validateSpec with { "useDraftSpec": true }.'
-        : 'The draft is complete: call validateSpec with { "useDraftSpec": true }.'
+        ? 'Continue with editDraftSpec; when the draft is complete, propose it with { "useDraftSpec": true }.'
+        : 'The draft is complete: propose it with { "useDraftSpec": true }.'
     }
   },
 
   async getDraftSpec(_args, ctx) {
     const draft = await draftOf(ctx)
     if (!draft) return { error: { code: 'NO_DRAFT', message: 'This conversation has no draft spec.' } }
-    return { source: draft.source, spec: draft.spec, instruction: 'To change it, validate the complete changed spec with validateSpec, then propose with { "useValidatedSpec": true }.' }
+    return { source: draft.source, spec: draft.spec, instruction: 'To change it, use editDraftSpec, then propose with { "useDraftSpec": true }.' }
   },
 
   async explainIflow({ iflowId }) {
@@ -504,7 +511,7 @@ const handlers = {
     if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
-    if (!valid) return compactInvalid(issues, 'Fix these errors, call validateSpec, then propose again.')
+    if (!valid) return compactInvalid(issues, 'Fix only what these errors name and propose again.')
 
     // Fail early on things the user could not approve successfully
     const existing = await iflowExists(spec.id)
@@ -519,7 +526,7 @@ const handlers = {
 
     const { summary } = await build(spec, { attachments }) // proves the spec builds into a zip
     const groovy = await groovySyntax(spec, attachments)
-    if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts, call validateSpec, then propose again.')
+    if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts with writeScript and propose again.')
     const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, attachments })
     return {
       valid: true,
@@ -554,7 +561,7 @@ const handlers = {
       ...(attachedFiles.length && { attachedFiles }),
       ...(keptUploads.length && { keptUploads }),
       instruction:
-        'Change only what the user asked for, keep everything else as it is, validate the complete spec with validateSpec and call proposeIflowUpdate. Scripts and XSLT files are attached files: keep their steps without code' +
+        'Change only what the user asked for, keep everything else as it is, edit the draft with editDraftSpec and call proposeIflowUpdate with { "useDraftSpec": true }. Scripts and XSLT files are attached files: keep their steps without code' +
         (keptUploads.length ? `; the user's uploads ${keptUploads.join(', ')} replace the iFlow's current files.` : '.')
     }
   },
@@ -567,7 +574,7 @@ const handlers = {
     if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflowUpdate' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
-    if (!valid) return compactInvalid(issues, 'Fix these errors, call validateSpec, then propose again.')
+    if (!valid) return compactInvalid(issues, 'Fix only what these errors name and propose again.')
     const current = await currentSpec(spec.id)
     if (!current) return { valid: false, errors: [`id: iFlow '${spec.id}' does not exist — use proposeIflow to create a new iFlow`] }
     if (current.packageId !== spec.packageId)
@@ -581,7 +588,7 @@ const handlers = {
     if (!changes.length) return { valid: false, errors: ['NO_CHANGE spec: nothing changed compared to the current iFlow'] }
     const { summary } = await build(spec, { attachments })
     const groovy = await groovySyntax(spec, attachments)
-    if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts, call validateSpec, then propose again.')
+    if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts with writeScript and propose again.')
     const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments })
     return {
       valid: true,

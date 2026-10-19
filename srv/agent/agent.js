@@ -23,6 +23,10 @@ const history = require('./history')
 const LOG = cds.log('agent')
 const maxIterations = () => Number(process.env.AGENT_MAX_MODEL_CALLS || 20)
 const MIN_PROGRESS_TOKENS = 50 // the "~N tokens so far" line appears from this size on
+const MAX_CUT_OFFS = 2 // answers cut off for length per message before the agent gives up
+const CUT_OFF_NOTE =
+  'Your previous response was cut off because it reached the output limit; nothing of it was used. Build the spec in parts instead: ' +
+  'write each Groovy script with writeScript, then editDraftSpec with {"op":"set",...} and addSteps (at most 8 steps per call), then proposeIflow with { "useDraftSpec": true }.'
 const HISTORY_LIMIT = 40 // earlier user messages and answers sent back to the model
 const INTERRUPTED = 'Interrupted by server restart — please send your message again.'
 const PACKAGE_ID = /^[A-Za-z0-9.]+$/
@@ -84,7 +88,7 @@ function draftContext(draft) {
   return (
     `Draft spec of this conversation (${source}${valid ? ', valid' : ''}): ${spec.id} "${spec.name}", ${spec.steps?.length || 0} steps${placeholders ? `, ${placeholders} placeholder(s)` : ''}, package ${spec.packageId}. ` +
     'It is the latest spec of the conversation; earlier copies are not repeated in the history. ' +
-    'Read it with getDraftSpec only if you need to change it; to propose it unchanged, call validateSpec with { "useDraftSpec": true }, then proposeIflow with { "useValidatedSpec": true }.'
+    'Read it with getDraftSpec only if you need to change it; change it with editDraftSpec; propose it with { "useDraftSpec": true }.'
   )
 }
 
@@ -305,6 +309,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
     const past = await loadHistory(user, sessionId)
     const system = await systemMessage(user, sessionId)
     let text = null
+    let cutOffs = 0
 
     for (let i = 0; i < maxIterations() && text === null; i++) {
       await checkCancel()
@@ -322,6 +327,17 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
       count(res)
       const { message: msg, finish_reason: finish } = res.choices[0]
       if (res.fallbackUsed) await emit('info', `Answered by fallback model ${res.model}`)
+
+      // Cut off at the output limit: a truncated tool call cannot be used. The model continues in parts.
+      if (finish === 'length') {
+        if (++cutOffs > MAX_CUT_OFFS) {
+          text = 'My answers were cut off several times because they got too long. Please narrow down the request or split it into parts.'
+          break
+        }
+        await emit('info', 'Answer cut off at the length limit — continuing in parts')
+        turn.push({ role: 'user', content: history.NOTE_PREFIX + CUT_OFF_NOTE })
+        continue
+      }
 
       if (msg.tool_calls?.length) {
         const toolCalls = msg.tool_calls.map(({ id, type, function: f }) => ({ id, type, function: { name: f.name, arguments: f.arguments || '{}' } }))

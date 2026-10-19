@@ -1068,7 +1068,7 @@ describe('editDraftSpec: building a large spec in parts', () => {
     const results = llm.chat.mock.calls.at(-1)[0].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))
 
     expect(results[0]).toMatchObject({ saved: true, id: 'Agent_Big_1', steps: expect.arrayContaining(['0. Step 1 (contentModifier)', '7. Step 8 (contentModifier)']) })
-    expect(results[0].next).toMatch(/call validateSpec with \{ "useDraftSpec": true \}/)
+    expect(results[0].next).toMatch(/propose it with \{ "useDraftSpec": true \}/)
     expect(results[1].openIssues).toEqual([expect.stringMatching(/^STEP_NOT_IN_V1 steps\[15\]: 'router'/)])
     expect(results[2]).toMatchObject({ valid: false, errors: [expect.stringMatching(/^STEP_NOT_IN_V1 steps\[15\]/)] })
     expect(results[3]).toMatchObject({ saved: true, exceptionSteps: ['0. Set Error (contentModifier)'] })
@@ -1096,5 +1096,41 @@ describe('editDraftSpec: building a large spec in parts', () => {
     for (const r of results) expect(r.instruction).toMatch(/^Nothing was changed/)
     const { data: session } = await GET(`/api/ChatSessions/${turn.sessionId}`)
     expect(session.draftSpec).toBeNull()
+  })
+})
+
+describe('one call instead of parts', () => {
+  test('a draft is proposed directly with useDraftSpec', async () => {
+    llm.chat
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Draft_Direct', name: 'Draft Direct', packageId: 'PilotReference', trigger: { type: 'timer', mode: 'once' }, end: { type: 'none' } } }, { op: 'addSteps', steps: [{ type: 'jsonToXml', name: 'To XML' }] }] }))
+      .mockResolvedValueOnce(toolCall('proposeIflow', { useDraftSpec: true }))
+      .mockResolvedValueOnce(answer('Ready.'))
+    const turn = await chat({ message: 'Build it' })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Agent_Draft_Direct' })])
+    expect(llm.chat).toHaveBeenCalledTimes(3) // no validateSpec call in between
+  })
+
+  test('an answer cut off at the length limit is not used; the model is told to continue in parts', async () => {
+    const cutOff = { choices: [{ finish_reason: 'length', message: { role: 'assistant', content: null, tool_calls: [{ id: 'p', type: 'function', function: { name: 'proposeIflow', arguments: '{"spec":{"id":"X","steps":[{"ty' } }] } }] }
+    llm.chat.mockResolvedValueOnce(cutOff).mockResolvedValueOnce(answer('Continuing in parts.'))
+    const turn = await chat({ message: 'Build a big one' })
+    expect(turn.status).toBe('DONE')
+    expect(turn.events.map((e) => e.label)).toContain('Answer cut off at the length limit — continuing in parts')
+    const second = llm.chat.mock.calls.at(-1)[0].messages
+    expect(second.at(-1)).toMatchObject({ role: 'user', content: expect.stringMatching(/^\[Integration Pilot\] Your previous response was cut off/) })
+    expect(second.some((m) => m.tool_calls)).toBe(false) // the truncated tool call was dropped
+
+    // the note is not part of later turns
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ sessionId: turn.sessionId, message: 'next' })
+    expect(JSON.stringify(llm.chat.mock.calls.at(-1)[0].messages)).not.toContain('[Integration Pilot]')
+  })
+
+  test('after repeated cut-offs the agent stops with a hint', async () => {
+    const cutOff = { choices: [{ finish_reason: 'length', message: { role: 'assistant', content: 'x' } }] }
+    llm.chat.mockResolvedValueOnce(cutOff).mockResolvedValueOnce(cutOff).mockResolvedValueOnce(cutOff)
+    const turn = await chat({ message: 'Build a huge one' })
+    expect(turn.text).toMatch(/cut off several times/)
+    expect(llm.chat).toHaveBeenCalledTimes(3)
   })
 })
