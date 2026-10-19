@@ -32,8 +32,8 @@
   },
   "scripts": {
     "start": "cds-serve",
-    "watch": "cds watch",
-    "watch:hybrid": "cds bind --exec --profile hybrid -- cds watch --profile hybrid",
+    "watch": "cds deploy && cds watch",
+    "watch:hybrid": "cds deploy --profile hybrid && cds bind --exec --profile hybrid -- cds watch --profile hybrid",
     "watch:hana": "cds bind --exec --profile hybrid-hana -- cds watch --profile hybrid-hana",
     "db:deploy": "cds deploy",
     "templates:derive": "node srv/iflow-builder/derive-templates.js",

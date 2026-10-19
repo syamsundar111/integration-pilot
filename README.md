@@ -48,7 +48,8 @@ xs-security.json                    XSUAA: scope Admin, role collection Integrat
 ```bash
 npm install
 npm run ui:install       # UI5 Tooling and linter (only needed for build/lint)
-npm run db:deploy        # creates db.sqlite (git-ignored) for the local profiles; run it again after schema changes
+npm run db:deploy        # creates db.sqlite (git-ignored) for the local profiles; npm run watch / watch:hybrid
+                         # also run it on start, adding new columns and keeping the data
 npm run groovy-check:build  # Groovy syntax check sidecar (needs JDK 17+ and Maven)
 ```
 
