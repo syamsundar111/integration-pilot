@@ -32,7 +32,48 @@ public final class SyntaxChecker {
     private SyntaxChecker() {
     }
 
+    static final int MAX_LOCATE_LINES = 600;
+    static final long LOCATE_BUDGET_MS = 3000;
+
+    /**
+     * Syntax errors of a script. The Groovy parser often reports an error inside a closure or
+     * block as "Unexpected input" at the block's opening brace; then the line whose removal makes
+     * the script parse is named in the message ("probably at line N: ...").
+     */
     public static List<Error> check(String fileName, String code) {
+        List<Error> errors = parse(fileName, code);
+        if (errors.size() == 1 && errors.get(0).message().startsWith("Unexpected input")) {
+            Integer culprit = locate(fileName, code);
+            Error e = errors.get(0);
+            if (culprit != null && culprit != e.line()) {
+                String text = code.split("\n", -1)[culprit - 1].trim();
+                if (text.length() > 80) text = text.substring(0, 77) + "...";
+                return List.of(new Error(culprit, 1, e.message() + " (reported at line " + e.line() + ":" + e.column() + "; the problem is probably at line " + culprit + ": " + text + ")"));
+            }
+        }
+        return errors;
+    }
+
+    /** The single line whose removal makes the script parse, or null */
+    static Integer locate(String fileName, String code) {
+        String[] lines = code.split("\n", -1);
+        if (lines.length > MAX_LOCATE_LINES) return null;
+        long deadline = System.currentTimeMillis() + LOCATE_BUDGET_MS;
+        Integer found = null;
+        for (int i = 0; i < lines.length; i++) {
+            if (System.currentTimeMillis() > deadline) return null;
+            if (lines[i].isBlank()) continue;
+            String[] copy = lines.clone();
+            copy[i] = "";
+            if (parse(fileName, String.join("\n", copy)).isEmpty()) {
+                if (found != null) return null; // more than one candidate: no reliable answer
+                found = i + 1;
+            }
+        }
+        return found;
+    }
+
+    private static List<Error> parse(String fileName, String code) {
         CompilerConfiguration config = new CompilerConfiguration();
         config.setDisabledGlobalASTTransformations(Set.of("groovy.grape.GrabAnnotationTransformation"));
         config.setTolerance(10); // report up to 10 errors per script instead of stopping at the first

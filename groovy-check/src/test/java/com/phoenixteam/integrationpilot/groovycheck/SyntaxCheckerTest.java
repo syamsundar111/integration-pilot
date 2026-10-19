@@ -57,4 +57,27 @@ class SyntaxCheckerTest {
         String grab = "@Grab('org.example:does-not-exist:1.0')\nimport org.example.Nothing\nprintln 'x'\n";
         assertEquals(List.of(), SyntaxChecker.check("grab.groovy", grab));
     }
+
+    @Test
+    void errorInsideAClosureNamesTheLineThatCausesIt() {
+        // as written by a model: quotes escaped twice inside nested closures; the parser reports the outer closure's brace
+        String code = String.join("\n",
+                "import com.sap.gateway.ip.core.customdev.util.Message",
+                "def Message processData(Message message) {",
+                "    def users = []",
+                "    users.each { user ->",
+                "        def toIso = { raw ->",
+                "            def date = new Date(1L)",
+                "            return date.format('yyyy-MM-dd\\\\'T\\\\'HH:mm:ss\\\\'Z\\\\', TimeZone.getTimeZone('UTC'))",
+                "        }",
+                "        def iso = toIso(user)",
+                "    }",
+                "    return message",
+                "}",
+                "");
+        List<SyntaxChecker.Error> errors = SyntaxChecker.check("model.groovy", code);
+        assertEquals(1, errors.size());
+        assertEquals(7, errors.get(0).line());
+        assertTrue(errors.get(0).message().startsWith("Unexpected input: '{' (reported at line 4:16; the problem is probably at line 7: return date.format("), errors.get(0).message());
+    }
 }

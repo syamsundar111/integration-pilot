@@ -85,6 +85,10 @@ realSidecar('groovy-check sidecar (real Groovy parser)', () => {
         { fileName: 'broken.groovy', code: 'def Message processData(Message message) {\n  def x = [1, 2\n  return message\n}\n' }
       ])
     )
-    expect(result).toEqual({ checked: true, errors: [{ fileName: 'broken.groovy', line: 3, column: 3, message: "Unexpected input: 'return'" }] })
+    // the parser stops at line 3; the line whose removal fixes the script is named
+    expect(result).toEqual({
+      checked: true,
+      errors: [{ fileName: 'broken.groovy', line: 2, column: 1, message: "Unexpected input: 'return' (reported at line 3:3; the problem is probably at line 2: def x = [1, 2)" }]
+    })
   })
 })
