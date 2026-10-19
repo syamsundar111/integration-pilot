@@ -101,6 +101,10 @@ public final class Server {
             send(ex, 200, Map.of("results", results));
         } catch (Exception e) {
             send(ex, 400, Map.of("error", String.valueOf(e.getMessage())));
+        } catch (Throwable t) {
+            // e.g. NoClassDefFoundError when the jar was replaced under the running JVM: answer at once
+            // instead of leaving the client waiting for its timeout
+            send(ex, 500, Map.of("error", t.getClass().getSimpleName() + ": " + t.getMessage()));
         } finally {
             RUNNING.decrementAndGet();
         }

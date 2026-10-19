@@ -89,7 +89,9 @@ in `.env` (a `GROOVY_CHECK_URL` exported in the shell or by the editor wins over
 log the URL used, the network cause and the sidecar's `/health` at that moment). Without it, scripts
 are proposed with a "not checked" warning shown in the proposal panel; approving checks them again —
 a syntax error blocks approval, and an unreachable check must be confirmed explicitly (audit log).
-`GROOVY_CHECK_TIMEOUT_MS` (default 15000) is the timeout per check. `GROOVY_CHECK_REQUIRED=true`
+`GROOVY_CHECK_TIMEOUT_MS` (default 15000) is the timeout per check. Do not rebuild the jar while a
+sidecar runs from it: the JVM loads classes from the file lazily (restart it after
+`npm run groovy-check:build`). `GROOVY_CHECK_REQUIRED=true`
 blocks proposals instead (set in the MTA files, where the sidecar is the module
 `integration-pilot-groovy-check` with a generated shared token).
 
