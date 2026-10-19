@@ -305,7 +305,11 @@ sap.ui.define(
           const attachments = pending.map((f) => ({ fileName: f.fileName, content: f.content }))
           const started = await api.post('/chat', { ...(sessionId && { sessionId }), message, defaults, ...(attachments.length && { attachments }) })
           this.startTurnPolling(started.turnId, Date.now(), [])
-          if (attachments.length) this.loadAttachments(started.sessionId)
+          if (attachments.length) {
+            // sent: no longer pending; the reload shows them as stored files
+            c.setProperty('/files', c.getProperty('/files').filter((f) => !pending.includes(f)))
+            this.loadAttachments(started.sessionId)
+          }
           if (!sessionId) {
             this._skipLoad = started.sessionId
             c.setProperty('/sessionId', started.sessionId)
@@ -352,9 +356,11 @@ sap.ui.define(
       // --- attached files (.groovy, .xsl): the model sees their names, the builder uses their content ---
 
       async loadAttachments(sessionId) {
+        // only the newest load (or removal) counts: an older answer arriving late must not bring back a removed file
+        const seq = (this._filesSeq = (this._filesSeq || 0) + 1)
         try {
           const stored = await api.get(`/Attachments${api.q({ $filter: `session_ID eq ${sessionId}`, $select: 'ID,fileName,lines,origin', $orderby: 'fileName' })}`)
-          if (this.chat().getProperty('/sessionId') !== sessionId) return
+          if (seq !== this._filesSeq || this.chat().getProperty('/sessionId') !== sessionId) return
           // files picked but not sent yet stay in the list
           const pending = this.chat()
             .getProperty('/files')
@@ -399,6 +405,7 @@ sap.ui.define(
           if (f.pending) c.setProperty('/files', c.getProperty('/files').filter((x) => x !== f))
           else
             try {
+              this._filesSeq = (this._filesSeq || 0) + 1 // loads still running are outdated now
               await api.post(`/Attachments/${api.seg(f.ID)}/remove`)
               c.setProperty('/files', c.getProperty('/files').filter((x) => x.ID !== f.ID))
             } catch (err) {
