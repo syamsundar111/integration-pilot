@@ -36,6 +36,19 @@ describe('groovy-check client', () => {
   })
   afterAll(() => server.close())
 
+  test('a dropped connection is retried once', async () => {
+    const realFetch = global.fetch
+    let calls = 0
+    global.fetch = (...a) => (++calls === 1 ? Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET' } })) : realFetch(...a))
+    try {
+      const result = await withEnv({ GROOVY_CHECK_URL: url, GROOVY_CHECK_TOKEN: 'secret' }, () => checkScripts([{ fileName: 'a.groovy', code: 'ok' }]))
+      expect(result).toEqual({ checked: true, errors: [] })
+      expect(calls).toBe(2)
+    } finally {
+      global.fetch = realFetch
+    }
+  })
+
   test('flattens the errors per file and sends the token', async () => {
     const result = await withEnv({ GROOVY_CHECK_URL: url, GROOVY_CHECK_TOKEN: 'secret' }, () =>
       checkScripts([{ fileName: 'a.groovy', code: 'ok' }, { fileName: 'b.groovy', code: 'x\noops' }])
@@ -49,7 +62,9 @@ describe('groovy-check client', () => {
     await withEnv({ GROOVY_CHECK_URL: url, GROOVY_CHECK_TOKEN: 'wrong' }, async () =>
       expect(await checkScripts([{ fileName: 'a.groovy', code: 'x' }])).toMatchObject({ checked: false, reason: expect.stringMatching(/HTTP 401/) })
     )
-    await withEnv({ GROOVY_CHECK_URL: 'http://localhost:1' }, async () => expect(await checkScripts([{ fileName: 'a.groovy', code: 'x' }])).toMatchObject({ checked: false }))
+    await withEnv({ GROOVY_CHECK_URL: 'http://localhost:1' }, async () =>
+      expect(await checkScripts([{ fileName: 'a.groovy', code: 'x' }])).toMatchObject({ checked: false, reason: expect.stringMatching(/^fetch failed \(.+\)$/) }) // the network cause is named
+    )
     expect(await checkScripts([])).toEqual({ checked: true, errors: [] })
     await withEnv({ GROOVY_CHECK_REQUIRED: 'true' }, () => expect(required()).toBe(true))
   })

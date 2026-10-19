@@ -118,6 +118,8 @@ public final class Server {
     static void send(HttpExchange ex, int status, Object body) throws IOException {
         byte[] out = JsonOutput.toJson(body).getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", "application/json");
+        // one request per connection: a client never reuses a connection the server has already closed
+        ex.getResponseHeaders().set("Connection", "close");
         ex.sendResponseHeaders(status, out.length);
         try (OutputStream os = ex.getResponseBody()) {
             os.write(out);
