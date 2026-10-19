@@ -16,6 +16,8 @@ const { specFromParsed, describeChanges } = require('../iflow-builder/to-spec')
 const LOG = cds.log('agent')
 const MAX_RESULT_CHARS = 12_000
 const MAX_ERRORS = 15 // validation errors returned to the model per call
+const MAX_STEPS_PER_EDIT = 8 // steps added or replaced per editDraftSpec call: keeps each answer short
+const DRAFT_FIELDS = ['id', 'name', 'description', 'packageId', 'trigger', 'end', 'parameters', 'resources', 'exceptionSubprocess']
 const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
 
 const fn = (name, description, properties = {}, required = []) => ({
@@ -58,6 +60,17 @@ const definitions = [
       code: { type: 'string', description: 'The complete Groovy script' }
     },
     ['fileName', 'code']
+  ),
+  fn(
+    'editDraftSpec',
+    `Build or change the conversation's draft spec in small parts instead of sending the whole spec. ops run in order, all or none:
+{"op":"set","fields":{id,name,description,packageId,trigger,end,parameters,resources,exceptionSubprocess}} sets top-level fields (starts a new draft if there is none; exceptionSubprocess: {"name"} or null),
+{"op":"addSteps","steps":[...],"at":<index, default: the end>,"exception":<true: exception subprocess>},
+{"op":"replaceStep","index":<0-based>,"step":{...},"exception":<bool>},
+{"op":"removeStep","index":<0-based>,"exception":<bool>}.
+At most ${MAX_STEPS_PER_EDIT} steps added or replaced per call. Returns the draft outline and its open validation errors.`,
+    { ops: { type: 'array', items: { type: 'object' }, description: 'Edit operations, applied in order' } },
+    ['ops']
   ),
   fn('getDraftSpec', "The conversation's draft spec (e.g. an imported iFlow), to change it. Scripts are attached files: keep their steps without code."),
   fn('explainIflow', 'Parse an existing iFlow (trigger, steps, adapters, parameters, scripts) to explain it.', { iflowId: { type: 'string' } }, ['iflowId']),
@@ -323,6 +336,7 @@ const handlers = {
         'Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs; define each in "parameters".',
         'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).',
         'Write every Groovy script with writeScript (plain code), then reference it in the spec by fileName without code; never put Groovy code into a spec.',
+        'More than 8 steps: build the draft with editDraftSpec (set, then addSteps with at most 8 steps per call), validate it with validateSpec { useDraftSpec: true }, fix single steps with replaceStep.',
         'validateSpec checks the syntax of every Groovy script (GROOVY_SYNTAX file:line:column: message); fix your scripts with writeScript, ask the user to fix attached ones.'
       ]
     }
@@ -381,6 +395,91 @@ const handlers = {
       lines: code.split('\n').length,
       ...(!checked && { warnings: [`Groovy syntax not checked: ${reason}`] }),
       next: `Use it with { "type": "groovyScript", "fileName": "${fileName}" } and no "code".`
+    }
+  },
+
+  async editDraftSpec({ ops }, ctx) {
+    ops = parseJsonString(ops)
+    if (!Array.isArray(ops) || !ops.length) return compactInvalid([{ code: 'NO_OPS', message: 'ops: send a list of edit operations' }])
+    const current = await draftOf(ctx)
+    let draft = current?.spec ? JSON.parse(JSON.stringify(current.spec)) : null
+    const issues = []
+    let stepsWritten = 0
+    ops.forEach((raw, n) => {
+      const op = parseJsonString(raw) || {}
+      const at = `ops[${n}]`
+      const list = () => {
+        if (!draft) return issues.push({ code: 'NO_DRAFT', message: `${at}: there is no draft yet — start with {"op":"set","fields":{id, name, packageId, trigger, end}}` }), null
+        if (!op.exception) return (draft.steps ??= [])
+        draft.exceptionSubprocess ??= { steps: [] }
+        return (draft.exceptionSubprocess.steps ??= [])
+      }
+      const index = (steps) => {
+        if (!Number.isInteger(op.index) || op.index < 0 || op.index >= steps.length) {
+          issues.push({ code: 'BAD_INDEX', message: `${at}: index ${op.index} is not a step (0..${steps.length - 1})` })
+          return false
+        }
+        return true
+      }
+      switch (op.op) {
+        case 'set': {
+          const fields = parseJsonString(op.fields) || {}
+          const unknown = Object.keys(fields).filter((k) => !DRAFT_FIELDS.includes(k))
+          if (unknown.length) return issues.push({ code: 'UNKNOWN_FIELD', message: `${at}: fields ${unknown.join(', ')} cannot be set here (steps: use addSteps)` })
+          draft ??= { steps: [] }
+          for (const [k, v] of Object.entries(fields)) {
+            const value = parseJsonString(v)
+            if (value === null) delete draft[k]
+            else if (k === 'exceptionSubprocess') draft.exceptionSubprocess = { ...(value.name && { name: value.name }), steps: draft.exceptionSubprocess?.steps || [] }
+            else draft[k] = value
+          }
+          return
+        }
+        case 'addSteps': {
+          const steps = (parseJsonString(op.steps) || []).map(parseJsonString)
+          const target = list()
+          if (!target) return
+          if (!steps.length) return issues.push({ code: 'NO_STEPS', message: `${at}: steps is empty` })
+          stepsWritten += steps.length
+          const pos = Number.isInteger(op.at) ? Math.min(Math.max(op.at, 0), target.length) : target.length
+          target.splice(pos, 0, ...steps)
+          return
+        }
+        case 'replaceStep': {
+          const target = list()
+          if (!target || !index(target)) return
+          stepsWritten++
+          target[op.index] = parseJsonString(op.step)
+          return
+        }
+        case 'removeStep': {
+          const target = list()
+          if (!target || !index(target)) return
+          target.splice(op.index, 1)
+          return
+        }
+        default:
+          issues.push({ code: 'UNKNOWN_OP', message: `${at}: op '${op.op}' is not set, addSteps, replaceStep or removeStep` })
+      }
+    })
+    if (stepsWritten > MAX_STEPS_PER_EDIT)
+      issues.push({ code: 'TOO_MANY', message: `ops: ${stepsWritten} steps in one call — send at most ${MAX_STEPS_PER_EDIT} per call` })
+    if (issues.length) return compactInvalid(issues, 'Nothing was changed. Fix the operations and call editDraftSpec again.')
+
+    await saveDraft(ctx, draft, { source: 'built with editDraftSpec' })
+    ctx.validatedSpec = undefined // the draft changed: validate it again before proposing
+    const attachments = await attachmentsOf(ctx)
+    const open = validate(draft, { attachments: Object.keys(attachments) }).issues
+    const outline = (steps = []) => steps.map((s, i) => `${i}. ${s?.name || '(no name)'} (${s?.type || '?'})`)
+    return {
+      saved: true,
+      id: draft.id,
+      steps: outline(draft.steps),
+      ...(draft.exceptionSubprocess && { exceptionSteps: outline(draft.exceptionSubprocess.steps) }),
+      ...(open.length && { openIssues: compactInvalid(open).errors }),
+      next: open.length
+        ? 'Continue with editDraftSpec; when the draft is complete, call validateSpec with { "useDraftSpec": true }.'
+        : 'The draft is complete: call validateSpec with { "useDraftSpec": true }.'
     }
   },
 

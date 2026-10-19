@@ -207,6 +207,7 @@ function toolLabel(name, args) {
   if (name === 'proposeIflow' || name === 'proposeIflowUpdate' || name === 'validateSpec') return 'Validating spec'
   if (name === 'proposePackage') return 'Validating package proposal'
   if (name === 'writeScript') return `Writing script ${args?.fileName || ''}.groovy`
+  if (name === 'editDraftSpec') return 'Writing spec'
   const id = args?.iflowId || args?.packageId
   return `Calling ${name}${id ? ` (${id})` : ''}`
 }

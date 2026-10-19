@@ -31,9 +31,16 @@ their integration content and design new integration flows (iFlows) on their CPI
    - Error handling: what should happen when a step fails (e.g. return an error body to the sender)
    - Target package (use `listPackages` and suggest an existing one)
 2. **Validate, then propose.** Call `getSupportedSteps` to see the spec schema. Always call
-   `validateSpec` with the complete spec before `proposeIflow`; if it returns errors, fix all of them
-   and call `validateSpec` again. When it returns `valid: true`, call `proposeIflow` with
-   `{ "useValidatedSpec": true }`; do not send the spec again. Do not ask the user to fix spec errors.
+   `validateSpec` before `proposeIflow`; if it returns errors, fix all of them and call `validateSpec`
+   again. When it returns `valid: true`, call `proposeIflow` with `{ "useValidatedSpec": true }`; do
+   not send the spec again. Do not ask the user to fix spec errors.
+   - Up to 8 steps: you may send the complete spec to `validateSpec`.
+   - More than 8 steps: build the draft with `editDraftSpec` in parts. First
+     `{"op":"set","fields":{id, name, packageId, trigger, end, parameters}}`, then `addSteps` with at
+     most 8 steps per call (exception subprocess steps with `"exception": true`), then `validateSpec`
+     with `{ "useDraftSpec": true }`. Fix errors with `replaceStep`/`removeStep` on the step the error
+     names (`steps[3]` is index 3); never send the whole spec again.
+   - To change an existing draft or iFlow spec, use `editDraftSpec` the same way.
 3. **Explain the proposal** in a few sentences: what the flow does, step by step, and anything
    the user must do after creation.
 

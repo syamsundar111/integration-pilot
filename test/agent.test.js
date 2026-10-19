@@ -1041,3 +1041,51 @@ describe('writeScript', () => {
     expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).errors).toEqual([expect.stringMatching(/^ATTACHED_BY_USER mine.groovy/)])
   })
 })
+
+describe('editDraftSpec: building a large spec in parts', () => {
+  const cm = (n) => ({ type: 'contentModifier', name: `Step ${n}`, properties: [{ name: `P${n}`, type: 'constant', value: String(n) }] })
+  const range = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => cm(from + i))
+
+  test('set, add in chunks of 8, fix one step, validate the draft and propose it', async () => {
+    llm.chat
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Big_1', name: 'Agent Big 1', packageId: 'PilotReference', trigger: { type: 'timer', mode: 'once' }, end: { type: 'none' } } }, { op: 'addSteps', steps: range(1, 8) }] }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'addSteps', steps: [...range(9, 15), { type: 'router', name: 'Oops' }] }] }))
+      .mockResolvedValueOnce(toolCall('validateSpec', { useDraftSpec: true }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'replaceStep', index: 15, step: cm(16) }, { op: 'addSteps', steps: [{ type: 'contentModifier', name: 'Set Error' }], exception: true }] }))
+      .mockResolvedValueOnce(toolCall('validateSpec', { useDraftSpec: true }))
+      .mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true }))
+      .mockResolvedValueOnce(answer('Ready.'))
+    const turn = await chat({ message: 'Build a 16-step flow' })
+    const results = llm.chat.mock.calls.at(-1)[0].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))
+
+    expect(results[0]).toMatchObject({ saved: true, id: 'Agent_Big_1', steps: expect.arrayContaining(['0. Step 1 (contentModifier)', '7. Step 8 (contentModifier)']) })
+    expect(results[0].next).toMatch(/call validateSpec with \{ "useDraftSpec": true \}/)
+    expect(results[1].openIssues).toEqual([expect.stringMatching(/^STEP_NOT_IN_V1 steps\[15\]: 'router'/)])
+    expect(results[2]).toMatchObject({ valid: false, errors: [expect.stringMatching(/^STEP_NOT_IN_V1 steps\[15\]/)] })
+    expect(results[3]).toMatchObject({ saved: true, exceptionSteps: ['0. Set Error (contentModifier)'] })
+    expect(results[3].openIssues).toBeUndefined()
+    expect(results[4]).toMatchObject({ valid: true })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Agent_Big_1' })])
+    const { data: proposal } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
+    expect(proposal.spec.steps.map((s) => s.name)).toEqual(range(1, 16).map((s) => s.name))
+    expect(proposal.spec.exceptionSubprocess.steps).toEqual([{ type: 'contentModifier', name: 'Set Error' }])
+  })
+
+  test('invalid operations change nothing; more than 8 steps per call are refused', async () => {
+    llm.chat
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'addSteps', steps: [cm(1)] }] }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Big_2', steps: [] } }] }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Big_2' } }, { op: 'addSteps', steps: range(1, 9) }] }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Big_2' } }, { op: 'removeStep', index: 3 }] }))
+      .mockResolvedValueOnce(answer('ok'))
+    const turn = await chat({ message: 'x' })
+    const results = llm.chat.mock.calls.at(-1)[0].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))
+    expect(results[0].errors).toEqual([expect.stringMatching(/^NO_DRAFT ops\[0\]: there is no draft yet/)])
+    expect(results[1].errors).toEqual([expect.stringMatching(/^UNKNOWN_FIELD ops\[0\]: fields steps cannot be set here/)])
+    expect(results[2].errors).toEqual([expect.stringMatching(/^TOO_MANY ops: 9 steps in one call/)])
+    expect(results[3].errors).toEqual([expect.stringMatching(/^BAD_INDEX ops\[1\]: index 3 is not a step \(0..-1\)/)])
+    for (const r of results) expect(r.instruction).toMatch(/^Nothing was changed/)
+    const { data: session } = await GET(`/api/ChatSessions/${turn.sessionId}`)
+    expect(session.draftSpec).toBeNull()
+  })
+})
