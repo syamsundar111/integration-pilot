@@ -77,7 +77,7 @@
     },
     "steps": {
       "type": "array",
-      "maxItems": 25,
+      "maxItems": 50,
       "items": {
         "$ref": "#/definitions/step"
       }

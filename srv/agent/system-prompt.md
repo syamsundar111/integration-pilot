@@ -1,7 +1,7 @@
 ## Hard limits
 
 Every spec must respect these limits; the validator rejects anything else:
-- At most 25 steps in the main flow.
+- At most 50 steps in the main flow (10 in the exception subprocess).
 - Step names are unique (main flow and exception subprocess together), receiver `system` names are
   unique, and Groovy `fileName`s are unique.
 - `{{Param}}` references only as the whole `url` of an HTTP receiver; literal values everywhere else.

@@ -42,8 +42,8 @@ describe('prompt linter', () => {
     expect(keys(lint('Add a multicast after step 2, then gather and join the branches'))).toEqual(['unsupported'])
   })
 
-  test('more than 25 steps', () => {
-    const many = ['Create an iFlow on a timer in package P. No auth.', ...Array.from({ length: 27 }, (_, i) => `${i + 1}. Content Modifier "Step ${i + 1}"`)].join('\n')
+  test('more than 50 steps', () => {
+    const many = ['Create an iFlow on a timer in package P. No auth.', ...Array.from({ length: 52 }, (_, i) => `${i + 1}. Content Modifier "Step ${i + 1}"`)].join('\n')
     expect(keys(lint(many))).toEqual(['steps'])
   })
 

@@ -8,13 +8,13 @@ sap.ui.define([], () => {
    * proposal, so they are shown as warnings with "Send anyway" / "Edit".
    */
 
-  const MAX_STEPS = 25
+  const MAX_STEPS = 50
 
   /** Fill-in template for the empty chat (replaces the starter prompts) */
   const TEMPLATE = [
     'Create an iFlow.',
     'Trigger: <timer, run once after deployment — or HTTPS sender with path, e.g. /orders/create>',
-    'Steps (in order, at most 25):',
+    'Steps (in order, at most 50):',
     '1. <step type and name, e.g. Content Modifier "Set Properties": property Source = constant SF>',
     '2. <…>',
     'Receivers: <name, method and URL of each HTTP call; externalize a URL as {{Name}} with a default>',

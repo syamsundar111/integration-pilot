@@ -31,11 +31,11 @@ const rowType = (iflw, value, type) => iflw.replace(`&lt;cell id='Type'&gt;const
 const converters = (n, from = 1) => Array.from({ length: n }, (_, i) => ({ type: 'jsonToXml', name: `S${from + i}` }))
 
 describe('import', () => {
-  test('unsupported steps become placeholders, merged to stay within 25 steps; XPath moves into Groovy', async () => {
+  test('unsupported steps become placeholders, merged to stay within 50 steps; XPath moves into Groovy', async () => {
     const spec = baseSpec({
       steps: [
         { type: 'contentModifier', name: 'Values', properties: [{ name: 'OrderId', type: 'constant', value: '/Order/Id' }, { name: 'Source', type: 'constant', value: 'Shop' }] },
-        ...converters(24)
+        ...converters(49)
       ],
       end: { type: 'httpReceiver', system: 'Backend', url: 'https://example.org/orders', method: 'POST', authType: 'None' }
     })
@@ -49,12 +49,12 @@ describe('import', () => {
     expect(r).toMatchObject({ valid: true, errors: [], placeholders: 1 })
     const names = r.spec.steps.map((s) => s.name)
 
-    // 1 Groovy + 1 Content Modifier + 24 converters = 26 > 25: the 6 splitters became one placeholder
-    expect(r.spec.steps).toHaveLength(21)
+    // 1 Groovy + 1 Content Modifier + 49 converters = 51 > 50: the 6 splitters became one placeholder
+    expect(r.spec.steps).toHaveLength(46)
     const merged = r.spec.steps.find((s) => /^REPLACE WITH /.test(s.description || ''))
     expect(merged).toMatchObject({ type: 'contentModifier', name: 'S3', properties: [{ name: 'REPLACE_WITH', type: 'constant' }] })
     expect(merged.description).toBe("REPLACE WITH Splitter 'S3'; then Splitter 'S4'; then Splitter 'S5'; then Splitter 'S6'; then Splitter 'S7'; then Splitter 'S8'")
-    expect(r.notes).toContain('Main flow: 6 consecutive placeholders were merged into one to stay within 25 steps')
+    expect(r.notes).toContain('Main flow: 6 consecutive placeholders were merged into one to stay within 50 steps')
 
     // XPath: a generated script before the Content Modifier, which keeps its constant
     expect(r.spec.steps.slice(0, 2)).toEqual([
@@ -76,7 +76,7 @@ describe('import', () => {
 
   test('too many real steps are refused with a hint', async () => {
     const spec = baseSpec({
-      steps: [{ type: 'contentModifier', name: 'Values', properties: [{ name: 'A', type: 'constant', value: '/a' }, { name: 'B', type: 'constant', value: 'b' }] }, ...converters(24)]
+      steps: [{ type: 'contentModifier', name: 'Values', properties: [{ name: 'A', type: 'constant', value: '/a' }, { name: 'B', type: 'constant', value: 'b' }] }, ...converters(49)]
     })
     const zip = await zipWith(spec, (x) => rowType(x, '/a', 'xpath'))
     await expect(importIflow(zip, { fileName: 'big.zip' })).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE', status: 400 })

@@ -20,7 +20,8 @@ turns into extra questions.
 
 Hard limits:
 
-- At most **25 steps** in the main flow (10 in the exception subprocess).
+- At most **50 steps** in the main flow (10 in the exception subprocess). Large flows are written
+  and checked in parts of up to 8 steps, so their size does not cause timeouts.
 - Step names, receiver names and Groovy file names must be **unique**.
 - `{{Parameter}}` only as the **whole URL** of an HTTP receiver.
 - Header and property values are **constant** or **expression** only. Read XML values with XPath in a
@@ -36,7 +37,7 @@ per thing the assistant needs:
 ```text
 Create an iFlow.
 Trigger: <timer, run once after deployment — or HTTPS sender with path, e.g. /orders/create>
-Steps (in order, at most 25):
+Steps (in order, at most 50):
 1. <step type and name, e.g. Content Modifier "Set Properties": property Source = constant SF>
 2. <…>
 Receivers: <name, method and URL of each HTTP call; externalize a URL as {{Name}} with a default>
@@ -92,7 +93,7 @@ spec:
 
 - Steps v1 cannot build become placeholder Content Modifiers whose description says
   *REPLACE WITH …*.
-- If the flow would exceed 25 steps, consecutive placeholders are merged.
+- If the flow would exceed 50 steps, consecutive placeholders are merged.
 - Duplicate names are made unique.
 - XPath values of Content Modifiers move into a generated Groovy script.
 - Scripts and XSLT files become attachments.

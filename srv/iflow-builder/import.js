@@ -4,7 +4,7 @@
  * Unlike to-spec.js, which must be exact because an update rebuilds the iFlow, import
  * approximates and does not refuse: what the spec cannot build becomes a placeholder Content
  * Modifier whose description (and REPLACE_WITH property) says what to put there in the CPI web
- * editor. Consecutive placeholders are merged if the flow would exceed 25 steps, names are
+ * editor. Consecutive placeholders are merged if the flow would exceed 50 steps, names are
  * made unique, and XPath values of Content Modifiers move into a generated Groovy script.
  * Groovy scripts, XSLT files and the generated scripts are returned as attachments, so the
  * spec references them by file name and the model never sees their content.
@@ -13,7 +13,7 @@ const JSZip = require('jszip')
 const { parse } = require('./parser')
 const { validate } = require('./validator')
 
-const MAX_STEPS = 25
+const MAX_STEPS = 50
 const MAX_EXCEPTION_STEPS = 10
 const IFLOW_DIR = 'src/main/resources/scenarioflows/integrationflow/'
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']

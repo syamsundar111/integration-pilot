@@ -118,7 +118,7 @@ describe('validator', () => {
         { type: 'contentModifier', name: 'A' },
         { type: 'contentModifier', name: 'A', headers: [{ name: 'X', type: 'xpath', value: '/a' }] },
         { type: 'router' },
-        ...Array.from({ length: 24 }, () => ({ type: 'jsonToXml' }))
+        ...Array.from({ length: 49 }, () => ({ type: 'jsonToXml' }))
       ],
       end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'Basic' }
     })
@@ -131,5 +131,14 @@ describe('validator', () => {
     const { issues } = validate(baseSpec({ steps: [{ type: 'timer' }, { type: 'jsonToXml' }, { type: 'none' }] }))
     expect(issues.map((i) => i.code)).toEqual(['TRIGGER_AS_STEP', 'END_AS_STEP'])
     expect(issues[1].message).toMatch(/steps\[2\]: 'none' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end'/)
+  })
+
+  test('the main flow takes up to 50 steps; 50 also build', async () => {
+    const steps = (n) => Array.from({ length: n }, (_, i) => ({ type: 'contentModifier', name: `Step ${i + 1}` }))
+    expect(validate(baseSpec({ steps: steps(50) })).valid).toBe(true)
+    expect(validate(baseSpec({ steps: steps(51) })).issues).toEqual([expect.objectContaining({ code: 'TOO_MANY', message: 'steps: must NOT have more than 50 items' })])
+    const { build } = require('../srv/iflow-builder/builder')
+    const { files } = await build(baseSpec({ steps: steps(50) }))
+    expect(files.find((f) => f.path.endsWith('.iflw')).content.match(/<bpmn2:callActivity /g)).toHaveLength(50)
   })
 })
