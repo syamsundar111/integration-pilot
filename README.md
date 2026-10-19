@@ -55,7 +55,9 @@ npm run groovy-check:build  # Groovy syntax check sidecar (needs JDK 17+ and Mav
 `.env` holds `LLM_MODEL` and `LLM_FALLBACK_MODEL`, plus optional `LLM_MAX_TOKENS` (default 8192;
 large specs need more). Model answers are streamed: `LLM_IDLE_TIMEOUT_MS` (default 60000) is the
 longest pause allowed in an answer and `LLM_TIMEOUT_MS` (default 900000) the cap for one model
-call; `LLM_STREAM=false` switches streaming off for a provider that does not support it. `.cdsrc-private.json` binds the hybrid profile
+call; `LLM_STREAM=false` switches streaming off for a provider that does not support it.
+`AGENT_MAX_MODEL_CALLS` (default 20) caps the model calls per chat message; a 30-step flow with
+scripts needs about 15. `.cdsrc-private.json` binds the hybrid profile
 to the destination service `iflowpilot-dest`. Both files were copied from iflow-pilot and are
 git-ignored. See iflow-pilot's README for setting up the destinations `CPI_API` and `NVIDIA_LLM`.
 

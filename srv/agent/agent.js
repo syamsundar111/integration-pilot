@@ -1,5 +1,6 @@
 /**
- * Agent: OpenAI-style function calling, max 8 model calls per user message.
+ * Agent: OpenAI-style function calling, up to AGENT_MAX_MODEL_CALLS (default 20) model calls per
+ * user message: a large flow needs about 15 (scripts, the spec in parts, validation, proposal).
  *
  * Chat is asynchronous: startTurn() stores a ChatTurn (RUNNING) and returns at once;
  * the loop runs in the background and appends progress events to the turn
@@ -20,7 +21,8 @@ const tools = require('./tools')
 const history = require('./history')
 
 const LOG = cds.log('agent')
-const MAX_ITERATIONS = 8
+const maxIterations = () => Number(process.env.AGENT_MAX_MODEL_CALLS || 20)
+const MIN_PROGRESS_TOKENS = 50 // the "~N tokens so far" line appears from this size on
 const HISTORY_LIMIT = 40 // earlier user messages and answers sent back to the model
 const INTERRUPTED = 'Interrupted by server restart — please send your message again.'
 const PACKAGE_ID = /^[A-Za-z0-9.]+$/
@@ -304,15 +306,16 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
     const system = await systemMessage(user, sessionId)
     let text = null
 
-    for (let i = 0; i < MAX_ITERATIONS && text === null; i++) {
+    for (let i = 0; i < maxIterations() && text === null; i++) {
       await checkCancel()
       if (i > 0) await emit('thinking', 'Thinking…')
       // while the answer streams in: "~1,200 tokens so far" on the current progress line, every 3s at most
       let shownAt = 0
       const onProgress = ({ outputChars, reasoningChars }) => {
-        if (Date.now() - shownAt < 3000) return
+        const tokens = Math.round((outputChars + reasoningChars) / 4)
+        if (tokens < MIN_PROGRESS_TOKENS || Date.now() - shownAt < 3000) return
         shownAt = Date.now()
-        events[events.length - 1].detail = `~${Math.round((outputChars + reasoningChars) / 4).toLocaleString('en-US')} tokens so far`
+        events[events.length - 1].detail = `~${tokens.toLocaleString('en-US')} tokens so far`
         update().catch(() => {})
       }
       const res = await llm.chat({ messages: [system, ...past, ...history.compactTurn(turn)], tools: tools.definitions, signal, onProgress })
@@ -348,7 +351,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
           ? 'My answer was cut off because it got too long. Please ask again, maybe in smaller parts.'
           : 'I could not produce an answer. Please rephrase your request.')
     }
-    if (text === null) text = `I stopped after ${MAX_ITERATIONS} steps without finishing. Please tell me how to continue, or narrow down the request.`
+    if (text === null) text = `I stopped after ${maxIterations()} steps without finishing. Please tell me how to continue, or narrow down the request.`
     await finish(text)
   } catch (e) {
     const wasCancelled = e.code === 'CANCELLED'

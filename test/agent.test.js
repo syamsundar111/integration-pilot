@@ -127,12 +127,20 @@ describe('agent', () => {
     expect(msgs[0].content).toContain(`${proposalId}: IFLOW Agent_Test_1 → PENDING`)
   })
 
-  test('stops after 8 model calls', async () => {
+  test('stops after 20 model calls (AGENT_MAX_MODEL_CALLS)', async () => {
     llm.chat.mockResolvedValue(toolCall('listPackages', {}))
     const data = await chat({ sessionId, message: 'loop forever' })
-    expect(llm.chat).toHaveBeenCalledTimes(8)
-    expect(data.text).toMatch(/stopped after 8 steps/)
-    llm.chat.mockReset()
+    expect(llm.chat).toHaveBeenCalledTimes(20)
+    expect(data.text).toMatch(/stopped after 20 steps/)
+    llm.chat.mockClear()
+    process.env.AGENT_MAX_MODEL_CALLS = '3'
+    try {
+      expect((await chat({ sessionId, message: 'loop again' })).text).toMatch(/stopped after 3 steps/)
+      expect(llm.chat).toHaveBeenCalledTimes(3)
+    } finally {
+      delete process.env.AGENT_MAX_MODEL_CALLS
+      llm.chat.mockReset()
+    }
   })
 
   test('LLM rate limit: the turn fails with a clear error, the conversation keeps a note', async () => {
@@ -987,6 +995,7 @@ describe('streaming progress', () => {
   test('the running turn shows how much of the answer has arrived', async () => {
     let seen
     llm.chat.mockImplementationOnce(async ({ onProgress }) => {
+      onProgress({ outputChars: 4, reasoningChars: 0 }) // too small to show
       onProgress({ outputChars: 4000, reasoningChars: 800 })
       await new Promise((r) => setTimeout(r, 50))
       const { data } = await GET(`/api/ChatTurns?$filter=status eq 'RUNNING'&$top=1`)
