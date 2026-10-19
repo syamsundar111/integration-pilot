@@ -31,6 +31,14 @@ sap.ui.define(
     }
 
     const esc = markdown.escape
+
+    /** Groovy check status of one script for the proposal panel */
+    function scriptStatus(fileName, check) {
+      if (!check) return { checkText: 'No check result', checkState: 'None' }
+      if (check.status === 'ok') return { checkText: 'Syntax checked: no errors', checkState: 'Success' }
+      if (check.status === 'failed') return { checkText: `Syntax error: ${(check.errors || []).map((e) => `${fileName}:${e}`).join('; ')}`, checkState: 'Error' }
+      return { checkText: `Not checked: ${check.reason || 'the Groovy check was unavailable'}`, checkState: 'Warning' }
+    }
     const userHtml = (text) => `<p>${esc(text).replace(/\n/g, '<br>')}</p>`
 
     // --- closest existing package (typos, case, partial names) — same rules as the agent ---
@@ -674,8 +682,9 @@ sap.ui.define(
           active.scripts = [...spec.steps, ...((spec.exceptionSubprocess && spec.exceptionSubprocess.steps) || [])]
             .filter((s) => s.type === 'groovyScript')
             .map((s) => ({
-              fileName: `${s.fileName}.groovy${s.code == null ? ' (attached file)' : ''}`,
-              code: s.code != null ? s.code : attached[`${s.fileName}.groovy`] || ''
+              fileName: `${s.fileName}.groovy`,
+              code: s.code != null ? s.code : attached[`${s.fileName}.groovy`] || '',
+              ...scriptStatus(`${s.fileName}.groovy`, (p.scriptChecks || {})[`${s.fileName}.groovy`])
             }))
           // Groovy check: a prominent strip when a script failed or could not be checked
           const checks = Object.values(p.scriptChecks || {})

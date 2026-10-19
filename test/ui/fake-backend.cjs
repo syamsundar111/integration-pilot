@@ -7,6 +7,7 @@
  * The fake model reacts to the last user message:
  * - contains "UITEST_PROPOSE": validateSpec (sample spec) -> proposeIflow -> answer
  * - contains "UITEST_NEWPKG": the same, in a package that does not exist (package selection)
+ * - contains "UITEST_UNCHECKED": the same, with the Groovy check unreachable until the next message
  * - anything else: a short answer
  * Every answer reports usage (1000 input / 100 output tokens per model call).
  */
@@ -31,7 +32,8 @@ const llm = {
     const lastUser = messages.map((m) => m.role).lastIndexOf('user')
     const text = String(messages[lastUser]?.content || '')
     const toolResults = messages.slice(lastUser + 1).filter((m) => m.role === 'tool').length
-    if (text.includes('UITEST_PROPOSE') || text.includes('UITEST_NEWPKG')) {
+    groovyDown = text.includes('UITEST_UNCHECKED')
+    if (text.includes('UITEST_PROPOSE') || text.includes('UITEST_NEWPKG') || text.includes('UITEST_UNCHECKED')) {
       const spec = { ...sample, id: `UI_Test_${Date.now().toString(36)}`, name: 'UI Test Flow', ...(text.includes('UITEST_NEWPKG') && { packageId: 'Ui.New.Package' }) }
       if (toolResults === 0) return toolCall('validateSpec', { spec })
       if (toolResults === 1) return toolCall('proposeIflow', { useValidatedSpec: true })
@@ -114,11 +116,15 @@ for (const name of ['updatePackage', 'deletePackage', 'downloadPackageZip', 'del
     throw Object.assign(new Error(`${name} is not part of the UI test fake`), { status: 501 })
   }
 
+// the real per-file logic (checkSpecScripts) on top of a fake sidecar call
+let groovyDown = false
+const realGroovyCheck = require(path.join(SRV, 'lib', 'groovy-check.js'))
 const groovyCheck = {
   async checkScripts() {
-    return { checked: true, errors: [] }
+    return groovyDown ? { checked: false, errors: [], reason: 'fetch failed (ECONNREFUSED) at http://localhost:4010' } : { checked: true, errors: [] }
   },
-  required: () => false
+  required: () => false,
+  checkSpecScripts: (spec, attachments) => realGroovyCheck.checkSpecScripts(spec, attachments, { check: groovyCheck.checkScripts })
 }
 
 const fake = (file, exports) => {

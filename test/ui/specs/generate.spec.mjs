@@ -180,6 +180,29 @@ describe('Generate page', () => {
     expect((await chat('/active')).doneText).toMatch(/^Created UI_Test_/)
   })
 
+  it('shows each script as checked, and asks before approving without the check', async () => {
+    await newChat()
+    await proposal('UITEST_PROPOSE')
+    expect((await chat('/active')).scripts).toEqual([expect.objectContaining({ fileName: 'addLengthHeader.groovy', checkText: 'Syntax checked: no errors', checkState: 'Success' })])
+    expect((await chat('/active')).groovyText).toBe('')
+
+    await newChat()
+    await proposal('UITEST_UNCHECKED')
+    const active = await chat('/active')
+    expect(active.scripts[0]).toMatchObject({ checkText: 'Not checked: fetch failed (ECONNREFUSED) at http://localhost:4010', checkState: 'Warning' })
+    expect(active.groovyText).toMatch(/^1 Groovy script\(s\) were not syntax-checked/)
+    const strip = await browser.asControl({ forceSelect: true, selector: { controlType: 'sap.m.MessageStrip', viewName: VIEW, properties: { text: active.groovyText } } })
+    expect(await strip.getVisible()).toBe(true)
+    expect(await strip.getType()).toBe('Warning')
+
+    await (await button('Approve & create')).press()
+    await (await button('Approve & create', true)).press()
+    await (await button('Approve without the check', true)).press()
+    await browser.waitUntil(async () => (await chat('/active'))?.status === 'DONE', { timeout: 30000, timeoutMsg: 'not executed' })
+    const steps = (await chat('/active')).execSteps
+    expect(steps[0]).toMatchObject({ label: 'Check Groovy scripts', status: 'warning' })
+  })
+
   it('rejects a proposal with a reason', async () => {
     await newChat()
     await proposal('UITEST_PROPOSE')
