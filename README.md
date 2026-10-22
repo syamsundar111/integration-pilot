@@ -129,6 +129,13 @@ npm run build:mta && npm run deploy                  # HANA Cloud (instance must
 npm run build:mta:sqlite && npm run deploy:sqlite    # in-memory SQLite, demo only
 ```
 
+**One backend instance.** `integration-pilot-srv` runs with `instances: 1` (both MTA files). Chat turns
+and approvals run inside the instance that started them, and at startup it marks every unfinished turn
+and approval as failed, which would also hit work running on a second instance. Do not scale the backend
+out before turns and approvals use proper locking or leases. A turn still RUNNING after the maximum
+turn time (`AGENT_MAX_TURN_MS`, default 60 min) is treated as failed, so a crash never blocks a
+conversation for good.
+
 After the first deployment, assign the role collection **`IntegrationPilot_Admin`** (BTP cockpit →
 Security → Role Collections → `IntegrationPilot_Admin` → Edit → Users). Then log out and in again.
 

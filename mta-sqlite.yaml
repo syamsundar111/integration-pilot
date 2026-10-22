@@ -28,6 +28,8 @@ modules:
     path: gen/srv
     parameters:
       buildpack: nodejs_buildpack
+      # one instance: turns, approvals and startup recovery assume a single backend (see README)
+      instances: 1
       memory: 512M
       disk-quota: 1024M
     build-parameters:

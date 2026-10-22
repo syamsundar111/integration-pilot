@@ -1640,3 +1640,40 @@ describe('conversations are private (full review #5)', () => {
     expect((await GET(`/api/Proposals/${a.proposals[0].ID}`, asB)).data).toMatchObject({ iflowId: 'Shared_Proposal' })
   })
 })
+
+describe('stuck turns (one instance; review: a RUNNING turn blocked its conversation forever)', () => {
+  test('a RUNNING turn older than the maximum turn time is marked FAILED; the conversation is usable again', async () => {
+    llm.chat.mockResolvedValueOnce(answer('first'))
+    const first = await chat({ message: 'first' })
+    const stuckId = cds.utils.uuid()
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600_000).toISOString()
+    await INSERT.into('iflowpilot.ChatTurn').entries({ ID: stuckId, session_ID: first.sessionId, status: 'RUNNING', message: 'left by a crashed instance', events: '[]', createdAt: twoHoursAgo, createdBy: 'local-dev' })
+
+    llm.chat.mockResolvedValueOnce(answer('works again'))
+    const next = await chat({ sessionId: first.sessionId, message: 'next' }) // was 409 TURN_IN_PROGRESS
+    expect(next.status).toBe('DONE')
+    const { data: stuck } = await GET(`/api/chat/turns/${stuckId}`)
+    expect(stuck).toMatchObject({ status: 'FAILED', error: { code: 'TURN_STALE' } })
+    const { data: msgs } = await GET(`/api/ChatSessions/${first.sessionId}/messages?$orderby=seq`)
+    expect(msgs.map((m) => m.content)).toEqual(expect.arrayContaining(['left by a crashed instance', expect.stringMatching(/did not finish/)]))
+  })
+
+  test('a recent RUNNING turn still blocks (it may be working)', async () => {
+    llm.chat.mockResolvedValueOnce(answer('first'))
+    const first = await chat({ message: 'first' })
+    await INSERT.into('iflowpilot.ChatTurn').entries({ ID: cds.utils.uuid(), session_ID: first.sessionId, status: 'RUNNING', message: 'busy', events: '[]', createdBy: 'local-dev' })
+    await expect(POST('/api/chat', { sessionId: first.sessionId, message: 'next' })).rejects.toMatchObject({ response: { status: 409 } })
+  })
+
+  test('a turn that runs past the maximum turn time is stopped and ends FAILED', async () => {
+    process.env.AGENT_MAX_TURN_MS = '300'
+    try {
+      // a model call that only ends when it is aborted, like the real one
+      llm.chat.mockImplementationOnce(({ signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('Cancelled'), { code: 'CANCELLED' })))))
+      const turn = await chat({ message: 'never ends' })
+      expect(turn).toMatchObject({ status: 'FAILED', error: { code: 'TURN_TIMEOUT', message: 'The message took longer than 0 minutes and was stopped.' } })
+    } finally {
+      delete process.env.AGENT_MAX_TURN_MS
+    }
+  })
+})

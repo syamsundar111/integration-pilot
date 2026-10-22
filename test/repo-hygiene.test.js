@@ -16,3 +16,12 @@ describe('.gitignore', () => {
 
   test.each(['srv/agent/agent.js', 'docs/prompt-guide.md', 'test/fixtures/users-summary/spec.json'])('%s is not ignored', (file) => expect(ignored(file)).toBe(false))
 })
+
+describe('deployment', () => {
+  const fs = require('fs')
+  test.each(['mta.yaml', 'mta-sqlite.yaml'])('%s runs the backend as exactly one instance', (file) => {
+    const mta = fs.readFileSync(path.join(ROOT, file), 'utf8')
+    const srv = mta.split(/\n  - name: /).find((m) => m.startsWith('integration-pilot-srv'))
+    expect(srv).toMatch(/\n      instances: 1\n/)
+  })
+})

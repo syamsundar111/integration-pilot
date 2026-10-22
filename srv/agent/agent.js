@@ -23,6 +23,9 @@ const history = require('./history')
 
 const LOG = cds.log('agent')
 const maxIterations = () => Number(process.env.AGENT_MAX_MODEL_CALLS || 20)
+// longest a message may run; a turn still RUNNING after that (plus a minute) was left by a crashed instance
+const maxTurnMs = () => Number(process.env.AGENT_MAX_TURN_MS || 3_600_000)
+const STALE_GRACE_MS = 60_000
 const MIN_PROGRESS_TOKENS = 50 // the "~N tokens so far" line appears from this size on
 const MAX_CUT_OFFS = 2 // answers cut off for length per message before the agent gives up
 const tokenBudget = () => Number(process.env.AGENT_MAX_TOKENS_PER_MESSAGE || 300_000) // input + output tokens per user message
@@ -338,6 +341,30 @@ function completeExchanges(turn) {
 
 // --- turns -------------------------------------------------------------------------------
 
+const STALE = 'This message did not finish: the server stopped working on it. Please send it again.'
+
+/**
+ * RUNNING turns of the session that are older than the maximum turn time are left over from a crashed
+ * instance (no turn runs longer, see startTurn): they are marked FAILED, with the question kept in the
+ * history, so the conversation is not blocked. One app instance (mta.yaml); proper locking comes before
+ * scaling out.
+ */
+async function expireStaleTurns(user, sessionId) {
+  const { ChatTurn } = E()
+  const cutoff = new Date(Date.now() - maxTurnMs() - STALE_GRACE_MS).toISOString()
+  const stale = await db(user, (tx) => tx.run(SELECT.from(ChatTurn).columns('ID', 'message', 'events').where({ session_ID: sessionId, status: 'RUNNING', createdAt: { '<': cutoff } })))
+  for (const t of stale) {
+    const events = t.events ? JSON.parse(t.events) : []
+    events.push(event('error', STALE))
+    await db(user, (tx) =>
+      tx.run(UPDATE(ChatTurn, t.ID).set({ status: 'FAILED', events: JSON.stringify(events), error: JSON.stringify({ code: 'TURN_STALE', message: STALE }) }).where({ status: 'RUNNING' }))
+    )
+    await saveMessages(user, sessionId, [{ role: 'user', content: t.message }, { role: 'assistant', content: `⚠️ ${STALE}` }]).catch((err) => LOG.error('Could not save stale turn', err))
+    LOG.warn(`Chat turn ${t.ID} was RUNNING for longer than the maximum turn time; marked FAILED`)
+  }
+  return stale.length
+}
+
 /**
  * Starts a turn and returns immediately; the agent runs in the background.
  * @returns {Promise<{ turnId: string, sessionId: string, status: 'RUNNING' }>}
@@ -347,6 +374,7 @@ async function startTurn({ sessionId, message, defaults, attachments = [], user 
   const sessionDefaults = normalizeDefaults(defaults)
   ;(attachments || []).forEach(attachmentStore.check) // fail before a new session is created
   sessionId = await ensureSession(user, sessionId, message)
+  await expireStaleTurns(user, sessionId)
   const { ChatTurn, ChatSession } = E()
   if (sessionDefaults)
     await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ defaults: Object.keys(sessionDefaults).length ? JSON.stringify(sessionDefaults) : null })))
@@ -362,9 +390,14 @@ async function startTurn({ sessionId, message, defaults, attachments = [], user 
 
   const controller = new AbortController()
   running.set(turnId, controller)
+  // the maximum turn time: the turn is stopped and ends FAILED (a stale-turn check relies on this limit)
+  const limit = setTimeout(() => controller.abort(fail(504, 'TURN_TIMEOUT', `The message took longer than ${Math.round(maxTurnMs() / 60_000)} minutes and was stopped.`)), maxTurnMs())
   runTurn({ turnId, sessionId, message: String(message), user, signal: controller.signal })
     .catch((e) => LOG.error(`Turn ${turnId} crashed`, e))
-    .finally(() => running.delete(turnId))
+    .finally(() => {
+      clearTimeout(limit)
+      running.delete(turnId)
+    })
   return { turnId, sessionId, status: 'RUNNING' }
 }
 
@@ -379,6 +412,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
   }
   // Cancel works across instances via the DB flag, and instantly in-process via the signal
   const checkCancel = async () => {
+    if (signal.aborted && signal.reason?.code === 'TURN_TIMEOUT') throw signal.reason
     if (signal.aborted) throw fail(499, 'CANCELLED', 'Cancelled')
     const t = await db(user, (tx) => tx.run(SELECT.one.from(ChatTurn).columns('cancelRequested').where({ ID: turnId })))
     if (t?.cancelRequested) throw fail(499, 'CANCELLED', 'Cancelled')
@@ -526,6 +560,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
 
   /** Ends the turn after an error or a cancel; a stored proposal still ends it DONE */
   async function failTurn(e) {
+    if (signal.aborted && signal.reason?.code === 'TURN_TIMEOUT') e = signal.reason // the model call ends as "cancelled" on abort
     const wasCancelled = e.code === 'CANCELLED'
     // A proposal was already stored and only a later step (usually the model's closing summary) failed:
     // the turn did its job, so end it DONE with a note instead of an error
@@ -562,6 +597,7 @@ async function importIntoSession({ sessionId, fileName, buffer, packageId, user 
   if (sessionId) {
     const s = await db(user, (tx) => ownSession(tx, user, sessionId, ['defaults']))
     packageId ||= s.defaults ? JSON.parse(s.defaults).packageId : undefined
+    await expireStaleTurns(user, sessionId)
     if (await db(user, (tx) => tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' }))))
       throw fail(409, 'TURN_IN_PROGRESS', 'The assistant is still working in this conversation. Wait for it or cancel it, then import.')
   }
@@ -593,6 +629,8 @@ async function importIntoSession({ sessionId, fileName, buffer, packageId, user 
 /** Requests cancellation; the turn ends as CANCELLED at the next step (the model call is aborted at once) */
 async function cancelTurn(turnId, user) {
   const { ChatTurn } = E()
+  const turn = await db(user, (tx) => tx.run(SELECT.one.from(ChatTurn, turnId).columns('session_ID')))
+  if (turn) await db(user, (tx) => ownSession(tx, user, turn.session_ID)).then(() => expireStaleTurns(user, turn.session_ID), () => {})
   await db(user, async (tx) => {
     const t = await tx.run(SELECT.one.from(ChatTurn, turnId))
     if (!t) throw fail(404, 'TURN_NOT_FOUND', `Turn ${turnId} not found`)
@@ -612,6 +650,8 @@ async function cancelTurn(turnId, user) {
  */
 async function deleteSession(sessionId, user) {
   const { ChatSession, ChatMessage, ChatTurn, Proposal, Attachment } = E()
+  await db(user, (tx) => ownSession(tx, user, sessionId))
+  await expireStaleTurns(user, sessionId)
   await db(user, async (tx) => {
     await ownSession(tx, user, sessionId)
     if (await tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' })))
