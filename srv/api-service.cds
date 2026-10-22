@@ -23,6 +23,7 @@ service ApiService {
     tenantHost : String;
     latencyMs  : Integer;
     error      : ErrorInfo;
+    commit     : String; // git commit of the running server (local runs; null when deployed without .git)
   }
 
   /** GET /api/health */

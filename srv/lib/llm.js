@@ -23,6 +23,8 @@ const LOG = cds.log('llm')
 
 const DESTINATION = 'NVIDIA_LLM'
 const TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 900_000) // cap for one model call (streamed: data keeps arriving)
+// the fallback model runs only after the main model failed: a shorter cap, so a slow fallback cannot hold a message for 15 min
+const fallbackTimeoutMs = () => Number(process.env.LLM_FALLBACK_TIMEOUT_MS || 300_000)
 const idleTimeoutMs = () => Number(process.env.LLM_IDLE_TIMEOUT_MS || 60_000) // longest pause in a streamed answer
 const streaming = () => process.env.LLM_STREAM !== 'false'
 const MAX_RETRIES = 3 // for 429, 5xx and garbled output
@@ -73,7 +75,7 @@ function normalizeError(e, modelName = model()) {
     if (e.idle)
       return llmError(504, 'LLM_TIMEOUT', `The AI model stopped sending its answer (no data for ${idleTimeoutMs() / 1000}s).`, 'Retry; the model endpoint may be overloaded.')
     if (e.code === 'ECONNABORTED' || /timeout/i.test(e.message))
-      return llmError(504, 'LLM_TIMEOUT', `The AI model did not answer within ${TIMEOUT_MS / 1000}s.`, 'Retry; reasoning models can be slow under load.')
+      return llmError(504, 'LLM_TIMEOUT', `The AI model did not answer within ${(e.capMs || TIMEOUT_MS) / 1000}s.`, 'Retry; reasoning models can be slow under load.')
     return llmError(502, 'LLM_UNREACHABLE', String(detail),
       `Check destination ${DESTINATION} (URL e.g. https://integrate.api.nvidia.com/v1, header URL.headers.Authorization = Bearer <key>). Locally run with --profile hybrid.`)
   }
@@ -150,11 +152,11 @@ function normalizeUsage(raw = {}, durationMs) {
  * ({ choices: [{ message, finish_reason }], usage }), streamed or not.
  * @param {(p: { outputChars: number, reasoningChars: number }) => void} [onProgress] called per streamed piece
  */
-async function send(body, signal, onProgress) {
+async function send(body, signal, onProgress, timeoutMs = TIMEOUT_MS) {
   if (!streaming()) {
     const res = await executeHttpRequest(
       { destinationName: DESTINATION },
-      { method: 'POST', url: '/chat/completions', data: body, timeout: TIMEOUT_MS, signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } },
+      { method: 'POST', url: '/chat/completions', data: body, timeout: timeoutMs, signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } },
       { fetchCsrfToken: false }
     )
     return res.data
@@ -169,7 +171,7 @@ async function send(body, signal, onProgress) {
         method: 'POST',
         url: '/chat/completions',
         data: { ...body, stream: true, stream_options: { include_usage: true } },
-        timeout: TIMEOUT_MS,
+        timeout: timeoutMs,
         signal: controller.signal,
         responseType: 'stream',
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }
@@ -178,7 +180,7 @@ async function send(body, signal, onProgress) {
     )
     // a provider that ignores "stream" answers with plain JSON
     if (!res.data || typeof res.data.on !== 'function') return res.data
-    return await readStream(res.data, onProgress)
+    return await readStream(res.data, onProgress, timeoutMs)
   } finally {
     signal?.removeEventListener('abort', abort)
   }
@@ -187,9 +189,11 @@ async function send(body, signal, onProgress) {
 /**
  * Collects a server-sent-events answer (OpenAI chat.completion.chunk format) into one
  * response: content, reasoning (dropped later), tool calls merged by index, finish reason, usage.
- * Fails when no data arrives for LLM_IDLE_TIMEOUT_MS or the call takes longer than LLM_TIMEOUT_MS.
+ * Fails when the model produces nothing for LLM_IDLE_TIMEOUT_MS (keep-alive lines and empty chunks
+ * do not count: a stalled model that only keeps the connection open is stopped after the idle
+ * limit, not after the cap) or the call takes longer than `capMs`.
  */
-function readStream(stream, onProgress) {
+function readStream(stream, onProgress, capMs = TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const message = { role: 'assistant', content: '', reasoning_content: '' }
     const calls = []
@@ -205,48 +209,70 @@ function readStream(stream, onProgress) {
       stream.destroy()
       reject(err)
     }
-    const timeoutError = (idleTimeout) => Object.assign(new Error(idleTimeout ? 'idle timeout' : 'timeout'), { code: 'ETIMEDOUT', idle: idleTimeout })
+    const timeoutError = (idleTimeout) => Object.assign(new Error(idleTimeout ? 'idle timeout' : 'timeout'), { code: 'ETIMEDOUT', idle: idleTimeout, capMs })
     let idle = setTimeout(() => fail(timeoutError(true)), idleTimeoutMs())
-    const cap = setTimeout(() => fail(timeoutError(false)), TIMEOUT_MS)
+    const cap = setTimeout(() => fail(timeoutError(false)), capMs)
 
+    /** Takes one SSE line; true when it carried progress (text, reasoning, tool call, finish, usage) */
     const take = (line) => {
-      if (!line.startsWith('data:')) return
+      if (!line.startsWith('data:')) return false
       const payload = line.slice(5).trim()
-      if (!payload || payload === '[DONE]') return
+      if (!payload) return false
+      if (payload === '[DONE]') return true
       let chunk
       try {
         chunk = JSON.parse(payload)
       } catch {
-        return // keep-alive or a partial line the provider repeats
+        return false // keep-alive or a partial line the provider repeats
       }
       if (chunk.error) {
         const err = new Error(chunk.error.message || 'The model service reported an error in the stream')
         err.response = { status: Number(chunk.error.code) || 502, data: chunk, headers: {} }
-        return fail(err)
+        fail(err)
+        return false
       }
-      if (chunk.usage) usage = chunk.usage
+      let progress = false
+      if (chunk.usage) {
+        usage = chunk.usage
+        progress = true
+      }
       const choice = chunk.choices?.[0]
-      if (!choice) return
+      if (!choice) return progress
       const delta = choice.delta || {}
-      if (typeof delta.content === 'string') message.content += delta.content
+      if (typeof delta.content === 'string' && delta.content) {
+        message.content += delta.content
+        progress = true
+      }
       const reasoning = delta.reasoning_content ?? delta.reasoning
-      if (typeof reasoning === 'string') message.reasoning_content += reasoning
+      if (typeof reasoning === 'string' && reasoning) {
+        message.reasoning_content += reasoning
+        progress = true
+      }
       for (const tc of delta.tool_calls || []) {
+        progress = true
         const call = (calls[tc.index ?? calls.length] ??= { id: tc.id, type: tc.type || 'function', function: { name: '', arguments: '' } })
         if (tc.id) call.id = tc.id
         if (tc.function?.name) call.function.name += tc.function.name
         if (tc.function?.arguments) call.function.arguments += tc.function.arguments
       }
-      if (choice.finish_reason) finish = choice.finish_reason
+      if (choice.finish_reason) {
+        finish = choice.finish_reason
+        progress = true
+      }
+      return progress
     }
 
     stream.on('data', (data) => {
-      clearTimeout(idle)
-      idle = setTimeout(() => fail(timeoutError(true)), idleTimeoutMs())
       buffer += data.toString('utf8')
       const lines = buffer.split(/\r?\n/)
       buffer = lines.pop()
-      for (const line of lines) take(line)
+      let progress = false
+      for (const line of lines) if (take(line)) progress = true
+      if (progress && !done) {
+        // only real output restarts the no-data limit, not keep-alive bytes
+        clearTimeout(idle)
+        idle = setTimeout(() => fail(timeoutError(true)), idleTimeoutMs())
+      }
       onProgress?.({ outputChars: message.content.length + calls.reduce((n, c) => n + c.function.arguments.length, 0), reasoningChars: message.reasoning_content.length })
     })
     stream.on('error', fail)
@@ -275,14 +301,14 @@ const cancelled = () => Object.assign(new Error('Cancelled'), { code: 'CANCELLED
  * One model, with retries for 429/5xx/garbled output (3x) and timeouts (1x) unless retries=false.
  * @returns {Promise<object>} response with cleaned messages
  */
-async function callModel(body, { retries = true, signal, onProgress } = {}) {
+async function callModel(body, { retries = true, signal, onProgress, timeoutMs = TIMEOUT_MS } = {}) {
   let timeouts = 0
   for (let attempt = 0; ; attempt++) {
     await throttle()
     if (signal?.aborted) throw cancelled()
     const started = Date.now()
     try {
-      const data = await send(body, signal, onProgress)
+      const data = await send(body, signal, onProgress, timeoutMs)
       const u = data.usage || {}
       LOG.info(`${body.model}: ${Date.now() - started}ms, tokens prompt=${u.prompt_tokens ?? '?'} completion=${u.completion_tokens ?? '?'} total=${u.total_tokens ?? '?'}`)
       data.usage = normalizeUsage(u, Date.now() - started)
@@ -337,7 +363,7 @@ async function chat({ messages, tools, toolChoice, temperature = 0.3, maxTokens,
     const fallback = process.env.LLM_FALLBACK_MODEL
     if (!fallback || fallback === body.model || NO_FALLBACK.has(e.code)) throw e
     LOG.warn(`${body.model} failed (${e.code}); retrying once with fallback model ${fallback}`)
-    return { ...(await callModel({ ...body, model: fallback }, { retries: false, signal, onProgress })), fallbackUsed: true }
+    return { ...(await callModel({ ...body, model: fallback }, { retries: false, signal, onProgress, timeoutMs: fallbackTimeoutMs() })), fallbackUsed: true }
   }
 }
 

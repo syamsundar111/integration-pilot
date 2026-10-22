@@ -8,6 +8,16 @@ const { getStats } = require('./lib/stats')
 const { explain, parsedIflow } = require('./lib/explain')
 const { usageSummary } = require('./lib/usage')
 
+/** The running server's git commit, for measurements (BUILD_COMMIT wins; null without .git) */
+const COMMIT = (() => {
+  if (process.env.BUILD_COMMIT) return process.env.BUILD_COMMIT
+  try {
+    return require('child_process').execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: cds.root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || null
+  } catch {
+    return null
+  }
+})()
+
 /** Key of the n-th entity in the URL path, e.g. /Packages/{id}/iflows -> keyOf(req) = id */
 const keyOf = (req, i = 0) => Object.values(req.params.at(i) ?? {})[0]
 
@@ -31,7 +41,7 @@ module.exports = class ApiService extends cds.ApplicationService {
 
     // --- Health -------------------------------------------------------------
 
-    this.on('health', () => cpi.health())
+    this.on('health', async () => ({ ...(await cpi.health()), commit: COMMIT }))
     this.on('me', (req) => ({ id: req.user?.id || 'anonymous' }))
     this.on('stats', (req) => getStats({ fresh: !!req.data.fresh }))
 

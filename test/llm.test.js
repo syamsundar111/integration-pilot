@@ -208,6 +208,46 @@ describe('streaming', () => {
     expect(executeHttpRequest).toHaveBeenCalledTimes(2)
   })
 
+  test('keep-alive lines do not hold off the no-data limit (measurement: a fallback waited 900 s)', async () => {
+    process.env.LLM_IDLE_TIMEOUT_MS = '80'
+    // the connection stays busy with keep-alive comments and empty chunks, but the model produces nothing
+    const keepAlive = () => {
+      const stream = new Readable({ read() {} })
+      const timer = setInterval(() => {
+        stream.push(': keep-alive\n\n')
+        stream.push(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {} }] })}\n\n`)
+      }, 20)
+      stream.on('close', () => clearInterval(timer))
+      return { data: stream }
+    }
+    executeHttpRequest.mockImplementation(async () => keepAlive())
+    const started = Date.now()
+    await expect(llm.chat({ messages: [] })).rejects.toMatchObject({ code: 'LLM_TIMEOUT', message: expect.stringMatching(/no data for 0.08s/) })
+    expect(Date.now() - started).toBeLessThan(2000) // two attempts of ~80 ms, not the 900 s cap
+  })
+
+  test('the fallback model has its own, shorter cap (LLM_FALLBACK_TIMEOUT_MS)', async () => {
+    process.env.LLM_FALLBACK_MODEL = 'test/fallback'
+    process.env.LLM_FALLBACK_TIMEOUT_MS = '300'
+    process.env.LLM_IDLE_TIMEOUT_MS = '1000'
+    // main model: 404 (no retry); fallback: a slow trickle of real tokens that would never stop on its own
+    const trickle = () => {
+      const stream = new Readable({ read() {} })
+      const timer = setInterval(() => stream.push(`data: ${JSON.stringify(delta({ content: '.' }))}\n\n`), 50)
+      stream.on('close', () => clearInterval(timer))
+      return { data: stream }
+    }
+    executeHttpRequest.mockImplementation(async (_d, req) => {
+      if (req.data.model === 'test/fallback') return trickle()
+      throw httpError(404)
+    })
+    await expect(llm.chat({ messages: [] })).rejects.toMatchObject({ code: 'LLM_TIMEOUT', message: 'The AI model did not answer within 0.3s.' })
+    const fallbackCall = executeHttpRequest.mock.calls.find(([, req]) => req.data.model === 'test/fallback')
+    expect(fallbackCall[1].timeout).toBe(300)
+    delete process.env.LLM_FALLBACK_MODEL
+    delete process.env.LLM_FALLBACK_TIMEOUT_MS
+  })
+
   test('an error inside the stream is reported like an HTTP error', async () => {
     executeHttpRequest.mockImplementation(async () => ({ data: sse(delta({ content: 'x' }), { error: { message: 'model overloaded', code: 503 } }) }))
     await expect(llm.chat({ messages: [] })).rejects.toMatchObject({ code: 'LLM_ERROR', message: 'model overloaded' })
