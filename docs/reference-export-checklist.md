@@ -1,12 +1,18 @@
-# Reference exports for receiver authentication and scheduled timers
+# Reference exports for receiver authentication, scheduled timers and ProcessDirect
 
-Integration Pilot builds iFlow XML only from verified CPI exports. Two roadmap items need exports
+Integration Pilot builds iFlow XML only from verified CPI exports. These roadmap items need exports
 that the tenant does not have yet:
 
 - **Item 2, receiver authentication:** HTTP receivers with Basic, OAuth2 Client Credentials,
   OAuth2 SAML Bearer Assertion and Client Certificate, plus one with an externalized credential name.
 - **Item 3, scheduled timers:** every N minutes, every N hours, daily, weekly and monthly, each in
   a time zone, plus one timer externalized as `{{Scheduler}}`.
+- **Item 4 (Phase 2), ProcessDirect sender and receiver:** high value, because shared notification
+  and logging iFlows are called by many others. Today the assistant can only offer an HTTPS
+  workaround, which is public and needs OAuth2 Client Credentials on every caller; ProcessDirect
+  stays inside the tenant and needs no authentication. Needs one called iFlow (ProcessDirect sender)
+  and one caller (ProcessDirect receiver as request-reply and as the end), with an externalized
+  address.
 
 Build the iFlows below in the CPI web editor exactly as listed, download them and put the zips in
 `srv/iflow-builder/reference/`. Use the values as given: the builder templates are cut out of
@@ -82,18 +88,38 @@ Only the Timer Start settings differ. Use time zone **(UTC -5:00) Eastern Standa
 
 *Save* each one (no need to deploy).
 
-## 4. Download the zips
+## 4. ProcessDirect (Phase 2, item 4): two iFlows
 
-For each of the seven iFlows:
+**`Reference_PD_Target`** (the called iFlow, e.g. a shared notification flow):
+1. Delete the default Sender and Start. Add a *Sender* participant named `REF_PD_Caller` and a
+   *Message Start* event, and connect them with the *ProcessDirect* adapter: Address `/reference/notify`.
+2. Add one *Transformation → Content Modifier* named `Set Marker`, with one exchange property:
+   name `Marker`, source type Constant, value `reference`.
+3. Connect Message Start → Set Marker → End.
+
+**`Reference_PD_Caller`** (calls the target in both supported ways):
+1. Delete the default Sender and Start, and add *Events → Timer Start* with *Run Once*.
+2. Add one *Call → External Call → Request Reply* named `Call Target`, connected to a receiver
+   `REF_PD_Target` with the *ProcessDirect* adapter: Address `/reference/notify`.
+3. Connect the End event to a second receiver `REF_PD_TargetEnd` with the *ProcessDirect* adapter.
+   Address: select the field and choose *Externalize*, parameter name `TargetAddress`, default value
+   `/reference/notify`.
+4. Connect Timer Start → Call Target → End.
+
+*Save* both (no need to deploy). Leave all other adapter fields at their defaults.
+
+## 5. Download the zips
+
+For each of the nine iFlows:
 
 1. Open the package `Integration Pilot Reference Exports`, tab *Artifacts*.
 2. In the iFlow's row choose *Actions (⋯) → Download*. If CPI asks, choose *Default Values Only*
    or *Merged Configured and Default Values*; both are fine because nothing is configured yet.
 3. The browser saves `<iFlow ID>.zip`. If the file has another name, rename it to the iFlow ID.
 
-## 5. Put them in the project
+## 6. Put them in the project
 
-Copy the seven zips into `srv/iflow-builder/reference/`. The existing `Reference_AllSteps.zip` and
+Copy the nine zips into `srv/iflow-builder/reference/`. The existing `Reference_AllSteps.zip` and
 `Reference_Timer.zip` stay.
 
 | File | For |
@@ -105,13 +131,15 @@ Copy the seven zips into `srv/iflow-builder/reference/`. The existing `Reference
 | `Reference_Timer_Weekly.zip` | item 3 |
 | `Reference_Timer_Monthly.zip` | item 3 |
 | `Reference_Timer_Externalized.zip` | item 3 |
+| `Reference_PD_Target.zip` | item 4 (Phase 2) |
+| `Reference_PD_Caller.zip` | item 4 (Phase 2) |
 
 Check before handing over:
 
-- Seven new zips in `srv/iflow-builder/reference/`, each named exactly as above.
+- Nine new zips in `srv/iflow-builder/reference/`, each named exactly as above.
 - No real passwords, keys or tokens in any iFlow; only the dummy aliases above.
 - The iFlows are saved in `IntegrationPilot.ReferenceExports`. Deploying them is not needed, and
   the package can stay on the tenant as a reference.
 
-Then tell the assistant the exports are in place. Items 2 and 3 are built from them, with tests that
+Then tell the assistant the exports are in place. Items 2, 3 and 4 are built from them, with tests that
 compare the builder output against these files.

@@ -198,6 +198,8 @@
           </HBox>
         </VBox>
 
+        <!-- drag (or arrow keys) to resize the panes; double-click resets -->
+        <core:HTML content="&lt;div class=&quot;ipSplitter&quot; role=&quot;separator&quot; tabindex=&quot;0&quot; aria-orientation=&quot;vertical&quot; aria-label=&quot;Resize chat and proposal panels&quot; title=&quot;Drag to resize · double-click to reset&quot;&gt;&lt;/div&gt;" afterRendering=".onSplitterRendered" />
         <!-- ================= proposal ================= -->
         <VBox renderType="Bare" class="ipPane ipCard">
           <IconTabHeader id="proposalTabs" items="{chat>/proposals}" selectedKey="{chat>/activeId}" select=".onProposalTab" visible="{= ${chat>/proposals}.length > 1 }" mode="Inline" backgroundDesign="Transparent">

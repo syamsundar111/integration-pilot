@@ -69,3 +69,36 @@ describe('system prompt: unsupported steps', () => {
     expect(spec.steps.filter((s) => /^REPLACE WITH /.test(s.description || ''))).toHaveLength(1)
   })
 })
+
+describe('system prompt: calling another iFlow (manual test 16)', () => {
+  const SENDER = fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/templates/iflw/messageflow-https-sender.xml'), 'utf8')
+  const value = (key) => SENDER.match(new RegExp(`<key>${key}</key>\\s*<value>([^<]*)</value>`))?.[1]
+
+  test('the HTTPS sender is a workaround for ProcessDirect, not an equivalent', () => {
+    expect(flat).toMatch(/v1 has no ProcessDirect sender or receiver/)
+    expect(flat).toMatch(/offer this \*\*workaround\*\* \(never call it an equivalent\)/)
+    expect(flat).toMatch(/ProcessDirect stays inside the tenant and needs no authentication; an HTTPS endpoint is public and every call to it must be authenticated/)
+  })
+
+  test('authentication is required: OAuth2 Client Credentials from a Process Integration Runtime service key (integration-flow)', () => {
+    expect(flat).toMatch(/\*\*Authentication is required\*\*, not optional/)
+    expect(flat).toMatch(/\*\*OAuth2 Client Credentials\*\*.*\*\*Process Integration Runtime\*\* instance with plan \*\*integration-flow\*\*/)
+    expect(flat).toMatch(/Never write "if the target requires it"/)
+    // the role the prompt names is the one the template requires
+    expect(value('senderAuthType')).toBe('RoleBased')
+    expect(value('userRole')).toBe('ESBMessaging.send')
+  })
+
+  test('the URL uses the -rt runtime host and a parameter named after the target', () => {
+    expect(flat).toMatch(/\*\*runtime host\*\* \(the host name contains `-rt`\), path `\/http\/<address>`/)
+    expect(flat).toMatch(/Monitor → Integrations and APIs → Manage Integration Content/)
+    expect(flat).toMatch(/named after the target iFlow, e\.g\. `\{\{CommonNotifyURL\}\}`, never `ProcessDirectURL`/)
+  })
+
+  test('CSRF: the prompt states what the HTTPS sender template sets', () => {
+    expect(value('xsrfProtection')).toBe('0') // CSRF Protected off
+    expect(flat).toMatch(/create the HTTPS sender with \*CSRF Protected\* off, so the caller needs no CSRF token/)
+    expect(flat).toMatch(/a caller without a token gets HTTP 403/)
+  })
+})
+

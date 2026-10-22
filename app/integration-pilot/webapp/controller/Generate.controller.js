@@ -19,6 +19,8 @@ sap.ui.define(
     const POLL_MS = 2000
     const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
     const NO_DEFAULTS = { packageId: '', timer: '', authNote: '' }
+    const MIN_SPLIT = 25 // the chat pane takes 25–75 % of the width
+    const MAX_SPLIT = 75
     /** { trigger, packageId } of a stored draft spec (JSON { spec, source, … }), or null */
     const draftInfo = (draftSpec) => {
       const spec = draftSpec ? JSON.parse(draftSpec).spec : null
@@ -109,6 +111,73 @@ sap.ui.define(
           }
           input.attachBrowserEvent('keydown', this._keyHandler)
         }
+      },
+
+      // --- resizable panes ---------------------------------------------------------------------
+
+      /** Drag, arrow keys or double-click (reset) on the splitter; the width is remembered in this browser */
+      onSplitterRendered(e) {
+        const handle = e.getSource().getDomRef()
+        if (!handle) return
+        const KEY = 'integrationPilot.generate.split'
+        // the container is looked up each time: a re-render of the page replaces it
+        const set = (percent, save) => {
+          const p = Math.min(MAX_SPLIT, Math.max(MIN_SPLIT, Math.round(percent)))
+          handle.parentElement.style.setProperty('--ipLeft', `${p}fr`)
+          handle.parentElement.style.setProperty('--ipRight', `${100 - p}fr`)
+          handle.setAttribute('aria-valuenow', String(p))
+          handle.dataset.split = String(p)
+          if (save)
+            try {
+              localStorage.setItem(KEY, String(p))
+            } catch (err) {
+              // not remembered (private window or blocked storage)
+            }
+        }
+        let saved = null
+        try {
+          saved = Number(localStorage.getItem(KEY)) || null
+        } catch (err) {
+          // default split
+        }
+        set(Number(handle.dataset.split) || saved || 50, false) // also after every re-render
+        if (handle.dataset.bound) return
+        handle.dataset.bound = 'true'
+        handle.setAttribute('aria-valuemin', String(MIN_SPLIT))
+        handle.setAttribute('aria-valuemax', String(MAX_SPLIT))
+
+        const percentAt = (x) => {
+          const r = handle.parentElement.getBoundingClientRect()
+          return ((x - r.left) / r.width) * 100
+        }
+        handle.addEventListener('pointerdown', (ev) => {
+          handle.setPointerCapture(ev.pointerId)
+          handle.classList.add('ipDragging')
+          document.body.style.userSelect = 'none'
+        })
+        handle.addEventListener('pointermove', (ev) => {
+          if (handle.hasPointerCapture(ev.pointerId)) set(percentAt(ev.clientX), false)
+        })
+        const stop = (ev) => {
+          if (!handle.hasPointerCapture(ev.pointerId)) return
+          handle.releasePointerCapture(ev.pointerId)
+          handle.classList.remove('ipDragging')
+          document.body.style.userSelect = ''
+          set(Number(handle.dataset.split), true)
+        }
+        handle.addEventListener('pointerup', stop)
+        handle.addEventListener('pointercancel', stop)
+        handle.addEventListener('dblclick', () => set(50, true))
+        handle.addEventListener('keydown', (ev) => {
+          const step = { ArrowLeft: -2, ArrowRight: 2 }[ev.key]
+          if (step) {
+            ev.preventDefault()
+            set(Number(handle.dataset.split) + step, true)
+          } else if (ev.key === 'Home' || ev.key === 'End') {
+            ev.preventDefault()
+            set(ev.key === 'Home' ? MIN_SPLIT : MAX_SPLIT, true)
+          }
+        })
       },
 
       onExit() {
