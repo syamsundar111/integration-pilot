@@ -307,7 +307,7 @@ function validate(spec, { attachments = [] } = {}) {
       return
     }
     const name = value.match(WHOLE_PARAM)[1]
-    if (!(name in params)) err('PARAM_UNDEFINED', `${path}: parameter '${name}' is referenced but not defined in 'parameters'`)
+    if (!Object.hasOwn(params, name)) err('PARAM_UNDEFINED', `${path}: parameter '${name}' is referenced but not defined in 'parameters'`)
   })
 
   const unique = issues.filter((i, n) => issues.findIndex((x) => x.message === i.message) === n)

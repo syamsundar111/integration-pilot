@@ -92,28 +92,35 @@ const HTTP_ADDRESS_ATTRIBUTE = () => tpl('propdef-attribute-http-address.txt').t
 function splitUrl(url, params = {}) {
   const param = String(url).match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
   // a parameter URL: the query of its default goes to the Query field, the address stays the parameter
-  if (param) return { address: url, query: paramQueries(params)[param] || '' }
+  if (param) return { address: url, query: (Object.hasOwn(params || {}, param) && splitParameters(params, [param]).queries[param]) || '' }
   const i = url.indexOf('?')
   return i < 0 ? { address: url, query: '' } : { address: url.slice(0, i), query: url.slice(i + 1) }
 }
 
+/** Parameters used as the whole URL of an HTTP receiver ({{P}}) */
+function receiverParams(spec) {
+  const calls = [...(spec?.steps || []).filter((s) => s?.type === 'requestReplyHttp'), ...(spec?.end?.type === 'httpReceiver' ? [spec.end] : [])]
+  return calls.map((c) => String(c.url ?? '').match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]).filter(Boolean)
+}
+
 /**
- * Parameter defaults with a query (https://host/Products?$format=json): CPI keeps the query in the
- * receiver's Query field (httpAddressQuery), not in the Address, so the parameter holds the base URL.
- * @returns {{ params: object, queries: Object<string, string> }} defaults without query, and each query
+ * Parameter defaults with a query (https://host/Products?$format=json): CPI keeps the query of a
+ * receiver URL in the receiver's Query field (httpAddressQuery), not in the Address, so such a
+ * parameter holds the base URL. Only the parameters in `only` (the receiver URLs) are split; any
+ * other parameter keeps its value as it is.
+ * @returns {{ params: object, queries: Object<string, string> }} defaults (receiver URLs without query), and each query
  */
-function splitParameters(parameters = {}) {
+function splitParameters(parameters = {}, only = null) {
   const params = {}
-  const queries = {}
+  const queries = Object.create(null)
   for (const [k, v] of Object.entries(parameters || {})) {
     const s = String(v ?? '')
-    const i = /^https?:\/\//i.test(s) ? s.indexOf('?') : -1
+    const i = (!only || only.includes(k)) && /^https?:\/\//i.test(s) ? s.indexOf('?') : -1
     params[k] = i < 0 ? v : s.slice(0, i)
     if (i >= 0) queries[k] = s.slice(i + 1)
   }
   return { params, queries }
 }
-const paramQueries = (parameters) => splitParameters(parameters).queries
 
 // --- layout ----------------------------------------------------------------------
 
@@ -354,7 +361,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
 
   // --- bundle files ------------------------------------------------------------------
   const date = javaDate(now)
-  const { params } = splitParameters(spec.parameters) // defaults without their query (it is in the receiver's Query field)
+  const { params } = splitParameters(spec.parameters, receiverParams(spec)) // receiver URLs without their query (it is in the Query field)
   const paramNames = Object.keys(params)
 
   const files = []
@@ -461,4 +468,4 @@ function nodeToXml(n) {
   }
 }
 
-module.exports = { build, injectAttachments, splitParameters, javaDate, propEscape, manifestHeader }
+module.exports = { build, injectAttachments, splitParameters, receiverParams, javaDate, propEscape, manifestHeader }

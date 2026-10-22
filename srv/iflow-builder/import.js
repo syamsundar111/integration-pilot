@@ -116,11 +116,11 @@ async function importIflow(buffer, { fileName, packageId }) {
       params[whole[1]] ??= ''
       return url
     }
-    const resolved = String(url).replace(PARAM_REF, (m, p) => (p in defaults ? defaults[p] : m))
+    const resolved = String(url).replace(PARAM_REF, (m, p) => (Object.hasOwn(defaults, p) ? defaults[p] : m))
     if (!HTTP_URL.test(resolved) || /\{\{/.test(resolved)) return null
     if (!/\{\{/.test(url)) return resolved
     let name = identifier(`${system}_URL`, 'Receiver_URL', 60)
-    for (let n = 2; name in params; n++) name = identifier(`${system}_URL_${n}`, 'Receiver_URL', 60)
+    for (let n = 2; Object.hasOwn(params, name); n++) name = identifier(`${system}_URL_${n}`, 'Receiver_URL', 60)
     params[name] = resolved
     notes.push(`${system}: the URL ${url} became the parameter {{${name}}} with the combined value as its default`)
     return `{{${name}}}`

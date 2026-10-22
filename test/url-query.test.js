@@ -69,3 +69,33 @@ describe('receiver URL with a query', () => {
     expect(r.valid).toBe(true)
   })
 })
+
+describe('parameter handling (full review)', () => {
+  test('two receivers sharing {{U}}: an update reads the query back once, not once per receiver', async () => {
+    const spec = baseSpec({
+      id: 'Shared_Query',
+      steps: [{ type: 'requestReplyHttp', name: 'Get', system: 'S1', url: '{{U}}', method: 'GET', authType: 'None' }],
+      end: { type: 'httpReceiver', system: 'S2', url: '{{U}}', method: 'POST', authType: 'None' },
+      parameters: { U: 'https://h/x?$format=json' }
+    })
+    let current = spec
+    for (let i = 0; i < 3; i++) {
+      const { spec: back, blockers } = specFromParsed(await parse((await build(current)).zipBase64), { packageId: spec.packageId })
+      expect(blockers).toEqual([])
+      expect(back.parameters.U).toBe('https://h/x?$format=json') // stable over repeated updates
+      current = back
+    }
+  })
+
+  test('a parameter that no receiver uses keeps its query', async () => {
+    const spec = baseSpec({ id: 'Doc_Param', parameters: { Doc: 'https://h/x?a=1' } })
+    const { spec: back } = specFromParsed(await parse((await build(spec)).zipBase64), { packageId: spec.packageId })
+    expect(back.parameters.Doc).toBe('https://h/x?a=1')
+  })
+
+  test('names of Object.prototype are not defined parameters', () => {
+    const r = validate(baseSpec({ steps: [{ type: 'requestReplyHttp', name: 'R', system: 'S', url: '{{constructor}}', method: 'GET', authType: 'None' }] }))
+    expect(r.valid).toBe(false)
+    expect(r.errors).toEqual(["steps[0].url: parameter 'constructor' is referenced but not defined in 'parameters'"])
+  })
+})
