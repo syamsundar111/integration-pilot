@@ -46,6 +46,13 @@ sap.ui.define(
       if (check.status === 'failed') return { checkText: `Syntax error: ${(check.errors || []).map((e) => `${fileName}:${e}`).join('; ')}`, checkState: 'Error' }
       return { checkText: `Not checked: ${check.reason || 'the Groovy check was unavailable'}`, checkState: 'Warning' }
     }
+    /** Update proposals: whether the script differs from the current iFlow (from the stored diff) */
+    function scriptChange(scripts, fileName) {
+      const status = scripts[fileName]
+      if (!status) return { changeText: '', changeState: 'None' }
+      if (status === 'unchanged') return { changeText: 'Unchanged from the iFlow', changeState: 'Warning' }
+      return { changeText: status === 'new' ? 'New script' : 'Changed compared with the iFlow', changeState: 'Information' }
+    }
     const userHtml = (text) => `<p>${esc(text).replace(/\n/g, '<br>')}</p>`
 
     // --- closest existing package (typos, case, partial names) — same rules as the agent ---
@@ -798,7 +805,8 @@ sap.ui.define(
             .map((s) => ({
               fileName: `${s.fileName}.groovy`,
               code: s.code != null ? s.code : attached[`${s.fileName}.groovy`] || '',
-              ...scriptStatus(`${s.fileName}.groovy`, (p.scriptChecks || {})[`${s.fileName}.groovy`])
+              ...scriptStatus(`${s.fileName}.groovy`, (p.scriptChecks || {})[`${s.fileName}.groovy`]),
+              ...scriptChange((p.changes && p.changes.scripts) || {}, `${s.fileName}.groovy`)
             }))
           // Groovy check: a prominent strip when a script failed or could not be checked
           const checks = Object.values(p.scriptChecks || {})

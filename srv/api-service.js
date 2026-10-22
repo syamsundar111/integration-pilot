@@ -230,7 +230,8 @@ module.exports = class ApiService extends cds.ApplicationService {
         ...('result' in p && { result: parseJson(p.result) }),
         ...('attachments' in p && { attachments: parseJson(p.attachments) }),
         ...('backup' in p && { backup: parseJson(p.backup) }),
-        ...('scriptChecks' in p && { scriptChecks: parseJson(p.scriptChecks) })
+        ...('scriptChecks' in p && { scriptChecks: parseJson(p.scriptChecks) }),
+        ...('changes' in p && { changes: parseJson(p.changes) })
       }
     this.on('READ', 'Proposals', async (req, next) => {
       const result = await next()

@@ -17,6 +17,8 @@ const LOG = cds.log('agent')
 const MAX_RESULT_CHARS = 12_000
 const MAX_ERRORS = 15 // validation errors returned to the model per call
 const MAX_STEPS_PER_EDIT = 8 // steps added or replaced per editDraftSpec call: keeps each answer short
+// Groovy code in a chat message: a CPI entry function or a CPI import
+const GROOVY_IN_TEXT = /\bdef\s+Message\s+processData\s*\(|\bimport\s+com\.sap\.(gateway|it)\./
 const DRAFT_FIELDS = ['id', 'name', 'description', 'packageId', 'trigger', 'end', 'parameters', 'resources', 'exceptionSubprocess']
 const { toPackageId } = require('../lib/package-id')
 
@@ -295,7 +297,7 @@ async function saveDraft(ctx, spec, { source, valid = false }) {
 }
 
 /** Stores a PENDING proposal in its own transaction, so it survives a failing chat turn */
-async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, packageName = null, operation = 'CREATE', attachments = {}, scriptChecks = null }) {
+async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, packageName = null, operation = 'CREATE', attachments = {}, scriptChecks = null, changes = null }) {
   const ID = cds.utils.uuid()
   // the attached files the spec uses, as they are now: approval and retry build from this snapshot
   const used = Object.fromEntries(attachmentStore.referencedBy(spec).map((f) => [f, attachments[f]]))
@@ -312,7 +314,8 @@ async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null
         packageId,
         packageName,
         attachments: Object.keys(used).length ? JSON.stringify(used) : null,
-        scriptChecks: scriptChecks && Object.keys(scriptChecks).length ? JSON.stringify(scriptChecks) : null
+        scriptChecks: scriptChecks && Object.keys(scriptChecks).length ? JSON.stringify(scriptChecks) : null,
+        changes: changes ? JSON.stringify(changes) : null
       })
     )
   )
@@ -354,7 +357,8 @@ async function detachFiles(ctx, spec, resources = {}) {
   return {
     spec: { ...spec, steps: spec.steps.map(strip), ...(spec.exceptionSubprocess && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: spec.exceptionSubprocess.steps.map(strip) } }) },
     attachedFiles: files.map((f) => f.fileName).filter((f) => stored.has(f)),
-    keptUploads: files.map((f) => f.fileName).filter((f) => !stored.has(f))
+    // files of the conversation that replace the iFlow's: uploads of the user and scripts written with writeScript
+    keptFiles: files.map((f) => f.fileName).filter((f) => !stored.has(f))
   }
 }
 
@@ -633,16 +637,16 @@ const handlers = {
         instruction:
           'This iFlow cannot be updated here: an update rebuilds it from the spec and would lose the blockers. Tell the user, list the blockers, and suggest changing it in the CPI web editor or creating a new iFlow.'
       }
-    const { spec, attachedFiles, keptUploads } = await detachFiles(ctx, current.spec, current.resources)
+    const { spec, attachedFiles, keptFiles } = await detachFiles(ctx, current.spec, current.resources)
     await saveDraft(ctx, spec, { source: `current content of iFlow ${iflowId}` })
     return {
       editable: true,
       spec,
       ...(attachedFiles.length && { attachedFiles }),
-      ...(keptUploads.length && { keptUploads }),
+      ...(keptFiles.length && { keptFiles }),
       instruction:
         'Change only what the user asked for, keep everything else as it is, edit the draft with editDraftSpec and call proposeIflowUpdate with { "useDraftSpec": true }. Scripts and XSLT files are attached files: keep their steps without code' +
-        (keptUploads.length ? `; the user's uploads ${keptUploads.join(', ')} replace the iFlow's current files.` : '.')
+        (keptFiles.length ? `; ${keptFiles.join(', ')} (uploaded by the user or written with writeScript in this conversation) replace the iFlow's current files.` : '.')
     }
   },
 
@@ -661,15 +665,35 @@ const handlers = {
       return { valid: false, errors: [`packageId: iFlow '${spec.id}' is in package '${current.packageId}' — an update keeps the package, set packageId to '${current.packageId}'`] }
     if (current.blockers.length) return { valid: false, errors: current.blockers.map((b) => `not updatable: ${b}`), instruction: 'Tell the user this iFlow cannot be updated here, and why.' }
 
+    // Scripts: the proposal's file against the iFlow's current code
+    const currentCode = Object.fromEntries(
+      [...current.spec.steps, ...(current.spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript').map((s) => [`${s.fileName}.groovy`, s.code])
+    )
+    const scripts = Object.fromEntries(
+      [...spec.steps, ...(spec.exceptionSubprocess?.steps || [])]
+        .filter((s) => s.type === 'groovyScript')
+        .map((s) => `${s.fileName}.groovy`)
+        .map((f) => [f, currentCode[f] == null ? 'new' : attachments[f] === currentCode[f] ? 'unchanged' : 'changed'])
+    )
+    // The user sent code but every script stays as it is: the model did not write it (or it was lost)
+    if (GROOVY_IN_TEXT.test(ctx.message || '') && Object.keys(scripts).length && Object.values(scripts).every((v) => v === 'unchanged'))
+      return {
+        valid: false,
+        errors: [
+          `SCRIPT_UNCHANGED ${Object.keys(scripts).join(', ')}: the user's message contains Groovy code, but this update keeps the iFlow's scripts unchanged. Write the user's code with writeScript (same fileName) exactly as given, then propose again. Do not change other fields to get past this.`
+        ]
+      }
+
     // compare with the scripts filled in: the current spec has code, the proposed one references attachments
     const changes = describeChanges({ ...current.spec, resources: undefined }, { ...injectAttachments(spec, attachments), resources: undefined })
     if (JSON.stringify(current.spec.resources || []) !== JSON.stringify(spec.resources || [])) changes.push('XSLT files changed')
     for (const f of spec.resources || []) if (current.resources?.[f] != null && current.resources[f] !== attachments[f]) changes.push(`${f} replaced`)
+    for (const [f, status] of Object.entries(scripts)) if (status !== 'unchanged') changes.push(`script ${f} ${status === 'new' ? 'added' : 'changed'}`)
     if (!changes.length) return { valid: false, errors: ['NO_CHANGE spec: nothing changed compared to the current iFlow'] }
     const { summary } = await build(spec, { attachments })
     const groovy = await groovySyntax(spec, attachments)
     if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts with writeScript and propose again.')
-    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments, scriptChecks: groovy.files })
+    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments, scriptChecks: groovy.files, changes: { list: changes, scripts } })
     return {
       valid: true,
       proposalId,
@@ -678,9 +702,10 @@ const handlers = {
       ...(groovy.warning && { warnings: [groovy.warning] }),
       operation: 'UPDATE',
       changes,
+      scripts,
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
       instruction:
-        'Tell the user the update is ready for review in the proposal panel and list the changes. Mention: approving replaces the iFlow content after backing it up (stored with the proposal and saved as a CPI version; "Restore previous version" on the iFlows page puts it back), and a deployed iFlow runs the old version until they approve with deploy. Nothing has changed yet.'
+        'Tell the user the update is ready for review in the proposal panel. Do not list the changes yourself: the app adds the actual changes (the list above, per script changed or unchanged) below your answer, and never claim a change that is not in that list. Mention: approving replaces the iFlow content after backing it up (stored with the proposal and saved as a CPI version; "Restore previous version" on the iFlows page puts it back), and a deployed iFlow runs the old version until they approve with deploy. Nothing has changed yet.'
     }
   },
 

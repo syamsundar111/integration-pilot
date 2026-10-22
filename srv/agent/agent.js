@@ -228,6 +228,27 @@ async function systemMessage(user, sessionId) {
   return { role: 'system', content: `${SYSTEM_PROMPT}\n\n## Context\n${context.join('\n')}` }
 }
 
+/**
+ * "What changed" for the update proposals of a turn, built from the stored diff (spec and script
+ * contents against the current iFlow), so the answer never shows changes the proposal does not make.
+ */
+async function changeSummary(user, ids) {
+  if (!ids.length) return ''
+  const { Proposal } = E()
+  const rows = await db(user, (tx) => tx.run(SELECT.from(Proposal).columns('iflowId', 'operation', 'changes').where({ ID: { in: ids }, operation: 'UPDATE' })))
+  const blocks = rows
+    .filter((p) => p.changes)
+    .map((p) => {
+      const { list = [], scripts = {} } = JSON.parse(p.changes)
+      const lines = [
+        ...list.filter((c) => !/^script \S+ (changed|added)$/.test(c)).map((c) => `- ${c}`),
+        ...Object.entries(scripts).map(([f, s]) => `- Script \`${f}\`: ${s === 'unchanged' ? 'unchanged from the iFlow' : s === 'new' ? 'new' : 'changed'}`)
+      ]
+      return `**What changed in ${p.iflowId}** (from the proposal, compared with the current iFlow):\n${lines.join('\n')}`
+    })
+  return blocks.length ? `\n\n---\n${blocks.join('\n\n')}` : ''
+}
+
 // --- progress events ------------------------------------------------------------------
 
 const event = (type, label, detail) => ({ at: new Date().toISOString(), type, label, ...(detail && { detail }) })
@@ -290,7 +311,7 @@ async function startTurn({ sessionId, message, defaults, attachments = [], user 
 
 async function runTurn({ turnId, sessionId, message, user, signal }) {
   const { ChatTurn } = E()
-  const ctx = { user, sessionId, proposals: [] }
+  const ctx = { user, sessionId, proposals: [], message } // message: for checks against what the user sent
   const events = [event('thinking', 'Thinking…')]
   const update = (patch = {}) => db(user, (tx) => tx.run(UPDATE(ChatTurn, turnId).set({ events: JSON.stringify(events), ...patch })))
   const emit = (type, label, detail) => {
@@ -352,6 +373,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
 
   const turn = [{ role: 'user', content: message }]
   const finish = async (text, messages = turn) => {
+    text += await changeSummary(user, ctx.proposals) // the actual changes, never the model's account of them
     const u = usageNow()
     await saveMessages(user, sessionId, [...messages, { role: 'assistant', content: text, usage: u }])
     const proposals = await loadProposals(user, ctx.proposals)

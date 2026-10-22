@@ -337,6 +337,7 @@
                   <VBox items="{chat>/active/scripts}" renderType="Bare">
                     <VBox class="sapUiSmallMarginBottom" renderType="Bare">
                       <Text text="{chat>fileName}" class="ipMono" />
+                      <ObjectStatus text="{chat>changeText}" state="{chat>changeState}" visible="{= !!${chat>changeText} }" icon="{= ${chat>changeState} === 'Warning' ? 'sap-icon://alert' : 'sap-icon://edit' }" class="sapUiTinyMarginBottom" />
                       <ObjectStatus text="{chat>checkText}" state="{chat>checkState}" icon="{= ${chat>checkState} === 'Success' ? 'sap-icon://accept' : (${chat>checkState} === 'Error' ? 'sap-icon://error' : (${chat>checkState} === 'Warning' ? 'sap-icon://alert' : '')) }" class="sapUiTinyMarginBottom" />
                       <ce:CodeEditor type="groovy" value="{chat>code}" editable="false" height="260px" syntaxHints="false" />
                     </VBox>

@@ -70,6 +70,7 @@ entity Proposal : cuid, managed {
   backupZip   : LargeString; // UPDATE proposals: the iFlow zip (base64) as it was before the update
   backup      : LargeString; // JSON { iflowId, version, savedVersion?, versionError?, sizeBytes, at }
   scriptChecks : LargeString; // JSON { fileName: { status: ok|failed|unchecked, errors?, reason?, at } }: Groovy check, at proposal and at approval
+  changes      : LargeString; // UPDATE only, JSON { list: [text], scripts: { fileName: changed|unchanged|new } }: the actual diff against the current iFlow
   result    : LargeString; // JSON execution result (steps, deploy status)
   error     : LargeString;
 }

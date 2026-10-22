@@ -54,7 +54,8 @@ async function save(user, sessionId, files, origin = 'upload') {
     if (existing.length + added > MAX_PER_SESSION) throw fail(400, 'TOO_MANY_ATTACHMENTS', `At most ${MAX_PER_SESSION} attached files per conversation`)
     for (const row of rows) {
       const old = byName[row.fileName]
-      if (old && origin !== 'upload' && old.origin === 'upload') continue
+      // the user's uploads and the scripts written in this conversation win over copies from an iFlow or an import
+      if (old && origin !== 'upload' && (old.origin === 'upload' || (origin !== 'ai' && old.origin === 'ai'))) continue
       if (old) await tx.run(UPDATE(Attachment()).set({ ...row, origin }).where({ session_ID: sessionId, fileName: row.fileName }))
       else await tx.run(INSERT.into(Attachment()).entries({ ...row, origin, session_ID: sessionId }))
       stored.push(row.fileName)

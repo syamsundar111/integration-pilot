@@ -1333,3 +1333,103 @@ describe('Groovy check at proposal and approval', () => {
     expect(done.result.steps[0]).toMatchObject({ key: 'check', status: 'done', detail: '1 script(s) checked, no syntax errors' })
   })
 })
+
+describe('update with new script code (manual test 16)', () => {
+  const { build } = require('../srv/iflow-builder/builder')
+  const JSZip = require('jszip')
+  const OLD = `import com.sap.gateway.ip.core.customdev.util.Message
+
+def Message processData(Message message) {
+    messageLogFactory.getMessageLog(message)?.setStringProperty('Old', 'yes')
+    return message
+}
+`
+  const NEW = `import com.sap.gateway.ip.core.customdev.util.Message
+
+def Message processData(Message message) {
+    def body = message.getBody(String) ?: ''
+    messageLogFactory.getMessageLog(message)?.addAttachmentAsString('Notification', body, 'text/plain')
+    return message
+}
+`
+  const current = {
+    id: 'Notify_Update',
+    name: 'Notify Update',
+    packageId: 'PilotReference',
+    trigger: { type: 'httpsSender', address: '/pilot/notify-update' },
+    steps: [{ type: 'groovyScript', name: 'Groovy Script 1', fileName: 'addNotificationAttachment' }],
+    end: { type: 'none' }
+  }
+  const userMessage = `Update Notify_Update. Replace the script with this code, use it verbatim:\n${NEW}`
+  const lastToolResult = () => JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+
+  beforeAll(async () => {
+    const zip = Buffer.from((await build(current, { attachments: { 'addNotificationAttachment.groovy': OLD } })).zipBase64, 'base64')
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (id === current.id) return { id, name: current.name, packageId: 'PilotReference', version: '1.0.0' }
+      throw Object.assign(new Error('not found'), { status: 404 })
+    })
+    cpi.downloadIflowZip.mockImplementation(async () => zip)
+  })
+  afterAll(() =>
+    cpi.getIflow.mockImplementation(async () => {
+      throw Object.assign(new Error('not found'), { status: 404 })
+    })
+  )
+
+  test('a script written before getIflowSpec is kept, and the proposal and answer show it as changed', async () => {
+    llm.chat
+      .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'addNotificationAttachment', code: NEW }))
+      .mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: current.id }))
+      .mockResolvedValueOnce(toolCall('proposeIflowUpdate', { useDraftSpec: true }))
+      .mockResolvedValueOnce(answer('Done. The script was replaced with your exact code.'))
+    const turn = await chat({ message: userMessage })
+
+    // getIflowSpec did not overwrite the script the model had written
+    const read = JSON.parse(llm.chat.mock.calls.at(-2)[0].messages.at(-1).content)
+    expect(read).toMatchObject({ editable: true, keptFiles: ['addNotificationAttachment.groovy'] })
+    const { data: files } = await GET(`/api/Attachments?$filter=session_ID eq ${turn.sessionId}`)
+    expect(files).toEqual([expect.objectContaining({ fileName: 'addNotificationAttachment.groovy', origin: 'ai' })])
+
+    const { data: p } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
+    expect(p.attachments['addNotificationAttachment.groovy']).toBe(NEW)
+    expect(p.changes).toEqual({ list: [expect.stringMatching(/^steps: /), 'script addNotificationAttachment.groovy changed'], scripts: { 'addNotificationAttachment.groovy': 'changed' } })
+    // the answer ends with the actual changes, not the model's account of them
+    expect(turn.text).toMatch(/\n---\n\*\*What changed in Notify_Update\*\* \(from the proposal, compared with the current iFlow\):\n/)
+    expect(turn.text).toContain('- Script `addNotificationAttachment.groovy`: changed')
+  })
+
+  test('code in the message but the script left unchanged: refused before proposing (SCRIPT_UNCHANGED)', async () => {
+    llm.chat
+      .mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: current.id }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { description: 'Script fixed' } }] }))
+      .mockResolvedValueOnce(toolCall('proposeIflowUpdate', { useDraftSpec: true }))
+      .mockResolvedValueOnce(answer('could not'))
+    const turn = await chat({ message: userMessage })
+    expect(lastToolResult()).toEqual({ valid: false, errors: [expect.stringMatching(/^SCRIPT_UNCHANGED addNotificationAttachment\.groovy: the user's message contains Groovy code, but this update keeps the iFlow's scripts unchanged/)] })
+    expect(turn.proposals).toEqual([])
+  })
+
+  test('without code in the message, a description-only update is allowed and the answer says the script is unchanged', async () => {
+    llm.chat
+      .mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: current.id }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { description: 'Adds the body as an attachment' } }] }))
+      .mockResolvedValueOnce(toolCall('proposeIflowUpdate', { useDraftSpec: true }))
+      .mockResolvedValueOnce(answer('The script was replaced.')) // a false claim by the model
+    const turn = await chat({ message: 'Update Notify_Update: change only the description to "Adds the body as an attachment".' })
+    const { data: p } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
+    expect(p.changes).toEqual({ list: ['description changed'], scripts: { 'addNotificationAttachment.groovy': 'unchanged' } })
+    expect(turn.text).toContain('- description changed\n- Script `addNotificationAttachment.groovy`: unchanged from the iFlow')
+  })
+
+  test('the built zip contains every script at the path its step references', async () => {
+    const { data: proposals } = await GET(`/api/Proposals?$filter=iflowId eq '${current.id}'&$orderby=createdAt`)
+    const p = proposals[0]
+    const { zipBase64 } = await build(p.spec, { attachments: p.attachments })
+    const zip = await JSZip.loadAsync(Buffer.from(zipBase64, 'base64'))
+    const iflw = await zip.file(/\.iflw$/)[0].async('string')
+    const refs = [...iflw.matchAll(/<key>script<\/key>\s*<value>([^<]+)<\/value>/g)].map((m) => m[1])
+    expect(refs).toEqual(['addNotificationAttachment.groovy'])
+    for (const ref of refs) expect(await zip.file(`src/main/resources/script/${ref}`)?.async('string')).toBe(NEW)
+  })
+})
