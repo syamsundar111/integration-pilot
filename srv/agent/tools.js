@@ -6,7 +6,7 @@
  */
 const cds = require('@sap/cds')
 const cpi = require('../lib/cpi-client')
-const { validate, schema, GROOVY_IMPORT, GROOVY_ENTRY } = require('../iflow-builder/validator')
+const { validate, normalizeTypes, schema, GROOVY_IMPORT, GROOVY_ENTRY } = require('../iflow-builder/validator')
 const { build } = require('../iflow-builder/builder')
 const attachmentStore = require('../lib/attachments')
 const groovyCheck = require('../lib/groovy-check')
@@ -272,6 +272,10 @@ async function attachmentsOf(ctx) {
   return ctx.attachments
 }
 
+/** Tool-result field for type fixes the assistant must mention */
+const autoFixes = (fixes) =>
+  fixes.length ? { autoFixes: [`type expression -> constant (the value has no \${...}): ${fixes.join(', ')}`], autoFixNote: 'Tell the user these fixes in one line.' } : {}
+
 /** The conversation's session defaults ({ packageId?, packageName?, ... }) */
 async function defaultsOf(ctx) {
   if (!ctx.sessionId) return {}
@@ -426,6 +430,8 @@ const handlers = {
     if (notJson) return notJson
     const source = draft ? draft.source : 'your latest validateSpec'
     if (toPackageId(spec.packageId).id) spec = { ...spec, packageId: toPackageId(spec.packageId).id } // a Name -> its ID, as CPI does
+    const typed = normalizeTypes(spec) // expression without ${...} -> constant
+    spec = typed.spec
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) {
@@ -445,7 +451,7 @@ const handlers = {
     }
     ctx.validatedSpec = spec
     await saveDraft(ctx, spec, { source, valid: true })
-    return { valid: true, ...(groovy.warning && { warnings: [groovy.warning] }), next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
+    return { valid: true, ...(groovy.warning && { warnings: [groovy.warning] }), ...autoFixes(typed.fixes), next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
   },
 
   async writeScript({ fileName, code }, ctx) {
@@ -583,6 +589,8 @@ const handlers = {
     const pkg = await resolvePackage(spec.packageId)
     if (pkg.error) return { valid: false, errors: [pkg.error] }
     if (pkg.note) spec = { ...spec, packageId: pkg.id }
+    const typed = normalizeTypes(spec) // expression without ${...} -> constant
+    spec = typed.spec
     if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
@@ -615,6 +623,7 @@ const handlers = {
       status: 'PENDING',
       ...(groovy.warning && { warnings: [groovy.warning] }),
       ...(pkg.note && { packageIdNote: `${pkg.note} Tell the user exactly this, in one line; do not ask about it.` }),
+      ...autoFixes(typed.fixes),
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
       ...(!pkgExists &&
         (pkg.name
@@ -651,10 +660,12 @@ const handlers = {
   },
 
   async proposeIflowUpdate(args, ctx) {
-    const { spec, error } = await specToPropose(args, ctx)
+    let { spec, error } = await specToPropose(args, ctx)
     if (error) return error
     const notJson = unparsableSpec(spec)
     if (notJson) return notJson
+    const typed = normalizeTypes(spec) // expression without ${...} -> constant
+    spec = typed.spec
     if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflowUpdate' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
@@ -689,7 +700,11 @@ const handlers = {
       const strip = (steps = []) => steps.map(({ code, ...s }) => s)
       return { ...sp, resources: undefined, steps: strip(sp.steps), ...(sp.exceptionSubprocess && { exceptionSubprocess: { ...sp.exceptionSubprocess, steps: strip(sp.exceptionSubprocess.steps) } }) }
     }
-    const changes = describeChanges(withoutCode(current.spec), withoutCode(spec))
+    // both sides typed alike, so rows the user did not touch are not reported as changed …
+    const currentTyped = normalizeTypes(current.spec)
+    const changes = describeChanges(withoutCode(currentTyped.spec), withoutCode(spec))
+    // … but the iFlow's own plain-value expressions do become constants: say so
+    if (currentTyped.fixes.length) changes.push(`type expression -> constant (the value has no \${...}): ${currentTyped.fixes.join(', ')}`)
     if (JSON.stringify(current.spec.resources || []) !== JSON.stringify(spec.resources || [])) changes.push('XSLT files changed')
     for (const f of spec.resources || []) if (current.resources?.[f] != null && current.resources[f] !== attachments[f]) changes.push(`${f} replaced`)
     for (const [f, status] of Object.entries(scripts)) if (status !== 'unchanged') changes.push(`script ${f} ${status === 'new' ? 'added' : 'changed'}`)

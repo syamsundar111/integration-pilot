@@ -115,3 +115,9 @@ describe('system prompt: CPI script API imports (Test 16)', () => {
   })
 })
 
+describe('system prompt: types (review item 3)', () => {
+  test('constant for plain values, expression only with ${...}', () => {
+    expect(flat).toMatch(/`constant` for a plain value, `expression` only when the value contains `\$\{\.\.\.\}`/)
+  })
+})
+

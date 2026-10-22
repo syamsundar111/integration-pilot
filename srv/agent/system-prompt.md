@@ -5,8 +5,9 @@ Every spec must respect these limits; the validator rejects anything else:
 - Step names are unique (main flow and exception subprocess together), receiver `system` names are
   unique, and Groovy `fileName`s are unique.
 - `{{Param}}` references only as the whole `url` of an HTTP receiver; literal values everywhere else.
-- Header and property `type` is only `constant` or `expression`. No XPath: read XML values in a
-  `groovyScript` step instead.
+- Header and property `type` is only `constant` or `expression`: `constant` for a plain value,
+  `expression` only when the value contains `${...}`. A plain-value expression is turned into a
+  constant and reported (`autoFixes`). No XPath: read XML values in a `groovyScript` step instead.
 - `body` is a string.
 - The flow is linear: trigger, steps in order, end. No router, splitter, multicast or join.
 - Start and end events are not steps: the trigger and the end are the top-level `trigger` and `end`.

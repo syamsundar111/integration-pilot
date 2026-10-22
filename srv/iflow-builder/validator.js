@@ -288,4 +288,34 @@ function validate(spec, { attachments = [] } = {}) {
   return { valid: unique.length === 0, errors: unique.map((i) => i.message), issues: unique }
 }
 
-module.exports = { validate, effectiveNames, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }
+/**
+ * Header and property types: `expression` only when the value contains ${...}; a plain value is a
+ * `constant` (CPI treats both alike, but constant states the intent and is what the CPI editor writes).
+ * @returns {{ spec: object, fixes: string[] }} the spec with such rows set to constant, and what was fixed
+ */
+function normalizeTypes(spec) {
+  if (!spec || typeof spec !== 'object') return { spec, fixes: [] }
+  const fixes = []
+  const fixRows = (rows, where) =>
+    Array.isArray(rows)
+      ? rows.map((r) => {
+          if (r?.type !== 'expression' || String(r.value ?? '').includes('${')) return r
+          fixes.push(`${where} ${r.name}`)
+          return { ...r, type: 'constant' }
+        })
+      : rows
+  const fixStep = (s, i, prefix) =>
+    s?.type === 'contentModifier'
+      ? { ...s, ...(s.headers && { headers: fixRows(s.headers, `${s.name || `${prefix}[${i}]`}: header`) }), ...(s.properties && { properties: fixRows(s.properties, `${s.name || `${prefix}[${i}]`}: property`) }) }
+      : s
+  const out = {
+    ...spec,
+    ...(Array.isArray(spec.steps) && { steps: spec.steps.map((s, i) => fixStep(s, i, 'steps')) }),
+    ...(Array.isArray(spec.exceptionSubprocess?.steps) && {
+      exceptionSubprocess: { ...spec.exceptionSubprocess, steps: spec.exceptionSubprocess.steps.map((s, i) => fixStep(s, i, 'exceptionSubprocess.steps')) }
+    })
+  }
+  return { spec: out, fixes }
+}
+
+module.exports = { validate, normalizeTypes, effectiveNames, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }

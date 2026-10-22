@@ -1434,3 +1434,14 @@ def Message processData(Message message) {
     for (const ref of refs) expect(await zip.file(`src/main/resources/script/${ref}`)?.async('string')).toBe(NEW)
   })
 })
+
+describe('header and property types (system prompt review, item 3)', () => {
+  test('proposeIflow stores a plain-value expression as constant and tells the model', async () => {
+    const spec = { ...sample, id: 'Types_1', name: 'Types 1', steps: [{ type: 'contentModifier', name: 'Set Source', properties: [{ name: 'Source', type: 'expression', value: 'Shop' }] }] }
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec })).mockResolvedValueOnce(answer('ready'))
+    const turn = await chat({ message: 'propose Types_1' })
+    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result).toMatchObject({ valid: true, autoFixes: ['type expression -> constant (the value has no ${...}): Set Source: property Source'] })
+    expect(turn.proposals[0].spec.steps[0].properties).toEqual([{ name: 'Source', type: 'constant', value: 'Shop' }])
+  })
+})

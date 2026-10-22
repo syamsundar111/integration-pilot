@@ -413,7 +413,8 @@ function nodeToXml(n) {
       const table = (entries = []) =>
         entries
           .map((e) =>
-            fill('content-modifier-row.xml', { TYPE: escText(e.type), VALUE: escText(e.value), NAME: escText(e.name), DATATYPE: escText(e.datatype || '') })
+            // a plain value is a constant, also if a spec says expression (see normalizeTypes)
+            fill('content-modifier-row.xml', { TYPE: escText(e.type === 'expression' && !String(e.value ?? '').includes('${') ? 'constant' : e.type), VALUE: escText(e.value), NAME: escText(e.name), DATATYPE: escText(e.datatype || '') })
           )
           .join('')
       const hasBody = s.body != null && s.body !== ''
