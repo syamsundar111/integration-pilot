@@ -4,6 +4,8 @@
  * The LLM can only READ from CPI and PROPOSE changes. Proposals are stored as PENDING
  * and executed only after a user approves them (srv/lib/proposals.js).
  */
+const fs = require('fs')
+const path = require('path')
 const cds = require('@sap/cds')
 const cpi = require('../lib/cpi-client')
 const { validate, normalizeTypes, schema, GROOVY_IMPORT, GROOVY_ENTRY } = require('../iflow-builder/validator')
@@ -17,6 +19,10 @@ const LOG = cds.log('agent')
 const MAX_RESULT_CHARS = 12_000
 const MAX_ERRORS = 15 // validation errors returned to the model per call
 const MAX_STEPS_PER_EDIT = 8 // steps added or replaced per editDraftSpec call: keeps each answer short
+// Worked patterns (srv/agent/patterns/*.md), read on demand so the system prompt stays short
+const PATTERNS = Object.fromEntries(['processDirect', 'updateIflow', 'importedIflow'].map((n) => [n, path.join(__dirname, 'patterns', `${n}.md`)]))
+const patternCache = {}
+
 // Groovy code in a chat message: a CPI entry function or a CPI import
 const GROOVY_IN_TEXT = /\bdef\s+Message\s+processData\s*\(|\bimport\s+com\.sap\.(gateway|it)\./
 const DRAFT_FIELDS = ['id', 'name', 'description', 'packageId', 'trigger', 'end', 'parameters', 'resources', 'exceptionSubprocess']
@@ -77,6 +83,12 @@ const definitions = [
 At most ${MAX_STEPS_PER_EDIT} steps added or replaced per call. Returns the draft outline and its open validation errors.`,
     { ops: { type: 'array', items: { type: 'object' }, description: 'Edit operations, applied in order' } },
     ['ops']
+  ),
+  fn(
+    'getPattern',
+    'A short worked pattern for a situation, loaded only when needed. processDirect: one iFlow calls another. updateIflow: change an existing iFlow. importedIflow: an imported iFlow is the draft.',
+    { name: { type: 'string', enum: Object.keys(PATTERNS) } },
+    ['name']
   ),
   fn('getDraftSpec', "The conversation's draft spec (e.g. an imported iFlow), to change it. Scripts are attached files: keep their steps without code."),
   fn('explainIflow', 'Parse an existing iFlow (trigger, steps, adapters, parameters, scripts) to explain it.', { iflowId: { type: 'string' } }, ['iflowId']),
@@ -566,6 +578,12 @@ const handlers = {
         ? 'Continue with editDraftSpec; when the draft is complete, propose it with { "useDraftSpec": true }.'
         : 'The draft is complete: propose it with { "useDraftSpec": true }.'
     }
+  },
+
+  async getPattern({ name } = {}) {
+    if (!PATTERNS[name]) return { error: { code: 'UNKNOWN_PATTERN', message: `No pattern '${name}'. Use one of: ${Object.keys(PATTERNS).join(', ')}.` } }
+    patternCache[name] ??= fs.readFileSync(PATTERNS[name], 'utf8')
+    return { name, pattern: patternCache[name], instruction: 'Follow this pattern.' }
   },
 
   async getDraftSpec(_args, ctx) {

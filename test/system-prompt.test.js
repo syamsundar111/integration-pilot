@@ -71,6 +71,8 @@ describe('system prompt: unsupported steps', () => {
 })
 
 describe('system prompt: calling another iFlow (manual test 16)', () => {
+  // the details are in the processDirect pattern; the prompt keeps a pointer
+  const flat = fs.readFileSync(path.join(__dirname, '../srv/agent/patterns/processDirect.md'), 'utf8').replace(/\s+/g, ' ')
   const SENDER = fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/templates/iflw/messageflow-https-sender.xml'), 'utf8')
   const value = (key) => SENDER.match(new RegExp(`<key>${key}</key>\\s*<value>([^<]*)</value>`))?.[1]
 
@@ -146,6 +148,31 @@ describe('system prompt: review items 1, 2, 4 and 5', () => {
 
   test('5: callers of an HTTPS-triggered iFlow need ESBMessaging.send', () => {
     expect(flat).toMatch(/For an \*\*HTTPS-triggered\*\* iFlow, tell the user that its callers need credentials with the role `ESBMessaging\.send`: a service key of a \*\*Process Integration Runtime\*\* instance with plan \*\*integration-flow\*\*/)
+  })
+})
+
+describe('system prompt: patterns loaded on demand (review item 6)', () => {
+  const tools = require('../srv/agent/tools')
+  const read = (n) => fs.readFileSync(path.join(__dirname, `../srv/agent/patterns/${n}.md`), 'utf8')
+
+  test('the prompt keeps a pointer to each pattern, the details are only in the pattern', () => {
+    expect(flat).toMatch(/When the user asks for ProcessDirect or one iFlow calling another, first call `getPattern` with `processDirect`/)
+    expect(flat).toMatch(/v1 cannot build ProcessDirect; the HTTPS workaround is public and needs authentication/)
+    expect(flat).toMatch(/To update, change, extend or fix an existing iFlow, first call `getPattern` with `updateIflow`/)
+    expect(flat).toMatch(/Never call `proposeIflow` for an iFlow that already exists, and never list the changes yourself/)
+    expect(flat).toMatch(/Before proposing or changing it, call `getPattern` with `importedIflow`/)
+    expect(flat).not.toMatch(/CSRF Protected/) // moved
+    expect(read('updateIflow')).toMatch(/SCRIPT_UNCHANGED/)
+    expect(read('importedIflow')).toMatch(/useDraftSpec/)
+  })
+
+  test('getPattern returns a pattern; unknown names are an error', async () => {
+    const def = tools.definitions.find((d) => d.function.name === 'getPattern')
+    expect(def.function.parameters.properties.name.enum).toEqual(['processDirect', 'updateIflow', 'importedIflow'])
+    const ok = JSON.parse(await tools.execute('getPattern', JSON.stringify({ name: 'processDirect' }), {}))
+    expect(ok).toMatchObject({ name: 'processDirect', pattern: expect.stringMatching(/^# Pattern: one iFlow calls another \(ProcessDirect\)/) })
+    const bad = JSON.parse(await tools.execute('getPattern', JSON.stringify({ name: 'nope' }), {}))
+    expect(bad).toMatchObject({ error: { code: 'UNKNOWN_PATTERN' } })
   })
 })
 
