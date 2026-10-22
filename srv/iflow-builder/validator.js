@@ -296,6 +296,7 @@ function validate(spec, { attachments = [] } = {}) {
   // start a new MANIFEST.MF header. Descriptions, bodies, values and code may span lines.
   const NAME_FIELD = /(^|\.)(id|name|packageId|system|fileName|address)$/
   walkStrings(spec, '', (value, path) => {
+    // eslint-disable-next-line no-control-regex -- finding control characters is the point
     if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value)) err('CONTROL_CHARACTER', `${path || 'spec'}: contains a control character — remove it`)
     else if (NAME_FIELD.test(path) && /[\r\n\t]/.test(value)) err('LINE_BREAK', `${path}: must be one line — remove line breaks and tabs`)
   })

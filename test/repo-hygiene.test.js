@@ -21,7 +21,7 @@ describe('deployment', () => {
   const fs = require('fs')
   test.each(['mta.yaml', 'mta-sqlite.yaml'])('%s runs the backend as exactly one instance', (file) => {
     const mta = fs.readFileSync(path.join(ROOT, file), 'utf8')
-    const srv = mta.split(/\n  - name: /).find((m) => m.startsWith('integration-pilot-srv'))
-    expect(srv).toMatch(/\n      instances: 1\n/)
+    const srv = mta.split(/\n {2}- name: /).find((m) => m.startsWith('integration-pilot-srv'))
+    expect(srv).toMatch(/\n {6}instances: 1\n/)
   })
 })
