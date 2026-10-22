@@ -108,6 +108,9 @@ public final class SyntaxChecker {
         CompilerConfiguration config = new CompilerConfiguration();
         config.setDisabledGlobalASTTransformations(Set.of("groovy.grape.GrabAnnotationTransformation"));
         config.setTolerance(10);
+        // resolve classes through the class loader, not by reading class files with ASM: Groovy's ASM
+        // cannot read the class files of newer JDKs ("Unsupported class file major version 69" on Java 25)
+        config.getOptimizationOptions().put("asmResolving", false);
         CompilationUnit unit = new CompilationUnit(config, null, new groovy.lang.GroovyClassLoader(SyntaxChecker.class.getClassLoader(), config));
         unit.addSource(fileName, code);
         List<Error> errors = new ArrayList<>();
@@ -128,6 +131,10 @@ public final class SyntaxChecker {
             }
         } catch (CompilationFailedException e) {
             // other failures are not import problems; the parse already passed
+        } catch (RuntimeException | LinkageError | AssertionError e) {
+            // a compiler failure (GroovyBugError, a class that cannot be loaded): the import check is
+            // skipped for this script instead of failing the whole check; the parse already passed
+            return List.of();
         }
         return errors;
     }

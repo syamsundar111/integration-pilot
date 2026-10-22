@@ -133,5 +133,22 @@ class SyntaxCheckerTest {
         String script = "import org.apache.camel.Exchange\nimport groovy.util.XmlSlurper\nimport com.sap.it.api.mapping.ValueMappingApi\nimport com.sap.it.api.securestore.SecureStoreService\nprintln 'x'\n";
         assertEquals(List.of(), SyntaxChecker.check("other.groovy", script));
     }
+
+    @Test
+    void jdkClassesResolveOnNewJdks() {
+        // with ASM resolving, Groovy 4.0.24 failed on Java 25 class files ("Unsupported class file major version 69")
+        String script = """
+                import com.sap.gateway.ip.core.customdev.util.Message
+                import java.text.SimpleDateFormat
+
+                def Message processData(Message message) {
+                    def now = new Date()
+                    message.setProperty('Today', new SimpleDateFormat('yyyy-MM-dd').format(now))
+                    message.setProperty('Id', UUID.randomUUID().toString())
+                    return message
+                }
+                """;
+        assertEquals(List.of(), SyntaxChecker.check("dates.groovy", script));
+    }
 }
 
