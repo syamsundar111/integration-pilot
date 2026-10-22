@@ -23,6 +23,7 @@ db.sqlite-wal
 db.sqlite-shm
 *.sqlite
 *.sqlite-journal
+db.sqlite.bak*
 *.db
 
 # MTA
@@ -42,3 +43,7 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 test/ui/screenshots/
+
+# Local-only tests and fixtures with client data (real exports, prompts, the forbidden-names list).
+# Never commit them; the tests in it skip when their fixtures are missing.
+test/local/

@@ -47,8 +47,10 @@
           <StandardListItem
             title="{= ${chat>title} || 'Untitled' }"
             description="{path: 'chat>modifiedAt', formatter: '.formatter.relativeTime'}"
-            type="Active"
+            type="DetailAndActive"
             press=".onSessionPick"
+            detailPress=".onRenameSession"
+            detailTooltip="Rename"
             highlight="{= ${chat>ID} === ${chat>/sessionId} ? 'Information' : 'None' }"
           />
         </List>
@@ -134,10 +136,10 @@
                   valueLiveUpdate="true"
                   showSuggestion="true"
                   suggestionItems="{path: 'chat>/packages', sorter: {path: 'id'}, templateShareable: false}"
-                  placeholder="Package id"
+                  placeholder="Package ID or name"
                   width="16rem"
                   valueState="{path: 'chat>/defaults/packageId', formatter: '.defaultsPackageState'}"
-                  valueStateText="Letters, digits and dots only — CPI does not allow underscores"
+                  valueStateText="{path: 'chat>/defaults/packageId', formatter: '.defaultsPackageStateText'}"
                   class="ipMono"
                 >
                   <suggestionItems><core:ListItem text="{chat>id}" additionalText="{chat>name}" /></suggestionItems>
@@ -153,7 +155,7 @@
               <VBox renderType="Bare">
                 <layoutData><FlexItemData growFactor="1" /></layoutData>
                 <Label text="Receiver authentication (set up after creation)" labelFor="defaultAuth" />
-                <Input id="defaultAuth" value="{chat>/defaults/authNote}" valueLiveUpdate="true" maxLength="500" width="100%" placeholder="e.g. OAuth2 SAML Bearer with credential DEMO_OAUTH on all receivers" />
+                <Input id="defaultAuth" value="{chat>/defaults/authNote}" valueLiveUpdate="true" maxLength="500" width="100%" placeholder="e.g. OAuth2 Client Credentials with credential DEMO_OAUTH on all receivers" />
               </VBox>
             </HBox>
           </Panel>

@@ -127,12 +127,12 @@ realSidecar('groovy-check sidecar (real Groovy parser)', () => {
   }, 20_000)
   afterAll(() => proc?.kill())
 
-  test('the SF -> Directory scripts pass; a missing bracket is reported with line and column', async () => {
-    const fixture = (f) => fs.readFileSync(path.join(__dirname, 'fixtures', 'sf-entra', f), 'utf8')
+  test('the Users Summary scripts pass; a missing bracket is reported with line and column', async () => {
+    const fixture = (f) => fs.readFileSync(path.join(__dirname, 'fixtures', 'users-summary', f), 'utf8')
     const result = await withEnv({ GROOVY_CHECK_URL: `http://localhost:${port}`, GROOVY_CHECK_TOKEN: '' }, () =>
       checkScripts([
-        { fileName: 'mapSfToEntra.groovy', code: fixture('mapSfToEntra.groovy') },
-        { fileName: 'buildErrorNotification.groovy', code: fixture('buildErrorNotification.groovy') },
+        { fileName: 'summarizeUsers.groovy', code: fixture('summarizeUsers.groovy') },
+        { fileName: 'buildErrorMessage.groovy', code: fixture('buildErrorMessage.groovy') },
         { fileName: 'broken.groovy', code: 'def Message processData(Message message) {\n  def x = [1, 2\n  return message\n}\n' }
       ])
     )

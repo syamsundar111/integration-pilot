@@ -19,6 +19,11 @@ sap.ui.define(
     const POLL_MS = 2000
     const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
     const NO_DEFAULTS = { packageId: '', timer: '', authNote: '' }
+    /** { trigger, packageId } of a stored draft spec (JSON { spec, source, … }), or null */
+    const draftInfo = (draftSpec) => {
+      const spec = draftSpec ? JSON.parse(draftSpec).spec : null
+      return spec ? { trigger: !!spec.trigger, packageId: spec.packageId || '' } : null
+    }
     const MAX_ATTACHMENT_KB = 200
     const MAX_IMPORT_MB = 10
     const ATTACHMENT_NAME = /^([A-Za-z][A-Za-z0-9_]*\.groovy|[A-Za-z][A-Za-z0-9_.-]*\.xslt?)$/
@@ -136,6 +141,17 @@ sap.ui.define(
         }
       },
 
+      /** The draft spec's trigger and package, for the pre-send check */
+      async loadDraft(sessionId) {
+        if (!sessionId) return
+        try {
+          const session = await api.get(`/ChatSessions/${api.seg(sessionId)}${api.q({ $select: 'draftSpec' })}`)
+          if (sessionId === this.chat().getProperty('/sessionId')) this.chat().setProperty('/draft', draftInfo(session.draftSpec))
+        } catch (e) {
+          // the check then works without the draft
+        }
+      },
+
       async loadPackages() {
         try {
           this.chat().setProperty('/packages', await api.get('/Packages'))
@@ -154,6 +170,7 @@ sap.ui.define(
           c.setProperty('/proposals', [])
           c.setProperty('/defaults', { ...NO_DEFAULTS })
           c.setProperty('/files', [])
+          c.setProperty('/draft', null)
           this.setActive(null)
           return
         }
@@ -174,8 +191,11 @@ sap.ui.define(
             this.startTurnPolling(running[0].ID, new Date(running[0].createdAt).getTime(), running[0].events || [])
           }
           c.setProperty('/messages', messages)
-          c.setProperty('/defaults', { ...NO_DEFAULTS, ...(session.defaults ? JSON.parse(session.defaults) : {}) })
+          const stored = session.defaults ? JSON.parse(session.defaults) : {}
+          // show the package as the user typed it: a Name ("test_1") is stored with its derived ID
+          c.setProperty('/defaults', { ...NO_DEFAULTS, ...stored, packageId: stored.packageName || stored.packageId || '' })
           c.setProperty('/files', [])
+          c.setProperty('/draft', draftInfo(session.draftSpec))
           this.loadAttachments(sessionId)
           c.setProperty('/proposals', proposals)
           this.setActive(proposals[0] ? proposals[0].ID : null)
@@ -196,6 +216,7 @@ sap.ui.define(
         const id = e.getSource().getBindingContext('chat').getProperty('ID')
         this.byId('sessionPopover').close()
         this._skipLoad = null
+        if (id !== this.chat().getProperty('/sessionId')) this.chat().setProperty('/input', '') // a draft belongs to the conversation it was typed in
         this.getRouter().navTo('generate', { '?query': { session: id } })
       },
 
@@ -221,6 +242,18 @@ sap.ui.define(
         }
       },
 
+      async onRenameSession(e) {
+        const { ID, title } = e.getSource().getBindingContext('chat').getObject()
+        const renamed = await this.promptText({
+          title: 'Rename conversation',
+          label: 'Name',
+          value: title || '',
+          action: 'Rename',
+          run: (value) => api.post(`/ChatSessions/${api.seg(ID)}/rename`, { title: value })
+        })
+        if (renamed) this.loadSessions()
+      },
+
       onNewChat() {
         this._skipLoad = null
         this.chat().setProperty('/input', '')
@@ -233,7 +266,7 @@ sap.ui.define(
       /** @param {object} [usage] AI usage of the turn this answer ends (shown under it) */
       toMessage(role, content, usage) {
         const extra = { usage: usage || null, usageText: this.formatter.usageLine(usage) }
-        if (role === 'user') return { kind: 'user', html: userHtml(content), usage: null, usageText: '' }
+        if (role === 'user') return { kind: 'user', text: content, html: userHtml(content), usage: null, usageText: '' }
         if (content.startsWith('⚠️')) return { kind: 'error', html: userHtml(content.replace(/^⚠️\s*/, '')), ...extra }
         if (content === 'Cancelled.') return { kind: 'muted', html: userHtml(content), ...extra }
         return { kind: 'assistant', html: markdown.toHtml(content), ...extra }
@@ -280,7 +313,7 @@ sap.ui.define(
             content: new VBox({
               renderType: 'Bare',
               // setText, not the constructor: '{{Scheduler}}' in a constructor string is parsed as a data binding
-              items: warnings.map((w) => new MessageStrip({ type: 'Warning', showIcon: true }).setText(w.message))
+              items: warnings.map((w) => new MessageStrip({ type: w.level === 'info' ? 'Information' : 'Warning', showIcon: true }).setText(w.message))
             }).addStyleClass('ipGapS'),
             beginButton: new Button({ text: 'Send anyway', type: 'Emphasized', press: () => close(true) }),
             endButton: new Button({ text: 'Edit', press: () => close(false) }),
@@ -299,11 +332,15 @@ sap.ui.define(
         const message = (text || '').trim()
         if (!message || c.getProperty('/turn') || c.getProperty('/starting')) return
         const defaults = this.currentDefaults()
-        const warnings = promptLint.lint(message, { defaults })
-        if (warnings.length && !(await this.confirmWarnings(warnings))) {
-          setTimeout(() => this.byId('input').focus(), 50)
-          return
-        }
+        const history = c.getProperty('/messages').filter((m) => m.kind === 'user').map((m) => m.text) // checked as one conversation
+        const findings = promptLint.lint(message, { defaults, history, draft: c.getProperty('/draft') })
+        const infos = findings.filter((w) => w.level === 'info')
+        if (findings.length > infos.length) {
+          if (!(await this.confirmWarnings(findings))) {
+            setTimeout(() => this.byId('input').focus(), 50)
+            return
+          }
+        } else if (infos.length) this.toast(infos.map((w) => w.message).join(' ')) // information only: sent without asking
         c.setProperty('/input', '')
         this.addMessage(this.toMessage('user', message))
         c.setProperty('/starting', true)
@@ -346,8 +383,14 @@ sap.ui.define(
         return parts.length ? parts.join(' · ') : 'none set: the assistant asks for package, trigger and authentication'
       },
 
+      /** A Name with underscores or spaces is fine: its ID is derived like in CPI (shown as information) */
       defaultsPackageState(packageId) {
-        return packageId && !PACKAGE_ID.test(packageId.trim()) ? 'Error' : 'None'
+        const pkg = promptLint.toPackageId(packageId)
+        return !pkg.name ? 'None' : pkg.id ? 'Information' : 'Error'
+      },
+
+      defaultsPackageStateText(packageId) {
+        return promptLint.toPackageId(packageId).note || 'Use letters, digits or dots for the package ID'
       },
 
       // --- AI usage ---------------------------------------------------------------------------------
@@ -512,6 +555,7 @@ sap.ui.define(
           this.addMessage({ kind: 'error', html: userHtml(err.message + (err.hint ? `\n${err.hint}` : '')), usage, usageText: this.formatter.usageLine(usage) })
           if (err.code === 'LLM_RATE_LIMITED') this.toast('AI rate limit reached — wait a minute before the next message.')
         }
+        this.loadDraft(c.getProperty('/sessionId')) // the turn may have written the draft spec
         const created = t.proposals || []
         if (created.length) {
           const existing = c.getProperty('/proposals').filter((p) => !created.some((x) => x.ID === p.ID))

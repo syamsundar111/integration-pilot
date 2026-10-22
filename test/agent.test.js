@@ -216,6 +216,30 @@ describe('delete conversation', () => {
   })
 })
 
+describe('conversation names', () => {
+  test('a proposal names the conversation after its iFlow; a rename is kept', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Name_One', name: 'Name One' } })).mockResolvedValueOnce(answer('proposed'))
+    const turn = await chat({ message: 'Build a flow that does something' })
+    const { data: named } = await GET(`/api/ChatSessions/${turn.sessionId}`)
+    expect(named).toMatchObject({ title: `Name One · ${sample.packageId}`, titleEdited: false })
+
+    const { data: renamed } = await POST(`/api/ChatSessions/${turn.sessionId}/rename`, { title: '  My   weather flow ' })
+    expect(renamed).toMatchObject({ title: 'My weather flow', titleEdited: true })
+
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Name_Two', name: 'Name Two' } })).mockResolvedValueOnce(answer('proposed again'))
+    await chat({ message: 'Another one', sessionId: turn.sessionId })
+    const { data: kept } = await GET(`/api/ChatSessions/${turn.sessionId}`)
+    expect(kept.title).toBe('My weather flow')
+  })
+
+  test('rename refuses an empty name (400) and unknown sessions (404)', async () => {
+    llm.chat.mockResolvedValueOnce(answer('hi'))
+    const turn = await chat({ message: 'Hello' })
+    await expect(POST(`/api/ChatSessions/${turn.sessionId}/rename`, { title: '   ' })).rejects.toMatchObject({ response: { status: 400 } })
+    await expect(POST(`/api/ChatSessions/${cds.utils.uuid()}/rename`, { title: 'x' })).rejects.toMatchObject({ response: { status: 404 } })
+  })
+})
+
 describe('async turns', () => {
   const deferred = () => {
     let resolve
@@ -307,6 +331,72 @@ describe('async turns', () => {
     expect(data).toMatchObject({ status: 'FAILED', error: { code: 'INTERRUPTED', message: INTERRUPTED } })
     const { data: msgs } = await GET(`/api/ChatSessions/${sessionId}/messages?$orderby=seq`)
     expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant'])
+  })
+})
+
+describe('package Name vs ID (manual test 10)', () => {
+  const lastToolResult = () => JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+  async function propose(id, packageId, body = {}) {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id, packageId } })).mockResolvedValueOnce(answer('ready'))
+    const data = await chat({ message: `propose ${id}`, ...body })
+    return { data, toolResult: lastToolResult() }
+  }
+
+  test('a Name with underscores becomes the ID without them; approving creates the package with the Name', async () => {
+    const { data, toolResult } = await propose('PkgName_1', 'test_1')
+    expect(toolResult).toMatchObject({ valid: true, packageIdNote: expect.stringMatching(/^Package ID will be test1 \(CPI does not allow underscores in IDs\)\. Tell the user/) })
+    expect(toolResult.similarPackages).toBeUndefined() // nothing to ask
+    const [p] = data.proposals
+    expect(p).toMatchObject({ packageId: 'test1', spec: { packageId: 'test1' } })
+    const { data: stored } = await GET(`/api/Proposals/${p.ID}`)
+    expect(stored.packageName).toBe('test_1')
+
+    cpi.createPackage.mockClear()
+    await POST(`/api/Proposals/${p.ID}/approve`, { deploy: false })
+    expect(await waitFor(p.ID)).toMatchObject({ status: 'DONE' })
+    expect(cpi.createPackage).toHaveBeenCalledWith({ id: 'test1', name: 'test_1', shortText: 'test_1' })
+  })
+
+  test('spaces are removed too and the capitalisation is kept', async () => {
+    const { data, toolResult } = await propose('PkgName_2', 'My Test_Package')
+    expect(toolResult.packageIdNote).toMatch(/^Package ID will be MyTestPackage \(CPI does not allow underscores or spaces in IDs\)\./)
+    expect(data.proposals[0].packageId).toBe('MyTestPackage')
+  })
+
+  test('the derived ID of an existing package with the same Name is used as it is', async () => {
+    cpi.getPackage.mockImplementationOnce(async (id) => ({ id, name: 'Pilot_Reference' }))
+    const { data, toolResult } = await propose('PkgName_3', 'Pilot_Reference')
+    expect(toolResult).toMatchObject({ valid: true, packageIdNote: expect.stringContaining('Package ID will be PilotReference') })
+    expect(data.proposals[0]).toMatchObject({ packageId: 'PilotReference' })
+  })
+
+  test('asks only when the derived ID is empty or belongs to a package with another Name', async () => {
+    const { data: empty, toolResult: noId } = await propose('PkgName_4', '___')
+    expect(noId).toMatchObject({ valid: false, errors: [expect.stringMatching(/has no letters or digits.*ask the user/)] })
+    expect(empty.proposals).toEqual([])
+
+    cpi.getPackage.mockImplementationOnce(async (id) => ({ id, name: 'Something Else' }))
+    const { data: clash, toolResult: taken } = await propose('PkgName_5', 'Pilot_Reference')
+    expect(taken).toMatchObject({ valid: false, errors: [expect.stringMatching(/becomes the package ID 'PilotReference', but package 'PilotReference' already exists with the name 'Something Else' — ask the user/)] })
+    expect(clash.proposals).toEqual([])
+  })
+
+  test('proposePackage takes a Name as the id', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposePackage', { id: 'Sales_Orders EU' })).mockResolvedValueOnce(answer('ready'))
+    const data = await chat({ message: 'new package Sales_Orders EU' })
+    expect(lastToolResult()).toMatchObject({ valid: true, packageIdNote: expect.stringContaining('Package ID will be SalesOrdersEU') })
+    expect(data.proposals[0]).toMatchObject({ kind: 'PACKAGE', packageId: 'SalesOrdersEU', spec: { id: 'SalesOrdersEU', name: 'Sales_Orders EU' } })
+  })
+
+  test('a default package Name is stored with its ID, and the iFlow proposal creates it with the Name', async () => {
+    const { data, toolResult } = await propose('PkgName_6', 'TEAMEU', { defaults: { packageId: 'TEAM_EU' } })
+    const { data: session } = await GET(`/api/ChatSessions/${data.sessionId}`)
+    expect(JSON.parse(session.defaults)).toMatchObject({ packageId: 'TEAMEU', packageName: 'TEAM_EU' })
+    const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+    expect(system).toContain("The user named it 'TEAM_EU': Package ID will be TEAMEU (CPI does not allow underscores in IDs).")
+    expect(toolResult.packageNote).toMatch(/approving creates it with the name 'TEAM_EU'/)
+    const { data: stored } = await GET(`/api/Proposals/${data.proposals[0].ID}`)
+    expect(stored).toMatchObject({ packageId: 'TEAMEU', packageName: 'TEAM_EU' })
   })
 })
 
@@ -613,11 +703,11 @@ describe('spec arguments in the wrong shape', () => {
 
 describe('session defaults', () => {
   test('are stored on the session and sent to the model as structured context', async () => {
-    const defaults = { packageId: 'DEV.SF.Directory', timer: 'once', authNote: 'OAuth2 SAML Bearer, credential DEMO_OAUTH' }
+    const defaults = { packageId: 'IntegrationPilot.Demo', timer: 'once', authNote: 'OAuth2 Client Credentials, credential DEMO_OAUTH' }
     llm.chat.mockResolvedValueOnce(answer('ok'))
     const turn = await chat({ message: 'Create the iFlow', defaults })
     const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
-    expect(system).toContain('{"packageId":"DEV.SF.Directory","trigger":{"type":"timer","mode":"once"},"receiverAuthentication":"OAuth2 SAML Bearer, credential DEMO_OAUTH"}')
+    expect(system).toContain('{"packageId":"IntegrationPilot.Demo","trigger":{"type":"timer","mode":"once"},"receiverAuthentication":"OAuth2 Client Credentials, credential DEMO_OAUTH"}')
     expect(system).toMatch(/never ask about them/)
     const { data: session } = await GET(`/api/ChatSessions/${turn.sessionId}`)
     expect(JSON.parse(session.defaults)).toEqual(defaults)
@@ -625,14 +715,14 @@ describe('session defaults', () => {
     // omitted: the stored defaults stay; empty: cleared
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ sessionId: turn.sessionId, message: 'next' })
-    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('"packageId":"DEV.SF.Directory"')
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('"packageId":"IntegrationPilot.Demo"')
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ sessionId: turn.sessionId, message: 'again', defaults: { packageId: '', timer: '', authNote: '' } })
     expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).not.toContain('Session defaults')
   })
 
   test('invalid defaults are rejected', async () => {
-    await expect(POST('/api/chat', { message: 'x', defaults: { packageId: 'DEV_SF' } })).rejects.toMatchObject({ response: { status: 400 } })
+    await expect(POST('/api/chat', { message: 'x', defaults: { packageId: '___' } })).rejects.toMatchObject({ response: { status: 400 } })
     await expect(POST('/api/chat', { message: 'x', defaults: { timer: 'hourly' } })).rejects.toMatchObject({ response: { status: 400 } })
   })
 })
@@ -742,28 +832,28 @@ describe('import an iFlow', () => {
   test('the import becomes the draft spec; it is proposed without the model writing the spec', async () => {
     const fs = require('fs')
     const { build } = require('../srv/iflow-builder/builder')
-    const dir = `${__dirname}/fixtures/sf-entra`
+    const dir = `${__dirname}/fixtures/users-summary`
     const spec = JSON.parse(fs.readFileSync(`${dir}/spec.json`, 'utf8'))
-    const attachments = { 'mapSfToEntra.groovy': fs.readFileSync(`${dir}/mapSfToEntra.groovy`, 'utf8'), 'buildErrorNotification.groovy': fs.readFileSync(`${dir}/buildErrorNotification.groovy`, 'utf8') }
+    const attachments = { 'summarizeUsers.groovy': fs.readFileSync(`${dir}/summarizeUsers.groovy`, 'utf8'), 'buildErrorMessage.groovy': fs.readFileSync(`${dir}/buildErrorMessage.groovy`, 'utf8') }
     const { zipBase64 } = await build(spec, { attachments })
 
-    const { data: imported } = await POST('/api/importIflow', { fileName: 'sf-entra.zip', contentBase64: zipBase64, packageId: 'PilotReference' })
-    expect(imported).toMatchObject({ valid: true, placeholders: 0, spec: { id: spec.id, packageId: 'PilotReference' } })
-    expect(imported.attachments.sort()).toEqual(['buildErrorNotification.groovy', 'mapSfToEntra.groovy'])
+    const { data: imported } = await POST('/api/importIflow', { fileName: 'users-summary.zip', contentBase64: zipBase64, packageId: 'PilotReference' })
+    expect(imported).toMatchObject({ valid: true, placeholders: 0, spec: { id: `${spec.id}_Imported`, packageId: 'PilotReference' } })
+    expect(imported.attachments.sort()).toEqual(['buildErrorMessage.groovy', 'summarizeUsers.groovy'])
     const { data: messages } = await GET(`/api/ChatSessions/${imported.sessionId}/messages?$orderby=seq`)
     expect(messages.map((m) => m.role)).toEqual(['user', 'assistant'])
-    expect(messages[1].content).toMatch(/^Imported \*\*SF SourceApp EC to Target Directory_Employee Data Replication_V1\*\*/)
+    expect(messages[1].content).toMatch(/^Imported \*\*Users Summary RUNID\*\*/)
 
     llm.chat
       .mockResolvedValueOnce(toolCall('validateSpec', { useDraftSpec: true }))
       .mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true }))
       .mockResolvedValueOnce(answer('Ready.'))
     const turn = await chat({ sessionId: imported.sessionId, message: 'Propose the imported iFlow as a new iFlow.' })
-    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: spec.id, status: 'PENDING' })])
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: `${spec.id}_Imported`, status: 'PENDING' })])
     const sent = llm.chat.mock.calls.at(-1)[0].messages
-    expect(sent[0].content).toMatch(/Draft spec of this conversation \(imported from sf-entra.zip\): SF_SourceApp_EC_to_Microsoft_Directory_ID_Employee_Data_Replication_V1/)
-    expect(sent[0].content).toContain('mapSfToEntra.groovy (Groovy,')
-    expect(JSON.stringify(sent)).not.toContain('ValueMappingApi') // the script body never reaches the model
+    expect(sent[0].content).toMatch(/Draft spec of this conversation \(imported from users-summary.zip\): Users_Summary_RUNID/)
+    expect(sent[0].content).toContain('summarizeUsers.groovy (Groovy,')
+    expect(JSON.stringify(sent)).not.toContain('openTodos[u.id]') // the script body never reaches the model
     const { data: proposal } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
     expect(proposal.attachments).toEqual(attachments)
   })

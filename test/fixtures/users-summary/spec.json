@@ -1,0 +1,137 @@
+{
+  "id": "Users_Summary_RUNID",
+  "name": "Users Summary RUNID",
+  "description": "Reads users and todos from a REST API, summarizes the open todos per user and converts the summary to XML for reporting.",
+  "packageId": "IntegrationPilot.Demo",
+  "trigger": {
+    "type": "timer",
+    "mode": "once"
+  },
+  "steps": [
+    {
+      "type": "contentModifier",
+      "name": "Set Properties",
+      "description": "Source, target, report name, environment and alert addresses used by the later steps.",
+      "properties": [
+        {
+          "name": "sourceSystem",
+          "type": "constant",
+          "value": "JSONPlaceholder"
+        },
+        {
+          "name": "targetSystem",
+          "type": "constant",
+          "value": "Reporting"
+        },
+        {
+          "name": "reportName",
+          "type": "constant",
+          "value": "Users Summary"
+        },
+        {
+          "name": "environment",
+          "type": "constant",
+          "value": "DEV"
+        },
+        {
+          "name": "alertTo",
+          "type": "constant",
+          "value": "alerts@example.com"
+        },
+        {
+          "name": "alertFrom",
+          "type": "constant",
+          "value": "noreply@example.com"
+        }
+      ]
+    },
+    {
+      "type": "requestReplyHttp",
+      "name": "Get Users",
+      "description": "Reads all users.",
+      "system": "RCVR_Users",
+      "url": "{{Users_URL}}",
+      "method": "GET",
+      "authType": "None"
+    },
+    {
+      "type": "contentModifier",
+      "name": "Store Users",
+      "description": "Keeps the users for the summary script.",
+      "properties": [
+        {
+          "name": "UsersJson",
+          "type": "expression",
+          "value": "${in.body}"
+        }
+      ]
+    },
+    {
+      "type": "requestReplyHttp",
+      "name": "Get Todos",
+      "description": "Reads all todos.",
+      "system": "RCVR_Todos",
+      "url": "{{Todos_URL}}",
+      "method": "GET",
+      "authType": "None"
+    },
+    {
+      "type": "contentModifier",
+      "name": "Store Todos",
+      "description": "Keeps the todos for the summary script.",
+      "properties": [
+        {
+          "name": "TodosJson",
+          "type": "expression",
+          "value": "${in.body}"
+        }
+      ]
+    },
+    {
+      "type": "groovyScript",
+      "name": "Summarize Users",
+      "description": "One entry per user with the number of open todos; sets UserCount.",
+      "fileName": "summarizeUsers"
+    },
+    {
+      "type": "jsonToXml",
+      "name": "Summary to XML",
+      "description": "Converts the summary to XML for reporting."
+    }
+  ],
+  "end": {
+    "type": "none"
+  },
+  "exceptionSubprocess": {
+    "name": "Exception Subprocess 1",
+    "steps": [
+      {
+        "type": "contentModifier",
+        "name": "Set Error Properties",
+        "description": "Error text and time for the alert.",
+        "properties": [
+          {
+            "name": "ErrorMessage",
+            "type": "expression",
+            "value": "${exception.message}"
+          },
+          {
+            "name": "ErrorTimestamp",
+            "type": "expression",
+            "value": "${date:now:yyyy-MM-dd'T'HH:mm:ss}"
+          }
+        ]
+      },
+      {
+        "type": "groovyScript",
+        "name": "Build Error Message",
+        "description": "Plain-text alert with report, environment, time and error.",
+        "fileName": "buildErrorMessage"
+      }
+    ]
+  },
+  "parameters": {
+    "Users_URL": "https://jsonplaceholder.typicode.com/users",
+    "Todos_URL": "https://jsonplaceholder.typicode.com/todos"
+  }
+}

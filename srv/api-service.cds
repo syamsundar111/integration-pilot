@@ -278,11 +278,13 @@ service ApiService {
 
   /**
    * GET /api/ChatSessions?$orderby=modifiedAt desc, GET /api/ChatSessions/{id}/messages?$orderby=seq,
-   * POST /api/ChatSessions/{id}/remove (deletes the conversation; executed proposals are kept)
+   * POST /api/ChatSessions/{id}/remove (deletes the conversation; executed proposals are kept),
+   * POST /api/ChatSessions/{id}/rename { title } (a renamed conversation keeps its name)
    */
   @readonly
   entity ChatSessions as projection on db.ChatSession actions {
     action remove();
+    action rename(title : String) returns ChatSessions;
   };
 
   @readonly

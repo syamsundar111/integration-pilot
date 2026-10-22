@@ -17,7 +17,7 @@ All credential names below are dummy aliases. They do not need to exist in Secur
 
 ## 1. Create the test package
 
-Use a separate package, not CLIENT or any client package.
+Use a separate package, not a client package.
 
 1. *Design → Integrations and APIs → Create*.
 2. Name: `Integration Pilot Reference Exports`

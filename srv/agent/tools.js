@@ -18,7 +18,7 @@ const MAX_RESULT_CHARS = 12_000
 const MAX_ERRORS = 15 // validation errors returned to the model per call
 const MAX_STEPS_PER_EDIT = 8 // steps added or replaced per editDraftSpec call: keeps each answer short
 const DRAFT_FIELDS = ['id', 'name', 'description', 'packageId', 'trigger', 'end', 'parameters', 'resources', 'exceptionSubprocess']
-const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
+const { toPackageId } = require('../lib/package-id')
 
 const fn = (name, description, properties = {}, required = []) => ({
   type: 'function',
@@ -105,7 +105,7 @@ At most ${MAX_STEPS_PER_EDIT} steps added or replaced per call. Returns the draf
   fn(
     'proposePackage',
     'Propose a new integration package for the user to approve (only if no suitable package exists).',
-    { id: { type: 'string', description: 'Letters, digits and dots only (no underscores)' }, name: { type: 'string' }, shortText: { type: 'string' } },
+    { id: { type: 'string', description: 'Package ID: letters, digits and dots. A name with underscores or spaces is turned into the ID the way CPI does (test_1 -> test1)' }, name: { type: 'string' }, shortText: { type: 'string' } },
     ['id', 'name']
   )
 ]
@@ -127,7 +127,7 @@ const SPEC_FORMAT = {
   exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson }',
   parameters: '{ "Name": "default value" } — used only as a whole receiver url "{{Name}}"',
   resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
-  names: 'id: letters, digits, _ · packageId: letters, digits, dots · fileName, system: letter first, then letters, digits, _ · step names unique'
+  names: 'id: letters, digits, _ · packageId: letters, digits, dots (a Name with _ or spaces is turned into the ID) · fileName, system: letter first, then letters, digits, _ · step names unique'
 }
 
 /** Validation result for the model: codes and short messages, never the spec itself */
@@ -205,6 +205,31 @@ async function packageExists(id) {
   }
 }
 
+async function getPackageOrNull(id) {
+  try {
+    return await cpi.getPackage(id)
+  } catch (e) {
+    if (notFound(e)) return null
+    throw e
+  }
+}
+
+/**
+ * A package value with underscores or spaces is the package Name; its ID drops what CPI does not
+ * allow (Name "test_1" -> ID "test1"), as CPI does. Asks the user only when nothing is left or the
+ * ID belongs to a package with another name.
+ * @returns {Promise<{ id: string, name: string|null, note: string|null, error?: string }>}
+ */
+async function resolvePackage(value, field = 'packageId') {
+  const r = toPackageId(value)
+  if (!r.name) return r
+  if (!r.id) return { ...r, error: `${field}: '${r.name}' has no letters or digits for a package ID — ask the user for a package ID (letters, digits and dots)` }
+  const existing = await getPackageOrNull(r.id)
+  if (existing && existing.name && existing.name !== r.name)
+    return { ...r, error: `${field}: '${r.name}' becomes the package ID '${r.id}', but package '${r.id}' already exists with the name '${existing.name}' — ask the user whether to use that package or to give another name` }
+  return { ...r, name: existing ? null : r.name } // an existing package keeps its name
+}
+
 async function iflowExists(id) {
   try {
     return await cpi.getIflow(id)
@@ -245,6 +270,13 @@ async function attachmentsOf(ctx) {
   return ctx.attachments
 }
 
+/** The conversation's session defaults ({ packageId?, packageName?, ... }) */
+async function defaultsOf(ctx) {
+  if (!ctx.sessionId) return {}
+  const s = await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.one.from('iflowpilot.ChatSession', ctx.sessionId).columns('defaults')))
+  return s?.defaults ? JSON.parse(s.defaults) : {}
+}
+
 /** The conversation's draft spec { spec, source, at }, or null */
 async function draftOf(ctx) {
   if (!ctx.sessionId) return null
@@ -263,7 +295,7 @@ async function saveDraft(ctx, spec, { source, valid = false }) {
 }
 
 /** Stores a PENDING proposal in its own transaction, so it survives a failing chat turn */
-async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, operation = 'CREATE', attachments = {}, scriptChecks = null }) {
+async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, packageName = null, operation = 'CREATE', attachments = {}, scriptChecks = null }) {
   const ID = cds.utils.uuid()
   // the attached files the spec uses, as they are now: approval and retry build from this snapshot
   const used = Object.fromEntries(attachmentStore.referencedBy(spec).map((f) => [f, attachments[f]]))
@@ -278,13 +310,24 @@ async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null
         status: 'PENDING',
         iflowId,
         packageId,
+        packageName,
         attachments: Object.keys(used).length ? JSON.stringify(used) : null,
         scriptChecks: scriptChecks && Object.keys(scriptChecks).length ? JSON.stringify(scriptChecks) : null
       })
     )
   )
   ctx.proposals.push(ID)
+  await nameSession(ctx.user, ctx.sessionId, kind === 'PACKAGE' ? `Package ${spec.name || packageId}` : `${spec.name || iflowId} · ${packageId}`)
   return ID
+}
+
+/** Names the conversation after what it builds, unless the user renamed it */
+async function nameSession(user, sessionId, title) {
+  if (!sessionId || !title) return
+  await cds.tx({ user }, async (tx) => {
+    const s = await tx.run(SELECT.one.from('iflowpilot.ChatSession', sessionId).columns('title', 'titleEdited'))
+    if (s && !s.titleEdited && s.title !== title) await tx.run(UPDATE('iflowpilot.ChatSession', sessionId).set({ title: title.slice(0, 200) }))
+  })
 }
 
 /** The existing iFlow as a spec, or null if it does not exist: { spec, blockers, packageId } */
@@ -378,6 +421,7 @@ const handlers = {
     const notJson = unparsableSpec(spec)
     if (notJson) return notJson
     const source = draft ? draft.source : 'your latest validateSpec'
+    if (toPackageId(spec.packageId).id) spec = { ...spec, packageId: toPackageId(spec.packageId).id } // a Name -> its ID, as CPI does
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) {
@@ -499,7 +543,8 @@ const handlers = {
     await saveDraft(ctx, draft, { source: 'built with editDraftSpec' })
     ctx.validatedSpec = undefined // the draft changed: validate it again before proposing
     const attachments = await attachmentsOf(ctx)
-    const open = validate(draft, { attachments: Object.keys(attachments) }).issues
+    // a package Name ("test_1") stays in the draft; proposing derives its ID, so it is no format error here
+    const open = validate({ ...draft, packageId: toPackageId(draft.packageId).id || draft.packageId }, { attachments: Object.keys(attachments) }).issues
     const outline = (steps = []) => steps.map((s, i) => `${i}. ${s?.name || '(no name)'} (${s?.type || '?'})`)
     return {
       saved: true,
@@ -527,10 +572,13 @@ const handlers = {
   },
 
   async proposeIflow(args, ctx) {
-    const { spec, error } = await specToPropose(args, ctx)
+    let { spec, error } = await specToPropose(args, ctx)
     if (error) return error
     const notJson = unparsableSpec(spec)
     if (notJson) return notJson
+    const pkg = await resolvePackage(spec.packageId)
+    if (pkg.error) return { valid: false, errors: [pkg.error] }
+    if (pkg.note) spec = { ...spec, packageId: pkg.id }
     if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
@@ -546,22 +594,31 @@ const handlers = {
         ]
       }
     const pkgExists = await packageExists(spec.packageId)
+    if (!pkgExists && !pkg.name) {
+      // the default package given as a Name ("test_1"): create it with that Name
+      const defaults = await defaultsOf(ctx)
+      if (defaults.packageName && defaults.packageId === spec.packageId) pkg.name = defaults.packageName
+    }
 
     const { summary } = await build(spec, { attachments }) // proves the spec builds into a zip
     const groovy = await groovySyntax(spec, attachments)
     if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts with writeScript and propose again.')
-    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, attachments, scriptChecks: groovy.files })
+    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, packageName: pkg.name, attachments, scriptChecks: groovy.files })
     return {
       valid: true,
       proposalId,
       iflowId: spec.id,
       status: 'PENDING',
       ...(groovy.warning && { warnings: [groovy.warning] }),
+      ...(pkg.note && { packageIdNote: `${pkg.note} Tell the user exactly this, in one line; do not ask about it.` }),
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
-      ...(!pkgExists && {
-        packageNote: `Package '${spec.packageId}' does not exist on the tenant. Tell the user. They choose in the proposal panel: use an existing package or create '${spec.packageId}' with a name. Mention the similar packages, if any.`,
-        similarPackages: await similarPackages(spec.packageId)
-      }),
+      ...(!pkgExists &&
+        (pkg.name
+          ? { packageNote: `Package '${spec.packageId}' does not exist yet; approving creates it with the name '${pkg.name}'.` }
+          : {
+              packageNote: `Package '${spec.packageId}' does not exist on the tenant. Tell the user. They choose in the proposal panel: use an existing package or create '${spec.packageId}' with a name. Mention the similar packages, if any.`,
+              similarPackages: await similarPackages(spec.packageId)
+            })),
       instruction: 'Tell the user the proposal is ready for review in the proposal panel. Nothing has been created yet.'
     }
   },
@@ -628,13 +685,23 @@ const handlers = {
   },
 
   async proposePackage({ id, name, shortText }, ctx) {
+    const pkg = await resolvePackage(id, 'id')
+    if (pkg.error) return { valid: false, errors: [pkg.error] }
+    id = pkg.id
+    name ||= pkg.name
     const errors = []
-    if (!PACKAGE_ID.test(id || '')) errors.push('id: use letters, digits and dots only (CPI does not allow underscores)')
+    if (!id) errors.push('id: required (letters, digits and dots)')
     if (!name) errors.push('name: required')
     if (errors.length) return { valid: false, errors }
     if (await packageExists(id)) return { valid: false, errors: [`id: package '${id}' already exists — use it instead of proposing a new one`] }
     const proposalId = await storeProposal(ctx, { kind: 'PACKAGE', spec: { id, name, shortText: shortText || name }, packageId: id })
-    return { valid: true, proposalId, status: 'PENDING', instruction: 'Tell the user the package proposal is ready for review. Nothing has been created yet.' }
+    return {
+      valid: true,
+      proposalId,
+      status: 'PENDING',
+      ...(pkg.note && { packageIdNote: `${pkg.note} Tell the user exactly this, in one line; do not ask about it.` }),
+      instruction: 'Tell the user the package proposal is ready for review. Nothing has been created yet.'
+    }
   }
 }
 
@@ -695,4 +762,4 @@ async function execute(name, rawArgs, ctx) {
   return json
 }
 
-module.exports = { definitions, execute }
+module.exports = { definitions, execute, nameSession }

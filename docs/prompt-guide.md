@@ -3,8 +3,9 @@
 Integration Pilot turns a chat request into an iFlow proposal. A request that gives the
 assistant everything up front gets a proposal in one turn. A request that leaves things
 open costs extra rounds of questions, and every round re-sends the whole conversation to the
-model. This guide shows how to write requests that work the first time, and walks through one
-real request: **SF SourceApp EC to Target Directory**.
+model. This guide shows how to write requests that work the first time, with three worked
+examples against public test APIs: a small flow, a larger orchestration, and the rebuild of an
+existing iFlow with placeholders.
 
 ## What v1 can build
 
@@ -38,7 +39,7 @@ per thing the assistant needs:
 Create an iFlow.
 Trigger: <timer, run once after deployment — or HTTPS sender with path, e.g. /orders/create>
 Steps (in order, at most 50):
-1. <step type and name, e.g. Content Modifier "Set Properties": property Source = constant SF>
+1. <step type and name, e.g. Content Modifier "Set Properties": property Source = constant Shop>
 2. <…>
 Receivers: <name, method and URL of each HTTP call; externalize a URL as {{Name}} with a default>
 Authentication: <None, or method and credential name per receiver>
@@ -63,7 +64,7 @@ Open **Session defaults** above the input and set:
 - **Target package**: the package id. It is used as the spec's package.
 - **Trigger**: *Timer, run once after deployment*, if that is the trigger.
 - **Receiver authentication**: what you will configure after creation, for example
-  *OAuth2 SAML Bearer with credential DEMO_OAUTH on all receivers*.
+  *OAuth2 Client Credentials with credential DEMO_OAUTH on all receivers*.
 
 They are sent with every message as structured context, and the assistant does not ask about
 them again.
@@ -92,158 +93,240 @@ XSLT Mapping step that you add in the CPI web editor (v1 has no XSLT step).
 spec:
 
 - Steps v1 cannot build become placeholder Content Modifiers whose description says
-  *REPLACE WITH …*.
-- If the flow would exceed 50 steps, consecutive placeholders are merged.
-- Duplicate names are made unique.
+  *REPLACE WITH …*, one per CPI component. Only if the flow would exceed 50 steps are consecutive
+  placeholders merged.
+- A branching flow keeps its main path (at each router, the route with a condition); the other
+  routes are described in the router's placeholder.
+- `{{Param}}` values outside receiver URLs become the parameter's default; a receiver URL combined
+  from parameters becomes one `<Receiver>_URL` parameter.
+- A Process Call in the exception subprocess is replaced by the steps of the local process it calls,
+  if they are Content Modifiers and Groovy scripts.
+- The import gets a new iFlow id (`<original>_Imported`); duplicate names are made unique.
 - XPath values of Content Modifiers move into a generated Groovy script.
 - Scripts and XSLT files become attachments.
 
 Then ask *Propose the imported iFlow as a new iFlow* and replace the placeholders in the CPI web
 editor after creation.
 
-## Worked example: SF SourceApp EC to Target Directory
+## Worked example 1: a small flow (Users Summary)
 
-### The original request
+Read users and todos from the public test API `jsonplaceholder.typicode.com`, count the open todos
+per user in Groovy, and convert the result to XML. `RUNID` stands for a unique suffix (the
+measurement script replaces it); use your own ID and name.
 
-The original request was precise about the flow: a timer, a Content Modifier with 16 constants,
-two SourceApp calls with externalized URLs, two Content Modifiers that keep the responses,
-a Groovy mapping, and an exception subprocess. It is in
-[scripts/measure/sf-entra-request.md](../scripts/measure/sf-entra-request.md). Three things made
-it expensive:
+### The first request
 
-1. **No package and no authentication.** The assistant asked about both, which took one extra
-   round. The answers came in a second message.
-2. **About 60 lines of Groovy described in prose** (steps 7a–7h and the error script). The model
-   had to write both scripts inside the spec, in one response of 5,000–10,000 tokens. On the
-   free-tier model that took 1–4 minutes per attempt, and attempts timed out at 120 s.
-3. **Every revision re-sent the full spec**, scripts included, and the conversation history grew
-   with each copy.
+The first version is in
+[scripts/measure/users-summary-request.md](../scripts/measure/users-summary-request.md). It is
+precise about the flow, but two things make it more expensive than it needs to be:
+
+1. **No package and no authentication.** The pre-send check warns about both; sent anyway, the
+   assistant asks, which costs one extra round.
+2. **Both Groovy scripts are described in prose.** The model has to write them, check them and keep
+   them in the conversation.
 
 ### The improved request
 
-1. Set the session defaults:
-   - Target package `DEV.SF.SourceApp.EC.to.Microsoft.Directory.ID`
-   - Timer, run once after deployment
-   - Receiver authentication: *OAuth2 SAML Bearer Assertion with credential DEMO_OAUTH on
-     RCVR_SF_User and RCVR_SF_AccountLockOut*
-2. Attach the two scripts: `mapSfToEntra.groovy` (step 7 of the original request) and
-   `buildErrorNotification.groovy` (step c of its exception subprocess). Versions of both are in
-   [test/fixtures/sf-entra/](../test/fixtures/sf-entra/).
+1. Set the session defaults: target package `IntegrationPilot.Demo`, timer run once after deployment,
+   and the receiver authentication note (here: none needed).
+2. Attach the two scripts `summarizeUsers.groovy` and `buildErrorMessage.groovy` (both are in
+   [test/fixtures/users-summary/](../test/fixtures/users-summary/)).
 3. Send the request, which no longer describes the scripts:
 
 <!-- example:improved-request -->
 ```text
 Create an iFlow.
-Name: SF SourceApp EC to Target Directory_Employee Data Replication_V1
-ID: SF_SourceApp_EC_to_Microsoft_Directory_ID_Employee_Data_Replication_V1
-Purpose: read employees from SourceApp Employee Central, map them to the Target Directory
-layout and produce a CSV file.
+Name: Users Summary RUNID
+ID: Users_Summary_RUNID
+Purpose: read users and their todos from a REST API, summarize the open todos per user and convert
+the summary to XML for a reporting system.
 Steps (in order):
 1. Content Modifier "Set Properties", constant properties:
-   sourceAgency_EmpType = SF, sourceIdentifier_EmpType = SF_EmpType,
-   targetAgency_EmpType = Directory, targetIdentifier_EmpType = Directory_EmpType,
-   sourceAgency_EmpSubGroup = SF_EmpSub, sourceIdentifier_EmpSubGroup = SF_EmpSubGroup,
-   targetAgency_EmpSubGroup = Directory_EmpSub, targetIdentifier_EmpSubGroup = Directory_EmpSubGroup,
-   toemailaddresses = alerts@example.com, ccemailaddresses = alerts@example.com,
-   emailfrom = noreply@example.com,
-   emailsubject = SF SourceApp EC to Target Directory_Employee Data Replication,
-   environment = DEV-COMMON,
-   iflowname = DEV_SF SourceApp EC to Target Directory_Employee Data Replication,
-   packagename = DEV_SF SourceApp EC to Target Directory, FileName = EmployeeDataReplication.csv
-2. Request-reply "Get SF Users": GET, receiver RCVR_SF_User, URL {{SF_User_URL}}, default
-   https://api.example.com/odata/v2/User?$format=json&$filter=status in 't','f'&$select=userId,username,empId,firstName,mi,lastName,displayName,email,title,department,location,status,hireDate,companyExitDate,custom06,custom07,manager/empId,empInfo/jobInfoNav/locationNav/description,empInfo/jobInfoNav/locationNav/addressNavDEFLT/address1,empInfo/jobInfoNav/locationNav/addressNavDEFLT/city,empInfo/jobInfoNav/locationNav/addressNavDEFLT/zipCode,empInfo/jobInfoNav/departmentNav/description,empInfo/jobInfoNav/jobCodeNav/name,empInfo/jobInfoNav/jobCodeNav/description&$expand=manager,empInfo/jobInfoNav/locationNav/addressNavDEFLT,empInfo/jobInfoNav/departmentNav,empInfo/jobInfoNav/jobCodeNav
-3. Content Modifier "Store SF Users": property SFUsersJson = expression ${in.body}
-4. Request-reply "Get Account Lockout": GET, receiver RCVR_SF_AccountLockOut, URL {{SF_AccountLockout_URL}},
-   default https://api.example.com/odata/v2/cust_AccountLockout?$format=json&$select=externalCode,cust_AccountLockout
-5. Content Modifier "Store Account Lockout": property LockoutJson = expression ${in.body}
-6. Groovy Script "Map SF to Directory and Build CSV" using the attached mapSfToEntra.groovy
+   sourceSystem = JSONPlaceholder, targetSystem = Reporting, reportName = Users Summary,
+   environment = DEV, alertTo = alerts@example.com, alertFrom = noreply@example.com
+2. Request-reply "Get Users": GET, receiver RCVR_Users, URL {{Users_URL}}, default
+   https://jsonplaceholder.typicode.com/users
+3. Content Modifier "Store Users": property UsersJson = expression ${in.body}
+4. Request-reply "Get Todos": GET, receiver RCVR_Todos, URL {{Todos_URL}}, default
+   https://jsonplaceholder.typicode.com/todos
+5. Content Modifier "Store Todos": property TodosJson = expression ${in.body}
+6. Groovy Script "Summarize Users" using the attached summarizeUsers.groovy
+7. JSON to XML Converter "Summary to XML"
 No receiver at the end.
 Error handling: exception subprocess "Exception Subprocess 1" with
 - Content Modifier "Set Error Properties": ErrorMessage = expression ${exception.message},
   ErrorTimestamp = expression ${date:now:yyyy-MM-dd'T'HH:mm:ss}
-- Groovy Script "Build Error Notification" using the attached buildErrorNotification.groovy
+- Groovy Script "Build Error Message" using the attached buildErrorMessage.groovy
 Give every step a one-sentence description of its purpose.
 ```
 
-The prompt check passes with the defaults set. The request is half as long (2.8 instead of 5.6
-thousand characters). The model has no questions to ask and writes a spec without script
-bodies: 4.7 KB of JSON instead of 10 KB. It validates the spec with
-`validateSpec` and proposes it with `{ "useValidatedSpec": true }`, so the spec is written once.
-The expected spec is
-[test/fixtures/sf-entra/spec.json](../test/fixtures/sf-entra/spec.json): 6 steps, 2
-externalized URLs, an exception subprocess with 2 steps, and the two scripts as attached
-files. `test/prompt-guide.test.js` checks this example: the linter result, the validation and
-build of the spec with the attached scripts, and an import of the built iFlow back into the
-same spec.
+The prompt check passes with the defaults set, and the model has nothing to ask and no script to
+write. The expected spec is
+[test/fixtures/users-summary/spec.json](../test/fixtures/users-summary/spec.json): 7 steps, 2
+externalized URLs, an exception subprocess with 2 steps, and the two scripts as attached files.
+`test/prompt-guide.test.js` checks this example: the linter result, the validation and build of the
+spec with the attached scripts, and an import of the built iFlow back into the same spec.
 
-### After creation
+## Worked example 2: a larger orchestration (Customer Activity Digest)
 
-The proposal panel lists what to finish in the CPI web editor. For this iFlow:
+An HTTPS-triggered flow that calls the test API four times with Groovy between the calls, posts the
+result to `https://httpbin.org/post`, and answers the caller. Everything is given up front: package,
+trigger, authentication, numbered steps with names, every URL as a parameter with a default, and the
+error handling, so the pre-send check passes without session defaults.
 
-- Set **OAuth2 SAML Bearer Assertion** with credential **DEMO_OAUTH** on the receivers
-  RCVR_SF_User and RCVR_SF_AccountLockOut.
-- Configure the value mappings `SF_EmpType` → `Directory_EmpType` and `SF_EmpSubGroup` →
-  `Directory_EmpSubGroup` on the tenant.
-- Set the production schedule on the timer when the flow goes live.
-
-## Worked example: SourceSystem to S/4HANA (25 steps)
-
-A larger flow between two non-SAP-SourceApp systems: active hardware incidents from SourceSystem
-become S/4HANA maintenance notifications, and the notification numbers are written back. The request
-gives everything up front: package, trigger, the authentication to set up after creation, 25
-numbered steps with names, every URL as a parameter with a default, and the error handling.
-`RUNID` stands for a unique suffix (the measurement script replaces it); use your own ID and name.
-
-<!-- example:SourceSystem-s4-request -->
+<!-- example:orchestration-request -->
 ```text
 Create an iFlow.
-Name: SourceSystem to S4HANA Maintenance Notifications RUNID
-ID: SourceSystem_to_S4HANA_Notifications_RUNID
+Name: Customer Activity Digest RUNID
+ID: Customer_Activity_Digest_RUNID
 Package: PilotReference
-Trigger: timer, run once after deployment.
-Authentication: SourceSystem receivers use Basic with credential SNOW_API_USER; S/4HANA receivers use
-OAuth2 Client Credentials with credential S4_OAUTH. Create them with None; I set them up in the CPI
-web editor after creation.
-Purpose: read active hardware incidents from SourceSystem, create S/4HANA maintenance notifications for
-them, and write the notification numbers back to SourceSystem.
+Trigger: HTTPS sender, address /pilot/activity-digest-RUNID
+Authentication: no authentication on any receiver.
+Purpose: for the user id in the request, collect profile, posts, comments and todos from a REST API,
+build one activity digest, send it to a target endpoint and answer the caller with a short status.
 
 Steps (in order):
-1. Content Modifier "Set Properties": constant properties sourceSystem = SourceSystem, targetSystem = S4HANA, plant = 1010, notificationType = M1, batchSize = 50
-2. Request-Reply "Get Incidents": GET, receiver RCVR_SourceSystem, URL {{SNOW_Incidents_URL}}, default https://source.example.com/api/now/table/incident?sysparm_query=active%3Dtrue%5Ecategory%3Dhardware&sysparm_limit=50
-3. Content Modifier "Store Incidents": property IncidentsJson = expression ${in.body}
-4. Groovy Script "Filter Incidents": from IncidentsJson.result keep incidents with priority 1, 2 or 3 and a non-empty assignment_group; set property IncidentCount; set the body to the kept incidents as a JSON array.
-5. Content Modifier "Store Filtered Incidents": property FilteredJson = expression ${in.body}
-6. Request-Reply "Get Equipment": GET, receiver RCVR_S4_Equipment, URL {{S4_Equipment_URL}}, default https://s4.example.com/sap/opu/odata/sap/API_EQUIPMENT/Equipment?$format=json&$top=500
-7. Content Modifier "Store Equipment": property EquipmentJson = expression ${in.body}
-8. Request-Reply "Get Functional Locations": GET, receiver RCVR_S4_FuncLoc, URL {{S4_FuncLoc_URL}}, default https://s4.example.com/sap/opu/odata/sap/API_FUNCTIONALLOCATION/FunctionalLocation?$format=json&$top=500
-9. Content Modifier "Store Functional Locations": property FuncLocJson = expression ${in.body}
-10. Groovy Script "Map to Notifications": for each incident in FilteredJson build an S/4HANA maintenance notification: NotificationText = short_description cut to 40 characters, MaintNotifLongText = description, MaintPriority = the incident priority, TechnicalObject = the Equipment whose SerialNumber equals the incident's cmdb_ci serial number (empty if none), FunctionalLocation = the functional location whose description equals the incident location (empty if none), NotificationType and MaintenancePlant from the properties notificationType and plant, and keep the incident sys_id; body = {"notifications": [...]}.
-11. Content Modifier "Store Notifications": property NotificationsJson = expression ${in.body}
-12. Content Modifier "Set CSRF Fetch Header": header x-csrf-token = constant Fetch
-13. Request-Reply "Fetch CSRF Token": GET, receiver RCVR_S4_Token, URL {{S4_Notification_Service_URL}}, default https://s4.example.com/sap/opu/odata/sap/API_MAINTNOTIFICATION
-14. Content Modifier "Keep CSRF Token": property CsrfToken = expression ${header.x-csrf-token}
-15. Groovy Script "Prepare Batch": set the body to property NotificationsJson, header x-csrf-token to property CsrfToken and header Content-Type to application/json.
-16. Request-Reply "Create Notifications": POST, receiver RCVR_S4_Notification, URL {{S4_Notification_Batch_URL}}, default https://s4.example.com/sap/opu/odata/sap/API_MAINTNOTIFICATION/MaintenanceNotification
-17. Content Modifier "Store S4 Response": property S4Response = expression ${in.body}
-18. Groovy Script "Read Notification Numbers": parse S4Response; build a list of {sys_id, notification} pairs from the created notifications; set property CreatedCount; body = the list as JSON.
-19. Content Modifier "Store Mapping": property MappingJson = expression ${in.body}
-20. Groovy Script "Build SourceSystem Updates": for each pair build {"sys_id": ..., "u_s4_notification": ..., "work_notes": "Created S/4HANA notification <number>"}; body = {"records": [...]}.
-21. Request-Reply "Update Incidents": POST, receiver RCVR_SourceSystem_Update, URL {{SNOW_Batch_Update_URL}}, default https://source.example.com/api/x_pilot/incident_batch_update
-22. Content Modifier "Store Update Response": property UpdateResponse = expression ${in.body}
-23. Groovy Script "Build Run Summary": set property Summary = "incidents read <n>, kept <IncidentCount>, notifications created <CreatedCount>".
-24. Content Modifier "Set Run Status": property RunStatus = constant Success, header SAP_ApplicationID = expression ${property.Summary}
-25. Groovy Script "Final Check": throw an exception if CreatedCount differs from IncidentCount.
-No receiver at the end.
+1. Content Modifier "Set Properties": property sourceSystem = constant JSONPlaceholder, property targetSystem = constant DigestService, property receivedAt = expression ${date:now:yyyy-MM-dd'T'HH:mm:ss}
+2. Groovy Script "Read Request": parse the JSON body; throw an exception if userId is missing or not a number; set property userId.
+3. Request-Reply "Get Users": GET, receiver RCVR_Users, URL {{Users_URL}}, default https://jsonplaceholder.typicode.com/users
+4. Groovy Script "Pick User": from the JSON array keep the user whose id equals property userId; throw an exception if there is none; set property UserJson to that user as JSON.
+5. Request-Reply "Get Posts": GET, receiver RCVR_Posts, URL {{Posts_URL}}, default https://jsonplaceholder.typicode.com/posts
+6. Groovy Script "Filter Posts": keep the posts whose userId equals property userId; set property PostsJson (JSON array) and property PostCount.
+7. Request-Reply "Get Comments": GET, receiver RCVR_Comments, URL {{Comments_URL}}, default https://jsonplaceholder.typicode.com/comments
+8. Groovy Script "Count Comments": count the comments per postId for the posts in PostsJson; set property CommentCountsJson ({"<postId>": <count>}).
+9. Request-Reply "Get Todos": GET, receiver RCVR_Todos, URL {{Todos_URL}}, default https://jsonplaceholder.typicode.com/todos
+10. Groovy Script "Build Digest": body = JSON {"user": {id, name, email, company: company.name}, "posts": [{id, title, comments}], "openTodos": number of todos of the user with completed false, "generatedAt": property receivedAt}.
+11. Content Modifier "Set Target Headers": header Content-Type = constant application/json, header X-Source = expression ${property.sourceSystem}
+12. Request-Reply "Send Digest": POST, receiver RCVR_DigestService, URL {{DigestService_URL}}, default https://httpbin.org/post
+13. Groovy Script "Build Reply": body = JSON {"status": "sent", "userId": <userId>, "posts": <PostCount>}; header Content-Type = application/json.
+No receiver at the end: the reply goes back to the HTTPS caller.
 Error handling: exception subprocess with
-- Content Modifier "Set Error Properties": property ErrorMessage = expression ${exception.message}, property ErrorTime = expression ${date:now:yyyy-MM-dd'T'HH:mm:ss}
-- Groovy Script "Build Error Mail Body": body = plain text with ErrorTime, ErrorMessage and Summary (if set).
+- Content Modifier "Set Error Reply": header CamelHttpResponseCode = constant 500, header Content-Type = constant application/json
+- Groovy Script "Build Error Reply": body = JSON {"status": "failed", "error": ${exception.message}}.
+```
+
+What to expect: the assistant writes the 7 Groovy scripts with `writeScript`, then proposes the
+13-step spec in one call. The exception subprocess returns HTTP 500 with a JSON error to the caller.
+
+## Worked example 3: rebuild an existing iFlow with placeholders (25 steps, 8 placeholders)
+
+An existing iFlow uses steps v1 cannot build: routers, a General Splitter, a Message Mapping, a SOAP
+request-reply and Write Variables. This request rebuilds it step by step and keeps the interfaces
+unchanged. Each unsupported component becomes a placeholder Content Modifier (`PH_...`) whose
+description says exactly what to add in the CPI web editor; where two unsupported components follow
+each other, one placeholder describes both (`PH_Router_MappingCheck_RR_TargetERP`). XPath values are
+read in Groovy instead, and the original Groovy scripts are written from their descriptions. The
+systems are generic: "Source System" (a REST API at `source.example.com`) and "Target ERP" (a SOAP
+service at `erp.example.com`).
+
+<!-- example:placeholder-rebuild-request -->
+```text
+Build this iFlow exactly as listed. Do not ask questions, do not rename, merge, add or remove steps.
+Steps called PH_... are placeholder Content Modifiers with no rows; put the given text in their description.
+Write each Groovy script from its description: import com.sap.gateway.ip.core.customdev.util.Message,
+define def Message processData(Message message), null-safe, no external libraries, declare all variables
+with def, do not change the body unless stated. Validate, then propose.
+
+iFlow name: Source Records to Target ERP RUNID
+iFlow ID: Source_Records_to_Target_ERP_RUNID
+Package: PilotReference. Trigger: timer, run once (description: "Manual: schedule {{Scheduler}}, every 5 minutes").
+All HTTP receivers authType None. End: none.
+
+Main flow (25 steps):
+1. contentModifier "CM_SetProperties". Properties (constant): AttachmentName = Source_Records_Response;
+PayloadLogging = TRUE; QueryDate_Const = ""; QueryDate = "".
+Description: "Manual: QueryDate type = persisted variable lastRunTime".
+2. groovyScript "Script_SetLastRunTime", fileName Script_SetLastRunTime.groovy.
+Code: property LastQueryDate = QueryDate_Const if not empty, else QueryDate if not empty,
+else "1970-01-01T00:00:00.000Z".
+3. requestReplyHttp "RR_Source_Records", system RCV_SOURCE_SYSTEM, GET, url {{Source_Records_URL}},
+default: https://source.example.com/api/records?changed_since=${property.LastQueryDate}&fields=id,status,title,region_north,region_south,category,assigned_group,description,created_on
+Description: "Manual: OAuth2 Client Credentials, credential SOURCE_OAUTH_CLIENT, timeout 60000".
+4. groovyScript "Script_CheckEmpty", fileName Script_CheckEmpty.groovy.
+Code: parse body as JSON; property HasRecords = "true" if "records" is a non-empty list, else "false".
+5. PH "PH_Router_HasRecords": "REPLACE WITH Router 'Router Has Records': Route 1 Non-XML ${property.HasRecords} = 'true' continues;
+Route 2 (default) -> Write Variables WV_LastRunTime -> End 2."
+6. groovyScript "Script_PayloadLogging", fileName Script_PayloadLogging.groovy.
+Code: if property PayloadLogging equals "TRUE" (ignore case), add the body to the message log as a text/plain
+attachment named by property AttachmentName (default "Payload").
+7. jsonToXml "JSON_to_XML_Records": add XML root element "root", use namespace mapping, JSON prefix separator ":".
+8. PH "PH_Splitter_Records": "REPLACE WITH General Splitter 'Splitter Records': XPath /root/records, streaming off,
+parallel off, stop on exception on, timeout 300."
+9. groovyScript "Script_Mandatory_Fields", fileName Script_Mandatory_Fields.groovy.
+Code: body is XML <root><records>...</records></root>; use the first record.
+- Invalid XML: ValidationStatus = INVALID, ValidationError = "Invalid XML payload received", RecordId = UNKNOWN.
+- No record: INVALID, "No record found in payload", RecordId = UNKNOWN.
+- RecordId = id, or UNKNOWN if empty. region = region_north if not empty, else region_south.
+- Mandatory (trimmed, not empty): id, status, title, region, category, assigned_group, description, created_on.
+- Missing: INVALID, ValidationError = "Validation failed for record <RecordId>. Missing mandatory field(s): <names joined by ', '>".
+- Otherwise: ValidationStatus = VALID, ValidationError = "". Always set RecordId.
+10. contentModifier "CM_CustomHeaders". Properties: _MessageKeyElement4 constant RecordId;
+_MessageKeyValue4 expression ${property.RecordId}.
+11. groovyScript "Script_SetCustomHeaders", fileName Script_SetCustomHeaders.groovy.
+Code: for each suffix "", "2", "3", "4": if properties _MessageKeyElement<suffix> and _MessageKeyValue<suffix>
+are both set, add a message log custom header property (name = element value, value = value text cut to 250 chars).
+12. PH "PH_Router_Validation": "REPLACE WITH Router 'Router Validation': Route 1 Non-XML ${property.ValidationStatus} = 'VALID' continues;
+Route 2 (default) -> Process Call PC_ErrorHandling -> WV_LastRunTime -> Escalation End 3."
+13. contentModifier "CM_SetTargetProperties". Properties (constant): SourceSystem = Source System;
+AttachmentName = Target_ERP_Response; DocumentType = SR1; Priority = 2.
+Description: "Manual: add XPath RecordStatus = //status, RecordId = //id".
+14. PH "PH_Mapping_Source_to_ERP": "REPLACE WITH Message Mapping 'MM_Source_to_ERP': source SourceRecord.xsd (root),
+target CreateDocument.wsdl (operation CreateDocument), value mappings Source/Region -> ERP/Plant (1000 if region empty)
+and Source/Category -> ERP/PlannerGroup."
+15. groovyScript "Script_Validate_ERP_Mapping", fileName Script_Validate_ERP_Mapping.groovy.
+Code: start with ERPMappingStatus = VALID, ERPMappingError = "".
+- Empty body: INVALID, "ERP request payload is empty."
+- XML parse error (XmlSlurper, not namespace aware): INVALID, "Invalid ERP request XML."
+- Find Plant and PlannerGroup anywhere (trimmed). Missing plant: error "No ERP plant found for the source region."
+Missing group: error "No ERP planner group found for the source category."
+- Any errors: INVALID, ERPMappingError = errors joined by a space.
+16. PH "PH_Router_MappingCheck_RR_TargetERP": "REPLACE WITH (a) Router 'Router Mapping Check': Route 1 Non-XML ${property.ERPMappingStatus} = 'VALID'
+continues; Route 2 (default) -> PC_ErrorHandling -> WV_LastRunTime -> Escalation End 4.
+(b) Request Reply 'RR_Target_ERP' to RCV_TARGET_ERP, SOAP 1.x: address https://erp.example.com/soap/CreateDocument,
+proxy On-Premise, location ID ERP_ONPREM, Basic auth credential ERP_BASIC_USER, timeout 60000."
+17. groovyScript "Script_Get_ERP_Response", fileName Script_Get_ERP_Response.groovy.
+Description: "Replaces CM_Set_Document_Number (XPath DocumentNumber)".
+Code: parse body XML (namespace aware); ERPErrorCode = text of first element with local name ErrorCode,
+ERPDocumentNumber = text of first element with local name DocumentNumber; both "" if missing or on parse error.
+18. PH "PH_Router_ERPResult_PayloadLogging": "REPLACE WITH (a) Router 'Router ERP Result': Route 1 XML //*[local-name()='ErrorCode'] = '00'
+continues to (b); Route 2 (default) -> CM_SetProperties_Failed (AttachmentName = Target_ERP_Failed_Response) ->
+Script_PayloadLogging -> WV_LastRunTime -> End 5. (b) Script_PayloadLogging."
+19. requestReplyHttp "RR_Get_Record_Key", system RCV_SOURCE_LOOKUP, GET, url {{Source_Lookup_URL}},
+default: https://source.example.com/api/records?id=${property.RecordId}&fields=record_key,id
+Description: "Manual: OAuth2 Client Credentials, credential SOURCE_OAUTH_CLIENT".
+20. groovyScript "Script_Get_Record_Key", fileName Script_Get_Record_Key.groovy.
+Description: "Replaces CM_Log_Record_Key (XPath //record_key)".
+Code: if body starts with "{", parse JSON and take record_key of the first item in "records" (or of "records" if it is
+an object); if it starts with "<", take the first element named record_key. Property RecordKey = that value or "".
+21. PH "PH_Router_RecordFound": "REPLACE WITH Router 'Router Record Found': Route 1 XML //record_key != '' continues;
+Route 2 (default) -> WV_LastRunTime -> End 6."
+22. groovyScript "Script_Set_Update_Body", fileName Script_Set_Update_Body.groovy.
+Code: read properties RecordId, RecordKey, ERPDocumentNumber; if one is empty, throw
+new Exception("<property name> property is missing."). Set the body to JSON:
+{"notes": "Target ERP document created for <RecordId>. Document number: <ERPDocumentNumber>",
+"erp_document_number": "<ERPDocumentNumber>"} using groovy.json.JsonOutput.
+23. contentModifier "CM_SetHeaders". Headers (constant): Accept = application/json; Content-Type = application/json.
+24. requestReplyHttp "RR_Update_Record", system RCV_SOURCE_UPDATE, PATCH, url {{Source_Update_URL}},
+default: https://source.example.com/api/records/${property.RecordKey}
+Description: "Manual: OAuth2 Client Credentials, credential SOURCE_OAUTH_CLIENT".
+25. PH "PH_WV_LastRunTime": "REPLACE WITH Write Variables 'WV_LastRunTime': lastRunTime =
+${date-with-timezone:now:UTC:yyyy-MM-dd'T'HH:mm:ss.SSS'Z'}, local, encrypted, 90 days -> End."
+
+Exception subprocess "Exception Subprocess":
+description: "Manual: move these steps into Local Integration Process 'LIP_ErrorHandling';
+here use Process Call 'PC_ErrorHandling' then Escalation End."
+E1. contentModifier "CM_SetMessage". Properties: _MessageKeyValue3 expression ${property.ERPMappingError};
+_MessageKeyElement3 constant ERPMappingError; _MessageKeyElement2 constant ValidationError;
+_MessageKeyValue2 expression ${property.ValidationError}; _MessageKeyValue expression ${exception.message};
+_MessageKeyElement constant Error_Message.
+E2. groovyScript "Script_SetCustomHeaders_Exc", fileName Script_SetCustomHeaders_Exc.groovy.
+Code: same logic as step 11.
 ```
 
 What to expect:
 
-- The assistant writes the 7 Groovy scripts with `writeScript` and builds the spec in parts.
-- Receivers are created with authentication None; the proposal panel reminds you to set Basic
-  (`SNOW_API_USER`) and OAuth2 Client Credentials (`S4_OAUTH`) on them in the CPI web editor.
-- The URL defaults are placeholders: set the real SourceSystem and S/4HANA addresses as externalized
-  parameters before deploying.
-
+- 25 main-flow steps: 17 real steps and 8 placeholders, plus a 2-step exception subprocess.
+- Every receiver is created with authentication None; the step descriptions name the credentials to
+  set in the CPI web editor.
+- Importing the original iFlow (**Import iFlow**) gives a similar draft, with one placeholder per
+  unsupported component instead of combined ones.

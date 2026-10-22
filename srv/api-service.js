@@ -207,6 +207,7 @@ module.exports = class ApiService extends cds.ApplicationService {
       const id = keyOf(req)
       return audited(req, { action: 'DELETE_CHAT_SESSION', targetType: 'ChatSession', targetId: id }, () => agent.deleteSession(id, req.user))
     })
+    this.on('rename', 'ChatSessions', (req) => agent.renameSession(keyOf(req), req.data.title, req.user))
 
     // Turns are returned with events/proposals/error parsed
     const parseJson = (v) => (typeof v === 'string' ? JSON.parse(v) : v)

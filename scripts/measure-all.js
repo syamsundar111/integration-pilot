@@ -7,11 +7,12 @@
  *        [--scenarios a,b,c,d] [--out results.jsonl] [--title "Before items 1-3"] [--no-docs]
  *   node scripts/measure-all.js --summarize results.jsonl --title "..."   (only write the summary)
  *
- * Scenarios:
- *   a  SF -> Directory, the model writes the scripts (original request + session defaults)
- *   b  SF -> Directory, scripts attached (improved request + session defaults)
+ * Scenarios (set v2, neutral, from 2026-10-22; rounds before that used client-specific scenarios
+ * that are no longer in the repository, so their numbers are not comparable with later rounds):
+ *   a  Users Summary, the model writes the scripts (first request + session defaults)
+ *   b  Users Summary, scripts attached (improved request + session defaults)
  *   c  generic 30-step order flow
- *   d  SourceSystem -> S/4HANA, 25 steps (docs/prompt-guide.md)
+ *   d  rebuild of an existing iFlow with placeholders, 25 steps (docs/prompt-guide.md)
  * Start the server with the model you want to measure and GROOVY_CHECK_URL pointing at a running
  * Groovy check (real environment variables win over .env).
  */
@@ -27,15 +28,16 @@ const opt = (name, fallback) => {
 }
 const flag = (name) => args.includes(`--${name}`)
 
-const F = 'test/fixtures/sf-entra'
+const SCENARIO_SET = 'v2 (neutral)'
+const F = 'test/fixtures/users-summary'
 const SCENARIOS = {
-  a: { name: 'SF→Directory, model writes scripts', args: ['--defaults'] },
+  a: { name: 'Users Summary, model writes scripts', args: ['--defaults'] },
   b: {
-    name: 'SF→Directory, scripts attached',
-    args: ['--defaults', '--request', 'scripts/measure/sf-entra-improved-request.md', '--attach', `${F}/mapSfToEntra.groovy,${F}/buildErrorNotification.groovy`]
+    name: 'Users Summary, scripts attached',
+    args: ['--defaults', '--request', 'scripts/measure/users-summary-improved-request.md', '--attach', `${F}/summarizeUsers.groovy,${F}/buildErrorMessage.groovy`]
   },
   c: { name: '30-step generic order flow', args: ['--request', 'scripts/measure/large-order-request.md'] },
-  d: { name: 'SourceSystem→S/4HANA, 25 steps', args: ['--request', 'scripts/measure/SourceSystem-s4-request.md'] }
+  d: { name: 'Placeholder rebuild, 25 steps', args: ['--request', 'scripts/measure/placeholder-rebuild-request.md'] }
 }
 
 const median = (xs) => {
@@ -55,7 +57,7 @@ function summary(rows, title) {
   const lines = [
     `## ${new Date().toISOString().slice(0, 10)} · ${title || 'Measurement'}`,
     '',
-    `Commit \`${commit}\` · model \`${model}\` · ${rows.length} runs. Median (min–max) per scenario.`,
+    `Commit \`${commit}\` · model \`${model}\` · scenario set ${SCENARIO_SET} · ${rows.length} runs. Median (min–max) per scenario.`,
     '',
     '| Scenario | Runs | Proposal | Messages | Model calls | Input tokens | Output tokens | Time (min) | Largest prompt | Groovy checks ok / not checked |',
     '|---|---|---|---|---|---|---|---|---|---|'

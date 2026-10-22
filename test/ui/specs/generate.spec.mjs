@@ -14,7 +14,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const API = `http://localhost:${process.env.UI_TEST_PORT || 4011}/api`
 const VIEW = 'integration.pilot.view.Generate'
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ip-ui-'))
-const GROOVY = fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'sf-entra', 'buildErrorNotification.groovy'), 'utf8')
+const GROOVY = fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'users-summary', 'buildErrorMessage.groovy'), 'utf8')
 
 // --- helpers ------------------------------------------------------------------------------------
 
@@ -158,11 +158,11 @@ describe('Generate page', () => {
   it('imports an iFlow zip as the draft spec', async () => {
     await newChat()
     const { build } = require(path.join(ROOT, 'srv', 'iflow-builder', 'builder.js'))
-    const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'sf-entra', 'spec.json'), 'utf8'))
+    const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'users-summary', 'spec.json'), 'utf8'))
     const attachments = Object.fromEntries(
-      ['mapSfToEntra.groovy', 'buildErrorNotification.groovy'].map((f) => [f, fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'sf-entra', f), 'utf8')])
+      ['summarizeUsers.groovy', 'buildErrorMessage.groovy'].map((f) => [f, fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'users-summary', f), 'utf8')])
     )
-    const zip = path.join(TMP, 'sf-entra.zip')
+    const zip = path.join(TMP, 'users-summary.zip')
     fs.writeFileSync(zip, Buffer.from((await build(spec, { attachments })).zipBase64, 'base64'))
     await setFile('zip', zip)
     await browser.waitUntil(async () => (await chat('/messages')).some((m) => m.html.includes('Imported')), { timeout: 30000, timeoutMsg: 'no import summary' })

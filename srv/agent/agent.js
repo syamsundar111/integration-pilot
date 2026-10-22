@@ -31,7 +31,7 @@ const CUT_OFF_NOTE =
   'write each Groovy script with writeScript, then editDraftSpec with {"op":"set",...} and addSteps (at most 8 steps per call), then proposeIflow with { "useDraftSpec": true }.'
 const HISTORY_LIMIT = 40 // earlier user messages and answers sent back to the model
 const INTERRUPTED = 'Interrupted by server restart — please send your message again.'
-const PACKAGE_ID = /^[A-Za-z0-9.]+$/
+const { toPackageId } = require('../lib/package-id')
 const MAX_AUTH_NOTE = 500
 
 const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 'utf8')
@@ -56,8 +56,11 @@ function normalizeDefaults(d) {
   const timer = String(d.timer ?? '').trim()
   const authNote = String(d.authNote ?? '').trim()
   if (packageId) {
-    if (!PACKAGE_ID.test(packageId)) throw fail(400, 'INVALID_DEFAULTS', 'Default package id: use letters, digits and dots only (CPI does not allow underscores)')
-    out.packageId = packageId
+    // a Name with underscores or spaces -> its ID, as CPI does ("test_1" -> "test1")
+    const pkg = toPackageId(packageId)
+    if (!pkg.id) throw fail(400, 'INVALID_DEFAULTS', `Default package '${packageId}' has no letters or digits for a package ID`)
+    out.packageId = pkg.id
+    if (pkg.name) out.packageName = pkg.name
   }
   if (timer) {
     if (timer !== 'once') throw fail(400, 'INVALID_DEFAULTS', `Default timer '${timer}' is not supported; v1 only runs once after deployment ('once')`)
@@ -99,6 +102,7 @@ function defaultsContext(defaults, packageExists) {
   if (!defaults || !Object.keys(defaults).length) return ''
   const structured = {
     ...(defaults.packageId && { packageId: defaults.packageId }),
+    ...(defaults.packageName && { packageName: defaults.packageName }),
     ...(defaults.timer && { trigger: { type: 'timer', mode: defaults.timer } }),
     ...(defaults.authNote && { receiverAuthentication: defaults.authNote })
   }
@@ -110,7 +114,7 @@ function defaultsContext(defaults, packageExists) {
           : packageExists === false
             ? 'It does not exist on the tenant yet; the proposal panel lets the user create it. Do not call listPackages to look for it.'
             : 'Whether it exists was not checked.'
-      }`,
+      }${defaults.packageName ? ` The user named it '${defaults.packageName}': ${toPackageId(defaults.packageName).note} Say this in one line; do not ask about it.` : ''}`,
     defaults.timer && '- Use this trigger.',
     defaults.authNote &&
       '- Create every receiver with authType "None", and tell the user in your summary to set up this authentication in the CPI web editor after creation.'
@@ -471,6 +475,7 @@ async function importIntoSession({ sessionId, fileName, buffer, packageId, user 
   await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ draftSpec: JSON.stringify(draft) })))
 
   const { spec } = result
+  await tools.nameSession(user, sessionId, `${spec.name || spec.id}${spec.packageId ? ` · ${spec.packageId}` : ''}`)
   const stepList = (steps) => steps.map((s, i) => `${i + 1}. ${s.name}${/^REPLACE WITH /.test(s.description || '') ? ' *(placeholder)*' : ''}`).join('\n')
   const summary = [
     `Imported **${spec.name}** (\`${spec.id}\`) from ${fileName} as the draft spec: ${spec.trigger.type === 'timer' ? 'timer, run once' : `HTTPS ${spec.trigger.address}`}, ${spec.steps.length} steps.`,
@@ -537,4 +542,17 @@ async function recoverInterruptedTurns() {
   return stuck.length
 }
 
-module.exports = { startTurn, cancelTurn, deleteSession, importIntoSession, recoverInterruptedTurns, toProposalInfo, toolLabel, INTERRUPTED }
+/** Renames a conversation; from then on its name is not changed automatically */
+async function renameSession(sessionId, title, user) {
+  const { ChatSession } = E()
+  title = (title || '').replace(/\s+/g, ' ').trim()
+  if (!title) throw fail(400, 'TITLE_REQUIRED', 'Enter a name for the conversation.')
+  if (title.length > 200) throw fail(400, 'TITLE_TOO_LONG', 'The name can have at most 200 characters.')
+  return db(user, async (tx) => {
+    if (!(await tx.run(SELECT.one.from(ChatSession, sessionId).columns('ID')))) throw fail(404, 'SESSION_NOT_FOUND', `Chat session ${sessionId} not found`)
+    await tx.run(UPDATE(ChatSession, sessionId).set({ title, titleEdited: true }))
+    return tx.run(SELECT.one.from(ChatSession, sessionId).columns('ID', 'title', 'titleEdited', 'modifiedAt'))
+  })
+}
+
+module.exports = { startTurn, cancelTurn, deleteSession, renameSession, importIntoSession, recoverInterruptedTurns, toProposalInfo, toolLabel, INTERRUPTED }

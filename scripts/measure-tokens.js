@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Token measurement for one chat session: sends the SF -> Directory request (scripts/measure/)
+ * Token measurement for one chat session: sends the Users Summary request (scripts/measure/)
  * to a running server, answers follow-up questions, and stops at the first iFlow proposal.
  * Token usage is summed from the server log lines that srv/lib/llm.js writes per model call
  * ("<model>: <ms>ms, tokens prompt=<n> completion=<n> total=<n>"), so start the server with
@@ -8,7 +8,7 @@
  *
  *   node scripts/measure-tokens.js --log server.log [--api http://localhost:4005/api]
  *        [--defaults] [--label before] [--max-turns 5] [--out results.jsonl]
- *        [--request scripts/measure/sf-entra-improved-request.md] [--attach a.groovy,b.groovy]
+ *        [--request scripts/measure/users-summary-improved-request.md] [--attach a.groovy,b.groovy]
  *
  * --defaults sends the session defaults (package, timer, auth note) with every turn.
  * --request replaces the original request; --attach sends files with the first message.
@@ -38,20 +38,16 @@ const DIR = path.join(__dirname, 'measure')
 const FOLLOW_UP = 'Use sensible defaults for anything still open and propose the iFlow now.'
 // A unique iFlow id per run, so the proposal never clashes with an existing iFlow
 const suffix = `M${Date.now().toString(36)}`
-const unique = (text) =>
-  text
-    .replace(/Employee_Data_Replication_V1/g, `Employee_Data_Replication_${suffix}`)
-    .replace(/Employee Data Replication_V1/g, `Employee Data Replication_${suffix}`)
-    .replace(/RUNID/g, suffix) // generic requests mark the id with RUNID
-const REQUEST = unique(fs.readFileSync(opt('request', path.join(DIR, 'sf-entra-request.md')), 'utf8'))
+const unique = (text) => text.replace(/RUNID/g, suffix) // requests mark the id with RUNID
+const REQUEST = unique(fs.readFileSync(opt('request', path.join(DIR, 'users-summary-request.md')), 'utf8'))
 const ATTACH = (opt('attach', '') || '').split(',').filter(Boolean).map((f) => ({ fileName: path.basename(f), content: fs.readFileSync(f, 'utf8') }))
-// answers to clarifying questions: the SF -> Directory answers for the default request, else the generic follow-up
-const ANSWERS = opt('request') ? FOLLOW_UP : fs.readFileSync(path.join(DIR, 'sf-entra-answers.md'), 'utf8')
+// answers to clarifying questions: the Users Summary answers for the default request, else the generic follow-up
+const ANSWERS = opt('request') ? FOLLOW_UP : fs.readFileSync(path.join(DIR, 'users-summary-answers.md'), 'utf8')
 
 const DEFAULTS = {
-  packageId: 'DEV.SF.SourceApp.EC.to.Microsoft.Directory.ID',
+  packageId: 'IntegrationPilot.Demo',
   timer: 'once',
-  authNote: 'Both receivers (RCVR_SF_User, RCVR_SF_AccountLockOut) use OAuth2 SAML Bearer Assertion with credential DEMO_OAUTH; configure it in the CPI web editor after creation.'
+  authNote: 'Both receivers (RCVR_Users, RCVR_Todos) need no authentication; keep authType None.'
 }
 
 async function call(method, url, body) {

@@ -118,6 +118,8 @@ function stepOf(node, adaptersBySource) {
       if (p.subActivityType === 'GroovyScript')
         return { ...base, type: 'groovyScript', fileName: (p.script || '').replace(/\.groovy$/, ''), script: p.script, function: p.scriptFunction || 'processData' }
       return { ...base, type: 'script', language: p.subActivityType, script: p.script }
+    case 'ProcessCallElement':
+      return { ...base, type: 'processCall', processId: p.processId || p.subProcessId || null, activityType: p.activityType }
     case 'JsonToXmlConverter':
       return { ...base, type: 'jsonToXml' }
     case 'XmlToJsonConverter':
@@ -142,10 +144,14 @@ function stepOf(node, adaptersBySource) {
 function walk(container, include = () => true) {
   const nodes = {}
   const outgoing = {}
+  const flows = {} // source id -> [{ id, name, target, condition }]
   for (const el of elements(container)) {
     if (el.localName === 'extensionElements') continue
-    if (el.localName === 'sequenceFlow') (outgoing[el.getAttribute('sourceRef')] ||= []).push(el.getAttribute('targetRef'))
-    else if (include(el)) nodes[el.getAttribute('id')] = el
+    if (el.localName === 'sequenceFlow') {
+      ;(outgoing[el.getAttribute('sourceRef')] ||= []).push(el.getAttribute('targetRef'))
+      const condition = text(child(el, 'conditionExpression')).trim() || props(el).expression || ''
+      ;(flows[el.getAttribute('sourceRef')] ||= []).push({ id: el.getAttribute('id'), name: el.getAttribute('name') || '', target: el.getAttribute('targetRef'), condition })
+    } else if (include(el)) nodes[el.getAttribute('id')] = el
   }
   const startNode = Object.values(nodes).find((n) => n.localName === 'startEvent')
   const order = []
@@ -162,14 +168,92 @@ function walk(container, include = () => true) {
     queue.push(...next)
   }
   for (const [id, n] of Object.entries(nodes)) if (!seen.has(id)) order.push(n) // unconnected leftovers
-  return { order, startNode, linear }
+  return { order, startNode, linear, nodes, flows }
+}
+
+/**
+ * The main path of a branching flow: from the start event, at each fork the route with a condition
+ * (not the router's default route) that has the most steps up to an end. The other routes are side
+ * branches: their steps up to an end event, or up to the step where they rejoin the main path.
+ * @returns {{ path: Element[], branches: Object<string, { route: string, condition: string, isDefault: boolean, steps: string[], end: string|null, rejoin: string|null }[]> }}
+ */
+function mainPath({ startNode, nodes, flows }) {
+  if (!startNode) return { path: [], branches: {} }
+  const out = (id) => (flows[id] || []).filter((f) => nodes[f.target])
+  const memo = {}
+  const longest = (id, stack = new Set()) => {
+    if (id in memo) return memo[id]
+    if (stack.has(id)) return 0 // a loop back
+    stack.add(id)
+    const n = nodes[id]
+    const own = n && !['startEvent', 'endEvent'].includes(n.localName) ? 1 : 0
+    const best = Math.max(0, ...out(id).map((f) => longest(f.target, stack)))
+    stack.delete(id)
+    return (memo[id] = own + best)
+  }
+  const isDefault = (id, f) => nodes[id].getAttribute('default') === f.id
+  const choose = (id) => {
+    const all = out(id)
+    const conditional = all.filter((f) => !isDefault(id, f) && f.condition)
+    const candidates = conditional.length ? conditional : all.filter((f) => !isDefault(id, f)).length ? all.filter((f) => !isDefault(id, f)) : all
+    return candidates.reduce((best, f) => (longest(f.target) > longest(best.target) ? f : best))
+  }
+
+  const path = []
+  const onPath = new Set()
+  for (let id = startNode.getAttribute('id'); id && nodes[id] && !onPath.has(id); ) {
+    path.push(nodes[id])
+    onPath.add(id)
+    id = out(id).length ? choose(id).target : null
+  }
+
+  const label = (n) => n.getAttribute('name') || n.localName
+  const branches = {}
+  for (const n of path) {
+    const id = n.getAttribute('id')
+    const all = out(id)
+    if (all.length < 2) continue
+    const main = choose(id)
+    branches[id] = all.map((f, i) => {
+      const steps = []
+      let end = null
+      let rejoin = null
+      if (f !== main) {
+        const queue = [f.target]
+        const seen = new Set()
+        while (queue.length) {
+          const t = queue.shift()
+          if (seen.has(t) || !nodes[t]) continue
+          seen.add(t)
+          if (onPath.has(t)) {
+            rejoin ??= label(nodes[t])
+            continue
+          }
+          if (nodes[t].localName === 'endEvent') end ??= label(nodes[t])
+          else steps.push(label(nodes[t]))
+          queue.push(...out(t).map((x) => x.target))
+        }
+      }
+      return { route: f.name || `Route ${i + 1}`, condition: f.condition, isDefault: isDefault(id, f), main: f === main, steps, end, rejoin }
+    })
+  }
+  return { path, branches }
+}
+
+/** 'escalation', 'error', 'terminate' or 'message' (a plain or message end) */
+function endKind(node) {
+  if (!node) return null
+  if (child(node, 'escalationEventDefinition')) return 'escalation'
+  if (child(node, 'errorEventDefinition')) return 'error'
+  if (child(node, 'terminateEventDefinition')) return 'terminate'
+  return 'message'
 }
 
 // --- main ----------------------------------------------------------------------------
 
 /**
  * @param {Buffer|string} input - zip as Buffer or base64 string
- * @returns {Promise<{ id, name, description, trigger, steps, end, exceptionSubprocess, adapters, parameters, scripts, mappings, files, linear }>}
+ * @returns {Promise<{ id, name, description, trigger, steps, end, exceptionSubprocess, adapters, parameters, scripts, mappings, files, linear, mainPath }>}
  */
 async function parse(input) {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(String(input), 'base64')
@@ -220,7 +304,8 @@ async function parse(input) {
 
   // Exception subprocesses are reported separately, not as steps of the main flow
   const isExceptionSubprocess = (el) => el.localName === 'subProcess' && props(el).activityType === 'ErrorEventSubProcessTemplate'
-  const { order, startNode, linear: mainLinear } = walk(main, (el) => !isExceptionSubprocess(el))
+  const mainWalk = walk(main, (el) => !isExceptionSubprocess(el))
+  const { order, startNode, linear: mainLinear } = mainWalk
   let linear = mainLinear
   const exceptionSubprocesses = elements(main)
     .filter(isExceptionSubprocess)
@@ -230,7 +315,8 @@ async function parse(input) {
       return {
         id: el.getAttribute('id'),
         name: el.getAttribute('name'),
-        steps: inner.order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepOf(n, adaptersBySource))
+        steps: inner.order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepOf(n, adaptersBySource)),
+        end: endKind(inner.order.find((n) => n.localName === 'endEvent'))
       }
     })
 
@@ -258,6 +344,22 @@ async function parse(input) {
       ? { type: 'httpReceiver', system: endAdapter.system, url: endAdapter.address, method: endAdapter.method, authType: endAdapter.authType, credentialAlias: endAdapter.credentialAlias }
       : { type: 'receiver', adapter: endAdapter.type, system: endAdapter.system, address: endAdapter.address }
   if (endNodes.length > 1) linear = false
+
+  // Branching flows: the main path alone, with its end, and what the side branches do
+  let branching = null
+  if (!mainLinear || endNodes.length > 1) {
+    const { path, branches } = mainPath(mainWalk)
+    const mainEndNode = path.at(-1)?.localName === 'endEvent' ? path.at(-1) : null
+    const a = mainEndNode && adaptersBySource[mainEndNode.getAttribute('id')]
+    branching = {
+      steps: path.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => ({ ...stepOf(n, adaptersBySource), ...(branches[n.getAttribute('id')] && { routes: branches[n.getAttribute('id')] }) })),
+      end: !a
+        ? { type: 'none' }
+        : a.type === 'HTTP'
+          ? { type: 'httpReceiver', system: a.system, url: a.address, method: a.method, authType: a.authType, credentialAlias: a.credentialAlias }
+          : { type: 'receiver', adapter: a.type, system: a.system, address: a.address }
+    }
+  }
 
   // Parameters: values from parameters.prop, names also from parameters.propdef
   const parameters = parseProperties(file('src/main/resources/parameters.prop'))
@@ -290,8 +392,16 @@ async function parse(input) {
     scripts,
     mappings,
     linear,
+    mainPath: branching, // branching flows only: { steps (routers carry routes), end }
     exceptionSubprocess: exceptionSubprocesses[0] || null,
     localProcesses: processes.filter((p) => p !== main).map((p) => p.getAttribute('name')),
+    // their steps, for Process Calls the import can inline: [{ id, name, steps, linear }]
+    localProcessSteps: processes
+      .filter((p) => p !== main)
+      .map((p) => {
+        const w = walk(p)
+        return { id: p.getAttribute('id'), name: p.getAttribute('name'), linear: w.linear, steps: w.order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepOf(n, adaptersBySource)) }
+      }),
     files: Object.keys(zip.files).filter((f) => !zip.files[f].dir).map((f) => f.slice(root.length))
   }
 }
