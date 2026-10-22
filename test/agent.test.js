@@ -1448,6 +1448,17 @@ describe('header and property types (system prompt review, item 3)', () => {
 })
 
 describe('placeholder parameter defaults (system prompt review, item 4)', () => {
+  test('only a URL with <...> is a placeholder: a default that contains XML is configured', async () => {
+    const spec = { ...sample, id: 'Xml_Default_1', name: 'Xml Default 1', parameters: { ...sample.parameters, Template: '<root><item>1</item></root>' } }
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec })).mockResolvedValueOnce(answer('ready'))
+    const turn = await chat({ message: 'propose Xml_Default_1' })
+    cpi.updateConfiguration.mockClear()
+    await POST(`/api/Proposals/${turn.proposals[0].ID}/approve`, { deploy: false })
+    const done = await waitFor(turn.proposals[0].ID)
+    expect(done.result.steps.find((s) => s.key === 'configure')).toMatchObject({ status: 'done' })
+    expect(cpi.updateConfiguration).toHaveBeenCalledWith('Xml_Default_1', 'Template', '<root><item>1</item></root>')
+  })
+
   test('a placeholder default is not configured, and the iFlow is not deployed while one is left', async () => {
     const spec = { ...sample, id: 'Placeholder_URL_1', name: 'Placeholder URL 1', parameters: { ReceiverURL: 'https://<tenant>-rt.example.com/http/notify' } }
     llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec })).mockResolvedValueOnce(answer('ready'))

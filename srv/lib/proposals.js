@@ -16,8 +16,9 @@ const groovyCheck = require('./groovy-check')
 
 const LOG = cds.log('proposals')
 const POLL_INTERVAL_MS = Number(process.env.DEPLOY_POLL_INTERVAL_MS || 5_000)
-// a parameter default that is a placeholder, not a value: https://<tenant>/http/..., <your-host>
-const PLACEHOLDER_VALUE = /<[^<>\s][^<>]*>/
+// a URL parameter whose default is a placeholder, not a value: https://<tenant>/http/..., http://<host>:8080
+// (only URLs: a value with XML in it, like <root/>, is a real value)
+const PLACEHOLDER_VALUE = /^https?:\/\/\S*<[^<>\s/]+>/i
 const POLL_TIMEOUT_MS = Number(process.env.DEPLOY_POLL_TIMEOUT_MS || 120_000)
 const INTERRUPTED = 'Execution interrupted by server restart — retry'
 
