@@ -7,7 +7,7 @@
 const cds = require('@sap/cds')
 const cpi = require('../lib/cpi-client')
 const { validate, schema, GROOVY_IMPORT, GROOVY_ENTRY } = require('../iflow-builder/validator')
-const { build, injectAttachments } = require('../iflow-builder/builder')
+const { build } = require('../iflow-builder/builder')
 const attachmentStore = require('../lib/attachments')
 const groovyCheck = require('../lib/groovy-check')
 const { parse } = require('../iflow-builder/parser')
@@ -684,8 +684,12 @@ const handlers = {
         ]
       }
 
-    // compare with the scripts filled in: the current spec has code, the proposed one references attachments
-    const changes = describeChanges({ ...current.spec, resources: undefined }, { ...injectAttachments(spec, attachments), resources: undefined })
+    // steps are compared without script code (fileName only): a script change is reported once, as the script
+    const withoutCode = (sp) => {
+      const strip = (steps = []) => steps.map(({ code, ...s }) => s)
+      return { ...sp, resources: undefined, steps: strip(sp.steps), ...(sp.exceptionSubprocess && { exceptionSubprocess: { ...sp.exceptionSubprocess, steps: strip(sp.exceptionSubprocess.steps) } }) }
+    }
+    const changes = describeChanges(withoutCode(current.spec), withoutCode(spec))
     if (JSON.stringify(current.spec.resources || []) !== JSON.stringify(spec.resources || [])) changes.push('XSLT files changed')
     for (const f of spec.resources || []) if (current.resources?.[f] != null && current.resources[f] !== attachments[f]) changes.push(`${f} replaced`)
     for (const [f, status] of Object.entries(scripts)) if (status !== 'unchanged') changes.push(`script ${f} ${status === 'new' ? 'added' : 'changed'}`)

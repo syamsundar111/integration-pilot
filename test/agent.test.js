@@ -1393,7 +1393,8 @@ def Message processData(Message message) {
 
     const { data: p } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
     expect(p.attachments['addNotificationAttachment.groovy']).toBe(NEW)
-    expect(p.changes).toEqual({ list: [expect.stringMatching(/^steps: /), 'script addNotificationAttachment.groovy changed'], scripts: { 'addNotificationAttachment.groovy': 'changed' } })
+    // a script-only change is reported once, as the script (not also as "step settings changed")
+    expect(p.changes).toEqual({ list: ['script addNotificationAttachment.groovy changed'], scripts: { 'addNotificationAttachment.groovy': 'changed' } })
     // the answer ends with the actual changes, not the model's account of them
     expect(turn.text).toMatch(/\n---\n\*\*What changed in Notify_Update\*\* \(from the proposal, compared with the current iFlow\):\n/)
     expect(turn.text).toContain('- Script `addNotificationAttachment.groovy`: changed')
