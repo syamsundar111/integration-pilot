@@ -25,3 +25,14 @@ describe('deployment', () => {
     expect(srv).toMatch(/\n {6}instances: 1\n/)
   })
 })
+
+describe('Groovy check sidecar memory (review: 256M is below the Java buildpack reservations)', () => {
+  const fs = require('fs')
+  test.each(['mta.yaml', 'mta-sqlite.yaml'])('%s gives it 512M and sizes stacks, code cache and metaspace', (file) => {
+    const mta = fs.readFileSync(path.join(ROOT, file), 'utf8')
+    const sidecar = mta.split(/\n {2}- name: /).find((m) => m.startsWith('integration-pilot-groovy-check'))
+    expect(sidecar).toMatch(/\n {6}memory: 512M\n/)
+    expect(sidecar).toMatch(/memory_calculator: \{ stack_threads: 40 \}/)
+    expect(sidecar).toMatch(/JAVA_OPTS: '-XX:ReservedCodeCacheSize=64M -XX:MaxMetaspaceSize=96M -XX:MaxDirectMemorySize=10M'/)
+  })
+})
