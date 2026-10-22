@@ -142,4 +142,36 @@ realSidecar('groovy-check sidecar (real Groovy parser)', () => {
       errors: [{ fileName: 'broken.groovy', line: 2, column: 1, message: "Unexpected input: 'return' (reported at line 3:3; the problem is probably at line 2: def x = [1, 2)" }]
     })
   })
+
+  test('an import of a class that does not exist on CPI is reported (Test 16: MessageLogFactory)', async () => {
+    const code = [
+      'import com.sap.gateway.ip.core.customdev.util.Message',
+      'import com.sap.gateway.ip.core.customdev.util.MessageLogFactory',
+      '',
+      'def Message processData(Message message) {',
+      '    MessageLogFactory.getMessageLog().addAttachmentAsString("Notification", "x", "text/plain")',
+      '    return message',
+      '}',
+      ''
+    ].join('\n')
+    const fixed = code.replace('import com.sap.gateway.ip.core.customdev.util.MessageLogFactory\n', '').replace('MessageLogFactory.getMessageLog()', 'messageLogFactory.getMessageLog(message)')
+    const result = await withEnv({ GROOVY_CHECK_URL: `http://localhost:${port}`, GROOVY_CHECK_TOKEN: '' }, () =>
+      checkScripts([
+        { fileName: 'addNotificationAttachment.groovy', code },
+        { fileName: 'fixed.groovy', code: fixed }
+      ])
+    )
+    expect(result).toEqual({
+      checked: true,
+      errors: [
+        {
+          fileName: 'addNotificationAttachment.groovy',
+          line: 2,
+          column: 1,
+          message:
+            'unable to resolve class com.sap.gateway.ip.core.customdev.util.MessageLogFactory (no such class on CPI: messageLogFactory is a binding variable, use messageLogFactory.getMessageLog(message) without an import)'
+        }
+      ]
+    })
+  })
 })

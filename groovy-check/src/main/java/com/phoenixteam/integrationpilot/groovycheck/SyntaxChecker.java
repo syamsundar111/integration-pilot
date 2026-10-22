@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.codehaus.groovy.control.CompilationFailedException;
 import org.codehaus.groovy.control.CompilationUnit;
@@ -16,9 +18,15 @@ import org.codehaus.groovy.control.messages.SyntaxErrorMessage;
 import org.codehaus.groovy.syntax.SyntaxException;
 
 /**
- * Parse-only syntax check of a Groovy script: compiles up to the CONVERSION phase (source to
- * AST), so no SAP classes are needed and nothing is resolved, generated or executed. @Grab is
- * disabled, so a script cannot make the checker download anything.
+ * Syntax check of a Groovy script. First a parse (CONVERSION phase: source to AST); if that passes,
+ * a second compile up to SEMANTIC_ANALYSIS resolves the imports and class names against stub
+ * classes of the CPI script API (com.sap.gateway..., com.sap.it.api..., in this module). Nothing is
+ * generated or executed, and @Grab is disabled, so a script cannot make the checker download anything.
+ *
+ * Only unresolved classes in the CPI API packages the stubs cover completely are reported (e.g. the
+ * non-existent com.sap.gateway.ip.core.customdev.util.MessageLogFactory, which fails at runtime with
+ * "unable to resolve class"). Other unresolved imports (Camel, classes of other Groovy versions,
+ * libraries of the tenant) are not reported, so correct scripts are never blocked by a missing stub.
  */
 public final class SyntaxChecker {
 
@@ -42,6 +50,7 @@ public final class SyntaxChecker {
      */
     public static List<Error> check(String fileName, String code) {
         List<Error> errors = parse(fileName, code);
+        if (errors.isEmpty()) return resolve(fileName, code);
         if (errors.size() == 1 && errors.get(0).message().startsWith("Unexpected input")) {
             Integer culprit = locate(fileName, code);
             Error e = errors.get(0);
@@ -86,6 +95,39 @@ public final class SyntaxChecker {
             for (Message m : e.getErrorCollector().getErrors()) errors.add(toError(m));
         } catch (CompilationFailedException e) {
             errors.add(new Error(0, 0, e.getMessage()));
+        }
+        return errors;
+    }
+
+    /** CPI API packages whose classes all have stubs: an unknown class there does not exist on CPI */
+    static final Set<String> STRICT_PACKAGES = Set.of("com.sap.gateway.ip.core.customdev.util", "com.sap.it.api.msglog");
+    private static final Pattern UNRESOLVED = Pattern.compile("unable to resolve class ([A-Za-z_$][\\w$.]*)");
+
+    /** Unresolved classes of the strict CPI packages, after compiling up to semantic analysis */
+    static List<Error> resolve(String fileName, String code) {
+        CompilerConfiguration config = new CompilerConfiguration();
+        config.setDisabledGlobalASTTransformations(Set.of("groovy.grape.GrabAnnotationTransformation"));
+        config.setTolerance(10);
+        CompilationUnit unit = new CompilationUnit(config, null, new groovy.lang.GroovyClassLoader(SyntaxChecker.class.getClassLoader(), config));
+        unit.addSource(fileName, code);
+        List<Error> errors = new ArrayList<>();
+        try {
+            unit.compile(Phases.SEMANTIC_ANALYSIS);
+        } catch (MultipleCompilationErrorsException e) {
+            for (Message m : e.getErrorCollector().getErrors()) {
+                Error err = toError(m);
+                Matcher u = UNRESOLVED.matcher(err.message());
+                if (!u.find()) continue;
+                String cls = u.group(1);
+                int dot = cls.lastIndexOf('.');
+                if (dot < 0 || !STRICT_PACKAGES.contains(cls.substring(0, dot))) continue;
+                String hint = cls.endsWith(".MessageLogFactory") && !cls.startsWith("com.sap.it.api.msglog.")
+                    ? " (no such class on CPI: messageLogFactory is a binding variable, use messageLogFactory.getMessageLog(message) without an import)"
+                    : " (no such class in the CPI script API)";
+                errors.add(new Error(err.line(), err.column(), "unable to resolve class " + cls + hint));
+            }
+        } catch (CompilationFailedException e) {
+            // other failures are not import problems; the parse already passed
         }
         return errors;
     }

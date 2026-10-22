@@ -145,6 +145,20 @@ Prefer standard steps. Write Groovy only when no standard step fits. Groovy scri
 `import com.sap.gateway.ip.core.customdev.util.Message` and define
 `def Message processData(Message message)` that returns the message.
 
+Imports for the CPI script API (import nothing else from `com.sap...`; a wrong import compiles here
+but fails on CPI with "unable to resolve class"):
+- Message: `import com.sap.gateway.ip.core.customdev.util.Message` (always).
+- Message log: **no import**. `messageLogFactory` is a binding variable, like `message`:
+  `def messageLog = messageLogFactory.getMessageLog(message)`, then
+  `messageLog?.addAttachmentAsString(name, text, 'text/plain')`, `messageLog?.setStringProperty(name, value)`
+  or `messageLog?.addCustomHeaderProperty(name, value)`. Never import a `MessageLogFactory`, and never
+  call a static `MessageLogFactory.getMessageLog()`.
+- Value mapping: `import com.sap.it.api.ITApiFactory` and `import com.sap.it.api.mapping.ValueMappingApi`,
+  then `ITApiFactory.getApi(ValueMappingApi, null).getMappedValue(sourceAgency, sourceIdentifier, value, targetAgency, targetIdentifier)`.
+- Credentials: `import com.sap.it.api.ITApiFactory` and `import com.sap.it.api.securestore.SecureStoreService`,
+  then `ITApiFactory.getService(SecureStoreService, null).getUserCredential(alias)`.
+- JSON: `groovy.json.JsonSlurper` and `groovy.json.JsonOutput`.
+
 Write each script with `writeScript` before you propose the spec; it is syntax-checked right away
 and stored as a file of the conversation. Proposing checks every script again and reports
 `GROOVY_SYNTAX file:line:column: message`. Fix your own scripts by calling `writeScript` again with

@@ -102,3 +102,16 @@ describe('system prompt: calling another iFlow (manual test 16)', () => {
   })
 })
 
+describe('system prompt: CPI script API imports (Test 16)', () => {
+  test('messageLogFactory is a binding variable, never imported', () => {
+    expect(flat).toMatch(/Message log: \*\*no import\*\*\. `messageLogFactory` is a binding variable, like `message`/)
+    expect(flat).toMatch(/Never import a `MessageLogFactory`, and never call a static `MessageLogFactory\.getMessageLog\(\)`/)
+    expect(flat).not.toMatch(/import com\.sap\.gateway\.ip\.core\.customdev\.util\.MessageLogFactory/)
+  })
+
+  test('the correct imports of the common CPI APIs are listed', () => {
+    for (const i of ['com.sap.gateway.ip.core.customdev.util.Message', 'com.sap.it.api.ITApiFactory', 'com.sap.it.api.mapping.ValueMappingApi', 'com.sap.it.api.securestore.SecureStoreService'])
+      expect(flat).toContain(`import ${i}`)
+  })
+})
+

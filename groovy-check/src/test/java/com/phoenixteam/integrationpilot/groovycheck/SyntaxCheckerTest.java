@@ -80,4 +80,58 @@ class SyntaxCheckerTest {
         assertEquals(7, errors.get(0).line());
         assertTrue(errors.get(0).message().startsWith("Unexpected input: '{' (reported at line 4:16; the problem is probably at line 7: return date.format("), errors.get(0).message());
     }
+
+    @Test
+    void messageLogFactoryImportFromTheWrongPackageIsReported() {
+        // Test 16: CPI failed at runtime with "unable to resolve class" (HTTP 500)
+        String script = """
+                import com.sap.gateway.ip.core.customdev.util.Message
+                import com.sap.gateway.ip.core.customdev.util.MessageLogFactory
+
+                def Message processData(Message message) {
+                    MessageLogFactory.getMessageLog().addAttachmentAsString("Notification", "x", "text/plain")
+                    return message
+                }
+                """;
+        List<SyntaxChecker.Error> errors = SyntaxChecker.check("addNotificationAttachment.groovy", script);
+        assertEquals(1, errors.size());
+        assertEquals(2, errors.get(0).line());
+        assertEquals(1, errors.get(0).column());
+        assertTrue(errors.get(0).message().startsWith("unable to resolve class com.sap.gateway.ip.core.customdev.util.MessageLogFactory (no such class on CPI: messageLogFactory is a binding variable"), errors.get(0).message());
+    }
+
+    @Test
+    void correctCpiImportsAndTheBindingVariablePass() {
+        String script = """
+                import com.sap.gateway.ip.core.customdev.util.Message
+                import com.sap.gateway.ip.core.customdev.util.*
+                import com.sap.it.api.ITApiFactory
+                import com.sap.it.api.msglog.MessageLog
+                import com.sap.it.api.msglog.MessageLogFactory
+
+                def Message processData(Message message) {
+                    MessageLog log = messageLogFactory.getMessageLog(message)
+                    log?.addAttachmentAsString("Notification", message.getBody(String) ?: "", "text/plain")
+                    return message
+                }
+                """;
+        assertEquals(List.of(), SyntaxChecker.check("ok.groovy", script));
+    }
+
+    @Test
+    void unknownClassesInTheStrictCpiPackagesAreReported() {
+        String script = "import com.sap.it.api.msglog.MessageLogger\nimport com.sap.gateway.ip.core.customdev.util.Messages\nprintln 'x'\n";
+        List<SyntaxChecker.Error> errors = SyntaxChecker.check("typo.groovy", script);
+        assertEquals(2, errors.size());
+        assertTrue(errors.get(0).message().contains("com.sap.it.api.msglog.MessageLogger (no such class in the CPI script API)"), errors.get(0).message());
+        assertEquals(2, errors.get(1).line());
+    }
+
+    @Test
+    void importsOutsideTheStrictPackagesAreNotReported() {
+        // Camel, classes of other Groovy versions and other SAP packages are not stubbed: never a false error
+        String script = "import org.apache.camel.Exchange\nimport groovy.util.XmlSlurper\nimport com.sap.it.api.mapping.ValueMappingApi\nimport com.sap.it.api.securestore.SecureStoreService\nprintln 'x'\n";
+        assertEquals(List.of(), SyntaxChecker.check("other.groovy", script));
+    }
 }
+

@@ -83,8 +83,10 @@ Tab*, or use the Command Palette → *Ports: Preview* → 4005.
 Locally every request runs as `local-dev` with the `Admin` role (`srv/lib/dev-auth.js`).
 
 **Groovy syntax check.** `validateSpec` sends every Groovy script (written or attached) to the
-sidecar in `groovy-check/` (Groovy 4 parser, CONVERSION phase only: no SAP classpath, nothing is
-executed, `@Grab` is off) and returns errors as `GROOVY_SYNTAX file:line:column: message`. Run it next
+sidecar in `groovy-check/` (Groovy 4: a parse, then semantic analysis against stub classes of the
+CPI script API, so an import of a class that does not exist on CPI, such as
+`com.sap.gateway.ip.core.customdev.util.MessageLogFactory`, is reported; nothing is executed, `@Grab` is
+off) and returns errors as `GROOVY_SYNTAX file:line:column: message`. Run it next
 to the app with `npm run groovy-check` (port 4010) and set `GROOVY_CHECK_URL=http://localhost:4010`
 in `.env` (a `GROOVY_CHECK_URL` exported in the shell or by the editor wins over `.env`; failed checks
 log the URL used, the network cause and the sidecar's `/health` at that moment). Without it, scripts
