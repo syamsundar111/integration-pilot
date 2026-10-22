@@ -73,11 +73,19 @@ function javaDate(d) {
   return `${DAYS[d.getUTCDay()]} ${MONTHS[d.getUTCMonth()]} ${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC ${d.getUTCFullYear()}`
 }
 
-/** One MANIFEST.MF header, folded at 72 bytes with CRLF + space continuation lines */
+/**
+ * One MANIFEST.MF header, folded at 72 bytes with CRLF + space continuation lines. A fold never splits
+ * a UTF-8 character, and a line break in the value cannot start a header of its own.
+ */
 function manifestHeader(name, value) {
-  const bytes = Buffer.from(`${name}: ${value}`, 'utf8')
+  const bytes = Buffer.from(`${name}: ${String(value).replace(/[\r\n]+/g, ' ')}`, 'utf8')
   const lines = []
-  for (let i = 0, max = 72; i < bytes.length; i += max, max = 71) lines.push((lines.length ? ' ' : '') + bytes.subarray(i, i + max).toString('utf8'))
+  for (let i = 0, max = 72; i < bytes.length; max = 71) {
+    let end = Math.min(i + max, bytes.length)
+    while (end < bytes.length && end > i + 1 && (bytes[end] & 0xc0) === 0x80) end-- // back off to a character start
+    lines.push((lines.length ? ' ' : '') + bytes.subarray(i, end).toString('utf8'))
+    i = end
+  }
   return lines.join('\r\n') + '\r\n'
 }
 

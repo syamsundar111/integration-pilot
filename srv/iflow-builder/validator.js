@@ -291,6 +291,15 @@ function validate(spec, { attachments = [] } = {}) {
       err('SECRET', `${where}.code: contains a hard-coded secret — read credentials from deployed security material (SecureStoreService) instead`)
   }
 
+  // --- characters ------------------------------------------------------------------
+  // XML 1.0 does not allow control characters in the .iflw; a line break in a name or id would also
+  // start a new MANIFEST.MF header. Descriptions, bodies, values and code may span lines.
+  const NAME_FIELD = /(^|\.)(id|name|packageId|system|fileName|address)$/
+  walkStrings(spec, '', (value, path) => {
+    if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value)) err('CONTROL_CHARACTER', `${path || 'spec'}: contains a control character — remove it`)
+    else if (NAME_FIELD.test(path) && /[\r\n\t]/.test(value)) err('LINE_BREAK', `${path}: must be one line — remove line breaks and tabs`)
+  })
+
   // --- externalized parameters --------------------------------------------------
   const params = spec.parameters && typeof spec.parameters === 'object' ? spec.parameters : {}
   walkStrings({ trigger: spec.trigger, steps, end: spec.end, exceptionSubprocess: spec.exceptionSubprocess }, '', (value, path) => {

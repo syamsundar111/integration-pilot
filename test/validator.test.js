@@ -171,3 +171,28 @@ describe('duplicate names say where and what to do ((d) run: three identical fai
     ])
   })
 })
+
+describe('characters (full review: MANIFEST injection and control characters)', () => {
+  const { baseSpec } = require('./helpers')
+  const { manifestHeader } = require('../srv/iflow-builder/builder')
+  const { parseManifest } = require('../srv/iflow-builder/parser')
+
+  test('a line break in a name or id is refused; descriptions and bodies may span lines', () => {
+    expect(validate(baseSpec({ name: 'X\nSAP-BundleType: Evil' })).errors).toEqual(['name: must be one line — remove line breaks and tabs'])
+    expect(validate(baseSpec({ steps: [{ type: 'jsonToXml', name: 'a\tb' }] })).errors).toEqual(['steps[0].name: must be one line — remove line breaks and tabs'])
+    expect(validate(baseSpec({ description: 'line 1\nline 2', steps: [{ type: 'contentModifier', name: 'C', body: '{\n  "a": 1\n}' }] })).valid).toBe(true)
+  })
+
+  test('control characters are refused anywhere (XML 1.0 does not allow them)', () => {
+    const r = validate(baseSpec({ steps: [{ type: 'contentModifier', name: 'C', headers: [{ name: 'H', type: 'constant', value: 'a\u0001b' }] }] }))
+    expect(r.errors).toEqual(['steps[0].headers[0].value: contains a control character — remove it'])
+  })
+
+  test('MANIFEST.MF folding never splits a UTF-8 character, and a line break cannot add a header', () => {
+    const long = 'ä'.repeat(60) + '€🙂'.repeat(10)
+    const h = manifestHeader('Bundle-Name', long)
+    expect(h.split('\r\n').filter(Boolean).every((l) => Buffer.byteLength(l) <= 72)).toBe(true)
+    expect(parseManifest(h)['Bundle-Name']).toBe(long)
+    expect(Object.keys(parseManifest(manifestHeader('Bundle-Name', 'X\nSAP-BundleType: Evil')))).toEqual(['Bundle-Name'])
+  })
+})
