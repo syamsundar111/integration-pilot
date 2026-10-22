@@ -28,6 +28,8 @@ def Message processData(Message message) {
 }`
 
 describe('system prompt: unsupported steps', () => {
+  // the detailed rules are a conditional section (added when the conversation mentions such steps)
+  const flat = fs.readFileSync(path.join(__dirname, '../srv/agent/prompt-sections/unsupportedSteps.md'), 'utf8').replace(/\s+/g, ' ')
   test('never suggests HTTP calls from Groovy', () => {
     expect(flat).toMatch(/Never suggest HTTP calls from Groovy/)
     expect(flat).toMatch(/Every call to another system is a `requestReplyHttp` step or the `httpReceiver` end/)
@@ -194,6 +196,14 @@ describe('system prompt: OData and streaming (Test 3)', () => {
     expect(p).toMatch(/`new BigDecimal\(value\.toString\(\)\)`/)
     expect(p).toMatch(/Cannot get property 'UnitPrice' on null object/)
     expect(pattern).toContain(FIXTURE)
+  })
+})
+
+describe('system prompt: core and conditional sections', () => {
+  test('the core keeps the key rules of the conditional sections', () => {
+    expect(flat).toMatch(/Never suggest HTTP calls from Groovy, and never claim that a script splits a message\. An unsupported step becomes a placeholder Content Modifier `PH_<StepName>`/)
+    expect(flat).toMatch(/Files of the conversation are listed in the Context\. Reference them by name and never retype their content/)
+    expect(flat).not.toMatch(/What Groovy can and cannot replace/) // in the section
   })
 })
 

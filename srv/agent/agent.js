@@ -36,6 +36,20 @@ const MAX_AUTH_NOTE = 500
 
 const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 'utf8')
 
+/**
+ * Conditional system prompt sections (srv/agent/prompt-sections/*.md), appended after the core prompt
+ * only while a conversation needs them. The core stays first and identical in every call (a stable
+ * prefix for prompt caching); a section, once included, stays for the rest of the conversation
+ * (sticky), so the rules do not change between messages. Order is fixed, not the order of activation.
+ */
+const UNSUPPORTED_TEXT = /\b(router|splitter|gather|multicast|aggregator|join(?!\s+(to|with|on|by)\b)|xslt|(message|graphical|operation|xml|edmx|value)\s+mapping|mapping\s+(step|artifact)|sftp|write variables?|process ?call|processdirect|local integration process)\b/i
+const PROMPT_SECTIONS = [
+  // the conversation has files (attached, written by the assistant, from an iFlow or an import)
+  { name: 'attachedFiles', applies: ({ files }) => files.length > 0 },
+  // unsupported step kinds are mentioned, or the draft has REPLACE WITH placeholders (e.g. an import)
+  { name: 'unsupportedSteps', applies: ({ userText, placeholders }) => placeholders > 0 || UNSUPPORTED_TEXT.test(userText) }
+].map((s) => ({ ...s, text: fs.readFileSync(path.join(__dirname, 'prompt-sections', `${s.name}.md`), 'utf8').trim() }))
+
 const db = (user, fn) => cds.tx({ user }, fn)
 const E = () => cds.entities('iflowpilot')
 const fail = (status, code, message) => Object.assign(new Error(message), { status, code })
@@ -204,13 +218,14 @@ const STATUS_MEANING = {
 }
 
 /** System prompt + live context: date, session defaults and the status of this session's proposals */
-async function systemMessage(user, sessionId) {
+async function systemMessage(user, sessionId, message = '') {
   const { Proposal, ChatSession } = E()
   const { proposals, session } = await db(user, async (tx) => ({
     proposals: await tx.run(SELECT.from(Proposal).where({ session_ID: sessionId }).orderBy('createdAt')),
-    session: await tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults', 'draftSpec'))
+    session: await tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults', 'draftSpec', 'promptSections'))
   }))
   const defaults = session?.defaults ? JSON.parse(session.defaults) : null
+  const files = await attachmentStore.list(user, sessionId)
   const lines = proposals.map((p) => {
     const result = p.result ? JSON.parse(p.result) : {}
     const detail = p.status === 'REJECTED' ? ` — reason: ${result.reason || 'none given'}` : p.status === 'FAILED' ? ` — error: ${p.error}` : ''
@@ -223,9 +238,27 @@ async function systemMessage(user, sessionId) {
       : 'No proposals in this conversation yet.',
     defaultsContext(defaults, defaults?.packageId ? await packageExists(defaults.packageId) : undefined),
     draftContext(session?.draftSpec ? JSON.parse(session.draftSpec) : null),
-    attachmentsContext(await attachmentStore.list(user, sessionId))
+    attachmentsContext(files)
   ].filter(Boolean)
-  return { role: 'system', content: `${SYSTEM_PROMPT}\n\n## Context\n${context.join('\n')}` }
+  const sections = await promptSections(user, sessionId, session, { files, message })
+  return { role: 'system', content: `${SYSTEM_PROMPT}${sections.map((s) => `\n\n${s.text}`).join('')}\n\n## Context\n${context.join('\n')}` }
+}
+
+/** The conditional sections this conversation uses: those used before (sticky) plus those it needs now */
+async function promptSections(user, sessionId, session, { files, message }) {
+  const used = new Set(session?.promptSections ? JSON.parse(session.promptSections) : [])
+  const draft = session?.draftSpec ? JSON.parse(session.draftSpec).spec : null
+  const placeholders = [...(draft?.steps || []), ...(draft?.exceptionSubprocess?.steps || [])].filter((s) => /^REPLACE WITH /.test(s?.description || '')).length
+  const { ChatMessage } = E()
+  const past = await db(user, (tx) => tx.run(SELECT.from(ChatMessage).columns('content').where({ session_ID: sessionId, role: 'user' })))
+  const userText = [...past.map((m) => m.content || ''), message].join('\n')
+  const before = used.size
+  for (const s of PROMPT_SECTIONS) if (!used.has(s.name) && s.applies({ files, userText, placeholders })) used.add(s.name)
+  if (used.size !== before) {
+    const { ChatSession } = E()
+    await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ promptSections: JSON.stringify(PROMPT_SECTIONS.map((s) => s.name).filter((n) => used.has(n))) })))
+  }
+  return PROMPT_SECTIONS.filter((s) => used.has(s.name))
 }
 
 /**
@@ -384,7 +417,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
   }
   try {
     const past = await loadHistory(user, sessionId)
-    const system = await systemMessage(user, sessionId)
+    const system = await systemMessage(user, sessionId, message)
     let text = null
     let cutOffs = 0
 

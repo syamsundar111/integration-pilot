@@ -1487,3 +1487,41 @@ describe('streaming lint in writeScript (Test 3)', () => {
     expect(result).toMatchObject({ stored: 'parseBody.groovy', warnings: [expect.stringMatching(/^parseBody\.groovy:5: parses the whole message body as a String/)] })
   })
 })
+
+describe('conditional system prompt sections', () => {
+  const fs = require('fs')
+  const CORE = fs.readFileSync(`${__dirname}/../srv/agent/system-prompt.md`, 'utf8')
+  const systemOf = (n = -1) => llm.chat.mock.calls.at(n)[0].messages[0].content
+
+  test('a plain request gets the core only; the core is the identical beginning of every call', async () => {
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow that posts the order to https://example.org/orders' })
+    const system = systemOf()
+    expect(system.startsWith(CORE)).toBe(true)
+    expect(system.slice(CORE.length)).toMatch(/^\n\n## Context\n/)
+    expect(system).not.toContain('## Unsupported steps')
+  })
+
+  test('mentioning an unsupported step adds the section, and it stays for the rest of the conversation (sticky)', async () => {
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    const first = await chat({ message: 'Create an iFlow with a router and a splitter' })
+    expect(systemOf().startsWith(CORE + '\n\n## Unsupported steps\n')).toBe(true)
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ sessionId: first.sessionId, message: 'Use package P.' })
+    expect(systemOf()).toContain('\n\n## Unsupported steps\n')
+    const { data: session } = await GET(`/api/ChatSessions/${first.sessionId}`)
+    expect(JSON.parse(session.promptSections)).toEqual(['unsupportedSteps'])
+  })
+
+  test('files add the attached-files section; sections keep a fixed order, whatever came first', async () => {
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    const first = await chat({ message: 'Add a router' })
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    const groovy = 'import com.sap.gateway.ip.core.customdev.util.Message\ndef Message processData(Message message) { return message }\n'
+    await chat({ sessionId: first.sessionId, message: 'Use my script', attachments: [{ fileName: 'mine.groovy', content: groovy }] })
+    const system = systemOf()
+    expect(system.startsWith(CORE + '\n\n## Attached files (details)\n')).toBe(true) // attachedFiles before unsupportedSteps
+    expect(system.indexOf('## Attached files (details)')).toBeLessThan(system.indexOf('## Unsupported steps'))
+    expect(system.indexOf('## Unsupported steps')).toBeLessThan(system.indexOf('## Context'))
+  })
+})

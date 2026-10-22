@@ -35,98 +35,66 @@ const fn = (name, description, properties = {}, required = []) => ({
 })
 
 const definitions = [
-  fn('listPackages', 'List integration packages on the tenant (id, name, short text).'),
-  fn('listIflows', 'List the iFlows of one package.', { packageId: { type: 'string' } }, ['packageId']),
-  fn('getIflowDetails', 'Design-time details, externalized parameters and runtime status of one iFlow.', { iflowId: { type: 'string' } }, ['iflowId']),
-  fn(
-    'getRuntimeStatus',
-    'Runtime status of deployed artifacts. With iflowId: status of that iFlow, including the error text if it failed. Without: all deployed artifacts.',
-    { iflowId: { type: 'string' } }
-  ),
-  fn(
-    'getMessageLogs',
-    'Recent message processing logs, newest first.',
-    {
-      status: { type: 'string', enum: cpi.MESSAGE_STATUSES },
-      sinceHours: { type: 'integer', minimum: 1, maximum: 720 },
-      top: { type: 'integer', minimum: 1, maximum: 50 }
-    }
-  ),
-  fn(
-    'getSupportedSteps',
-    'The iFlow spec v1 format in short: what can be built and how to write a spec, with one example. Call once before proposing an iFlow. { "full": true } returns the complete JSON schema (rarely needed).',
-    { full: { type: 'boolean' } }
-  ),
-  fn(
-    'validateSpec',
-    'Check a spec with the same checks as proposing, without proposing it. proposeIflow validates too, so use this only after a failed proposal. Returns { valid: true } or compact errors "CODE path: message".',
-    {
-      spec: { type: 'object', description: 'Complete iFlow spec v1' },
-      useDraftSpec: { type: 'boolean', description: "true: validate the conversation's draft spec (see Context) instead of sending one" }
-    }
-  ),
+  fn('listPackages', 'Integration packages (id, name, short text).'),
+  fn('listIflows', 'iFlows of one package.', { packageId: { type: 'string' } }, ['packageId']),
+  fn('getIflowDetails', 'Details, parameters and runtime status of one iFlow.', { iflowId: { type: 'string' } }, ['iflowId']),
+  fn('getRuntimeStatus', 'Runtime status of deployed artifacts; with iflowId one iFlow, incl. its error.', { iflowId: { type: 'string' } }),
+  fn('getMessageLogs', 'Recent message processing logs, newest first.', {
+    status: { type: 'string', enum: cpi.MESSAGE_STATUSES },
+    sinceHours: { type: 'integer', minimum: 1, maximum: 720 },
+    top: { type: 'integer', minimum: 1, maximum: 50 }
+  }),
+  fn('getSupportedSteps', 'Spec v1 format in short, with an example. Call once before proposing. full: the JSON schema (rarely needed).', { full: { type: 'boolean' } }),
+  fn('validateSpec', 'Check a spec without proposing it; only after a failed proposal. Returns { valid } or errors "CODE path: message".', {
+    spec: { type: 'object' },
+    useDraftSpec: { type: 'boolean', description: 'validate the draft spec' }
+  }),
   fn(
     'writeScript',
-    'Write or replace one Groovy script of this conversation as plain code (never put Groovy code into a spec). Its syntax is checked right away. A groovyScript step then uses it with { "fileName": "<name>" } and no "code".',
-    {
-      fileName: { type: 'string', description: 'Without extension, e.g. mapUsers (letters, digits, underscore; starts with a letter)' },
-      code: { type: 'string', description: 'The complete Groovy script' }
-    },
+    'Write or replace one Groovy script (plain code, checked at once). Steps use it by fileName, without code.',
+    { fileName: { type: 'string', description: 'No extension, e.g. mapUsers' }, code: { type: 'string' } },
     ['fileName', 'code']
   ),
   fn(
     'editDraftSpec',
-    `Build or change the conversation's draft spec in small parts instead of sending the whole spec. ops run in order, all or none:
-{"op":"set","fields":{id,name,description,packageId,trigger,end,parameters,resources,exceptionSubprocess}} sets top-level fields (starts a new draft if there is none; exceptionSubprocess: {"name"} or null),
-{"op":"addSteps","steps":[...],"at":<index, default: the end>,"exception":<true: exception subprocess>},
-{"op":"replaceStep","index":<0-based>,"step":{...},"exception":<bool>},
-{"op":"removeStep","index":<0-based>,"exception":<bool>}.
-At most ${MAX_STEPS_PER_EDIT} steps added or replaced per call. Returns the draft outline and its open validation errors.`,
-    { ops: { type: 'array', items: { type: 'object' }, description: 'Edit operations, applied in order' } },
+    `Build or change the draft spec in parts; ops run in order, all or none:
+{"op":"set","fields":{id,name,description,packageId,trigger,end,parameters,resources,exceptionSubprocess}}
+{"op":"addSteps","steps":[...],"at":<index>,"exception":<bool>}
+{"op":"replaceStep","index":<0-based>,"step":{...},"exception":<bool>}
+{"op":"removeStep","index":<0-based>,"exception":<bool>}
+At most ${MAX_STEPS_PER_EDIT} steps per call. Returns the outline and open errors.`,
+    { ops: { type: 'array', items: { type: 'object' } } },
     ['ops']
   ),
   fn(
     'getSampleResponse',
-    'Public GET endpoint without authentication only: fetches one response and returns its structure (keys, types, short example values), truncated. Call it with the real URL (not a {{parameter}}) before writing a script that reads that response.',
-    { url: { type: 'string', description: 'The full http(s) URL, query included' } },
+    'Structure of one response of a public GET URL without auth (the real URL, not {{param}}); use it before writing a script that reads it.',
+    { url: { type: 'string' } },
     ['url']
   ),
   fn(
     'getPattern',
-    'A short worked pattern for a situation, loaded only when needed. processDirect: one iFlow calls another. updateIflow: change an existing iFlow. importedIflow: an imported iFlow is the draft. odata: a script reads an OData response (URL with /odata/ or .svc).',
+    'Worked pattern: processDirect (iFlow calls iFlow), updateIflow (change an existing iFlow), importedIflow (imported draft), odata (script reads OData).',
     { name: { type: 'string', enum: Object.keys(PATTERNS) } },
     ['name']
   ),
-  fn('getDraftSpec', "The conversation's draft spec (e.g. an imported iFlow), to change it. Scripts are attached files: keep their steps without code."),
-  fn('explainIflow', 'Parse an existing iFlow (trigger, steps, adapters, parameters, scripts) to explain it.', { iflowId: { type: 'string' } }, ['iflowId']),
-  fn(
-    'proposeIflow',
-    'Propose a new iFlow for the user to approve. Validates the spec and returns errors to fix, so send the complete spec here directly (no validateSpec before). A draft built with editDraftSpec: { "useDraftSpec": true }. Nothing is created until the user approves.',
-    {
-      useDraftSpec: { type: 'boolean', description: "true: propose the conversation's draft spec (built with editDraftSpec)" },
-      useValidatedSpec: { type: 'boolean', description: 'true: propose the spec the last validateSpec call accepted' },
-      spec: { type: 'object', description: 'Complete iFlow spec v1 (only if you did not validate it)' }
-    }
-  ),
-  fn(
-    'getIflowSpec',
-    'The current content of an existing iFlow as an iFlow spec v1, to change it with proposeIflowUpdate. Returns blockers instead if the iFlow contains things the spec cannot express (an update would lose them).',
-    { iflowId: { type: 'string' } },
-    ['iflowId']
-  ),
-  fn(
-    'proposeIflowUpdate',
-    'Propose new content for an EXISTING iFlow (same id and package). Start from getIflowSpec (its spec becomes the draft), change only what the user asked for with editDraftSpec, then call this with { "useDraftSpec": true }. Validates and returns errors to fix. Nothing changes until the user approves.',
-    {
-      useDraftSpec: { type: 'boolean', description: "true: propose the conversation's draft spec (built with editDraftSpec)" },
-      useValidatedSpec: { type: 'boolean', description: 'true: propose the spec the last validateSpec call accepted' },
-      spec: { type: 'object', description: 'Complete iFlow spec v1 of the updated iFlow (only if you did not validate it)' }
-    }
-  ),
+  fn('getDraftSpec', "The conversation's draft spec, to change it."),
+  fn('explainIflow', 'Parse an existing iFlow to explain it.', { iflowId: { type: 'string' } }, ['iflowId']),
+  fn('proposeIflow', 'Propose a NEW iFlow (validates; returns errors to fix). Send the complete spec, no validateSpec before.', {
+    spec: { type: 'object' },
+    useDraftSpec: { type: 'boolean', description: 'propose the draft (editDraftSpec)' },
+    useValidatedSpec: { type: 'boolean', description: 'propose the spec validateSpec accepted' }
+  }),
+  fn('getIflowSpec', 'Current content of an existing iFlow as a spec (it becomes the draft), or blockers.', { iflowId: { type: 'string' } }, ['iflowId']),
+  fn('proposeIflowUpdate', 'Propose new content for an EXISTING iFlow: getIflowSpec, editDraftSpec, then { useDraftSpec: true }. Validates.', {
+    spec: { type: 'object' },
+    useDraftSpec: { type: 'boolean', description: 'propose the draft (editDraftSpec)' },
+    useValidatedSpec: { type: 'boolean', description: 'propose the spec validateSpec accepted' }
+  }),
   fn(
     'proposePackage',
-    'Propose a new integration package for the user to approve (only if no suitable package exists).',
-    { id: { type: 'string', description: 'Package ID: letters, digits and dots. A name with underscores or spaces is turned into the ID the way CPI does (test_1 -> test1)' }, name: { type: 'string' }, shortText: { type: 'string' } },
+    'Propose a new package (only if none fits).',
+    { id: { type: 'string', description: 'Letters, digits, dots; a name like test_1 becomes test1' }, name: { type: 'string' }, shortText: { type: 'string' } },
     ['id', 'name']
   )
 ]

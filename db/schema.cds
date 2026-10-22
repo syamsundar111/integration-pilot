@@ -5,6 +5,7 @@ using { cuid, managed } from '@sap/cds/common';
 entity ChatSession : cuid, managed {
   title       : String(200);
   titleEdited : Boolean default false; // renamed by the user: automatic names (iFlow of a proposal or import) no longer apply
+  promptSections : String(200); // JSON array of conditional system prompt sections in use; sticky: only grows (srv/agent/agent.js)
   defaults    : LargeString; // JSON { packageId?, timer?, authNote? }: session defaults from the chat panel
   draftSpec   : LargeString; // JSON { spec, source, at }: the conversation's working spec (e.g. an imported iFlow); scripts are attachments
   messages    : Composition of many ChatMessage on messages.session = $self;
