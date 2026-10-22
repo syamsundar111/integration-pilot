@@ -209,8 +209,12 @@ module.exports = class ApiService extends cds.ApplicationService {
 
     this.on('remove', 'Attachments', async (req) => {
       const id = keyOf(req)
-      const n = await DELETE.from('iflowpilot.Attachment', id)
-      if (!n) req.reject(404, `Attachment ${id} not found`)
+      // only in the user's own conversations; another user's attachment looks like a missing one
+      // checked in the request's own transaction (a second transaction would wait for it on SQLite)
+      const a = await SELECT.one.from('iflowpilot.Attachment', id).columns('session_ID')
+      const owned = a && (await SELECT.one.from('iflowpilot.ChatSession').columns('ID').where({ ID: a.session_ID, createdBy: req.user.id }))
+      if (!owned) return req.reject(404, `Attachment ${id} not found`)
+      await DELETE.from('iflowpilot.Attachment', id)
     })
 
     this.on('remove', 'ChatSessions', (req) => {

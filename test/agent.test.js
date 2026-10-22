@@ -325,7 +325,7 @@ describe('async turns', () => {
     const { recoverInterruptedTurns, INTERRUPTED } = require('../srv/agent/agent')
     const sessionId = cds.utils.uuid()
     const turnId = cds.utils.uuid()
-    await INSERT.into('iflowpilot.ChatSession').entries({ ID: sessionId, title: 'x' })
+    await INSERT.into('iflowpilot.ChatSession').entries({ ID: sessionId, title: 'x', createdBy: 'local-dev' }) // owned by the test user
     await INSERT.into('iflowpilot.ChatTurn').entries({ ID: turnId, session_ID: sessionId, status: 'RUNNING', message: 'lost?', events: '[]' })
     expect(await recoverInterruptedTurns()).toBe(1)
     const { data } = await GET(`/api/chat/turns/${turnId}`)
@@ -1587,5 +1587,56 @@ describe('cut-off answers keep their finished tool calls ((d) run: 3 cut-offs of
     const { data: files } = await GET(`/api/Attachments?$filter=session_ID eq ${turn.sessionId}`)
     expect(files).toEqual([])
     expect(turn.events.map((e) => e.label)).toContain('Answer cut off at the length limit — continuing in parts')
+  })
+})
+
+describe('conversations are private (full review #5)', () => {
+  const asB = { headers: { 'x-test-user': 'user-b' } }
+  const groovy = 'import com.sap.gateway.ip.core.customdev.util.Message\ndef Message processData(Message message) { return message }\n'
+  const status = (p) => p.then((r) => r.status, (e) => e.response?.status)
+
+  test('user B cannot read user A conversation, messages, turns or attachments', async () => {
+    llm.chat.mockResolvedValueOnce(answer('hello A'))
+    const a = await chat({ message: 'A asks', attachments: [{ fileName: 'mine.groovy', content: groovy }] })
+    // A sees everything
+    expect((await GET(`/api/ChatSessions/${a.sessionId}`)).status).toBe(200)
+    // B sees nothing of it
+    expect(await status(GET(`/api/ChatSessions/${a.sessionId}`, asB))).toBe(404)
+    expect((await GET('/api/ChatSessions', asB)).data.map((s) => s.ID)).not.toContain(a.sessionId)
+    expect((await GET(`/api/ChatMessages?$filter=session_ID eq ${a.sessionId}`, asB)).data).toEqual([])
+    expect(await status(GET(`/api/ChatTurns/${a.turnId}`, asB))).toBe(404)
+    expect(await status(GET(`/api/chat/turns/${a.turnId}`, asB))).toBe(404)
+    expect((await GET(`/api/Attachments?$filter=session_ID eq ${a.sessionId}`, asB)).data).toEqual([])
+  })
+
+  test('user B cannot change user A conversation: send, rename, delete, import, remove an attachment, cancel a turn', async () => {
+    llm.chat.mockResolvedValueOnce(answer('hello A'))
+    const a = await chat({ message: 'A asks', attachments: [{ fileName: 'mine.groovy', content: groovy }] })
+    const [att] = (await GET(`/api/Attachments?$filter=session_ID eq ${a.sessionId}`)).data
+    expect(await status(POST('/api/chat', { sessionId: a.sessionId, message: 'B writes' }, asB))).toBe(404)
+    expect(await status(POST(`/api/ChatSessions/${a.sessionId}/rename`, { title: 'taken over' }, asB))).toBe(404)
+    expect(await status(POST(`/api/ChatSessions/${a.sessionId}/remove`, {}, asB))).toBe(404)
+    expect(await status(POST(`/api/Attachments/${att.ID}/remove`, {}, asB))).toBe(404)
+    const { build } = require('../srv/iflow-builder/builder')
+    const zip = (await build({ ...sample, id: 'Private_Import' })).zipBase64
+    expect(await status(POST('/api/importIflow', { sessionId: a.sessionId, fileName: 'x.zip', contentBase64: zip }, asB))).toBe(404)
+
+    // a running turn of A cannot be cancelled by B
+    let release
+    llm.chat.mockImplementationOnce(() => new Promise((r) => (release = () => r(answer('done')))))
+    const { data: running } = await POST('/api/chat', { sessionId: a.sessionId, message: 'slow' })
+    expect(await status(POST(`/api/ChatTurns/${running.turnId}/cancel`, {}, asB))).toBe(404)
+    release()
+
+    // nothing of A changed
+    const { data: session } = await GET(`/api/ChatSessions/${a.sessionId}`)
+    expect(session.title).not.toBe('taken over')
+    expect((await GET(`/api/Attachments?$filter=session_ID eq ${a.sessionId}`)).data).toHaveLength(1)
+  })
+
+  test('proposals stay visible to all admins', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Shared_Proposal', name: 'Shared Proposal' } })).mockResolvedValueOnce(answer('ready'))
+    const a = await chat({ message: 'propose it' })
+    expect((await GET(`/api/Proposals/${a.proposals[0].ID}`, asB)).data).toMatchObject({ iflowId: 'Shared_Proposal' })
   })
 })

@@ -162,12 +162,22 @@ async function packageExists(id) {
 
 // --- persistence -------------------------------------------------------------------
 
+/**
+ * The conversation if `user` owns it (createdBy), else a 404: conversations are private, and another
+ * user's conversation answers like a missing one. Every entry that takes a session id checks this; the
+ * agent's own database access does not go through the service's @restrict.
+ */
+async function ownSession(tx, user, sessionId, columns = ['ID']) {
+  const s = await tx.run(SELECT.one.from(E().ChatSession).columns(...columns).where({ ID: sessionId, createdBy: user?.id ?? null }))
+  if (!s) throw fail(404, 'SESSION_NOT_FOUND', `Chat session ${sessionId} not found`)
+  return s
+}
+
 async function ensureSession(user, sessionId, firstMessage) {
   const { ChatSession } = E()
   return db(user, async (tx) => {
     if (sessionId) {
-      const s = await tx.run(SELECT.one.from(ChatSession, sessionId))
-      if (!s) throw fail(404, 'SESSION_NOT_FOUND', `Chat session ${sessionId} not found`)
+      await ownSession(tx, user, sessionId)
       return sessionId
     }
     const ID = cds.utils.uuid()
@@ -550,8 +560,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
 async function importIntoSession({ sessionId, fileName, buffer, packageId, user }) {
   const { ChatSession, ChatTurn } = E()
   if (sessionId) {
-    const s = await db(user, (tx) => tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults')))
-    if (!s) throw fail(404, 'SESSION_NOT_FOUND', `Chat session ${sessionId} not found`)
+    const s = await db(user, (tx) => ownSession(tx, user, sessionId, ['defaults']))
     packageId ||= s.defaults ? JSON.parse(s.defaults).packageId : undefined
     if (await db(user, (tx) => tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' }))))
       throw fail(409, 'TURN_IN_PROGRESS', 'The assistant is still working in this conversation. Wait for it or cancel it, then import.')
@@ -587,6 +596,9 @@ async function cancelTurn(turnId, user) {
   await db(user, async (tx) => {
     const t = await tx.run(SELECT.one.from(ChatTurn, turnId))
     if (!t) throw fail(404, 'TURN_NOT_FOUND', `Turn ${turnId} not found`)
+    await ownSession(tx, user, t.session_ID).catch(() => {
+      throw fail(404, 'TURN_NOT_FOUND', `Turn ${turnId} not found`) // another user's turn looks like a missing one
+    })
     if (t.status !== 'RUNNING') throw fail(409, 'TURN_NOT_RUNNING', `Turn is ${t.status}; only running turns can be cancelled.`)
     await tx.run(UPDATE(ChatTurn, turnId).set({ cancelRequested: true }))
   })
@@ -601,7 +613,7 @@ async function cancelTurn(turnId, user) {
 async function deleteSession(sessionId, user) {
   const { ChatSession, ChatMessage, ChatTurn, Proposal, Attachment } = E()
   await db(user, async (tx) => {
-    if (!(await tx.run(SELECT.one.from(ChatSession, sessionId)))) throw fail(404, 'SESSION_NOT_FOUND', `Chat session ${sessionId} not found`)
+    await ownSession(tx, user, sessionId)
     if (await tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' })))
       throw fail(409, 'TURN_IN_PROGRESS', 'The assistant is still working in this conversation. Wait for it or cancel it, then delete.')
     if (await tx.run(SELECT.one.from(Proposal).columns('ID').where({ session_ID: sessionId, status: 'APPROVED' })))
@@ -638,7 +650,7 @@ async function renameSession(sessionId, title, user) {
   if (!title) throw fail(400, 'TITLE_REQUIRED', 'Enter a name for the conversation.')
   if (title.length > 200) throw fail(400, 'TITLE_TOO_LONG', 'The name can have at most 200 characters.')
   return db(user, async (tx) => {
-    if (!(await tx.run(SELECT.one.from(ChatSession, sessionId).columns('ID')))) throw fail(404, 'SESSION_NOT_FOUND', `Chat session ${sessionId} not found`)
+    await ownSession(tx, user, sessionId)
     await tx.run(UPDATE(ChatSession, sessionId).set({ title, titleEdited: true }))
     return tx.run(SELECT.one.from(ChatSession, sessionId).columns('ID', 'title', 'titleEdited', 'modifiedAt'))
   })

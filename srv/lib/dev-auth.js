@@ -8,6 +8,8 @@ const cds = require('@sap/cds')
 const user = new cds.User({ id: process.env.DEV_USER || 'local-dev', roles: ['Admin'] })
 
 module.exports = function dev_auth(req, _res, next) {
-  cds.context.user = req.user = user
+  // tests only (NODE_ENV=test): a second user via the x-test-user header, to test per-user access
+  const testUser = process.env.NODE_ENV === 'test' && req.headers['x-test-user']
+  cds.context.user = req.user = testUser ? new cds.User({ id: String(testUser), roles: ['Admin'] }) : user
   next()
 }

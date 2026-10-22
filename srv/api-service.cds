@@ -273,6 +273,11 @@ service ApiService {
    * POST /api/chat/turns/{id}/cancel
    */
   @readonly
+  // Conversations are private: each user sees and changes only their own (createdBy); proposals and
+  // the audit log stay visible to all admins. Reads are filtered here; the actions (cancel, rename,
+  // remove) check ownership in srv/agent/agent.js (ownSession), not here: an instance check here runs
+  // in the request transaction while the agent opens its own, which deadlocks on SQLite.
+  @restrict: [{ grant: 'READ', to: 'Admin', where: 'session.createdBy = $user' }, { grant: 'cancel', to: 'Admin' }]
   entity ChatTurns    as projection on db.ChatTurn actions {
     action cancel() returns ChatTurns;
   };
@@ -283,12 +288,14 @@ service ApiService {
    * POST /api/ChatSessions/{id}/rename { title } (a renamed conversation keeps its name)
    */
   @readonly
+  @restrict: [{ grant: 'READ', to: 'Admin', where: 'createdBy = $user' }, { grant: ['remove', 'rename'], to: 'Admin' }]
   entity ChatSessions as projection on db.ChatSession actions {
     action remove();
     action rename(title : String) returns ChatSessions;
   };
 
   @readonly
+  @restrict: [{ grant: 'READ', to: 'Admin', where: 'session.createdBy = $user' }]
   entity ChatMessages as projection on db.ChatMessage;
 
   /**
@@ -296,6 +303,7 @@ service ApiService {
    * POST /api/Attachments/{id}/remove
    */
   @readonly
+  @restrict: [{ grant: 'READ', to: 'Admin', where: 'session.createdBy = $user' }, { grant: 'remove', to: 'Admin' }]
   entity Attachments  as projection on db.Attachment excluding { content } actions {
     action remove();
   };
