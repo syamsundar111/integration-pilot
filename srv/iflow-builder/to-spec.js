@@ -115,6 +115,17 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
 
   if (blockers.length) return { spec: null, blockers }
 
+  // a parameter address with a Query field ({{P}} + ?$format=json): the spec keeps url {{P}} and the
+  // query in the parameter's default, as the builder expects (see splitParameters)
+  const rejoin = (call) => {
+    const m = call?.url?.match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}\?(.+)$/)
+    if (!m || m[2].includes('{{')) return call
+    parameters[m[1]] = `${parameters[m[1]] ?? ''}?${m[2]}`
+    return { ...call, url: `{{${m[1]}}}` }
+  }
+  for (const list of [steps, exceptionSubprocess?.steps]) if (list) list.forEach((s, i) => (list[i] = s.type === 'requestReplyHttp' ? rejoin(s) : s))
+  if (end?.type === 'httpReceiver') end = rejoin(end)
+
   const spec = {
     id: parsed.id,
     name: parsed.name,

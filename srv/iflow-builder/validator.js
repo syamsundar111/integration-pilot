@@ -241,9 +241,16 @@ function validate(spec, { attachments = [] } = {}) {
 
   const httpCalls = steps.map((s, i) => [s, `steps[${i}]`]).filter(([s]) => s?.type === 'requestReplyHttp')
   if (spec.end?.type === 'httpReceiver') httpCalls.push([spec.end, 'end'])
-  for (const [call, where] of httpCalls)
+  const warnings = []
+  for (const [call, where] of httpCalls) {
     if (typeof call.url === 'string' && /^https?:\/\/[^/@\s]+:[^/@\s]+@/.test(call.url))
       err('URL_CREDENTIALS', `${where}.url: contains user:password — remove it; ${AUTH_HINT}`)
+    // CPI keeps the query in the receiver's Query field; the builder splits it off the address
+    const param = typeof call.url === 'string' && call.url.match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
+    const full = param ? String(spec.parameters?.[param] ?? '') : String(call.url ?? '')
+    if (full.includes('?'))
+      warnings.push(`${where}.url: the query "${full.slice(full.indexOf('?') + 1)}" is written to the receiver's Query field, not the Address${param ? `; the parameter ${param} holds the URL before '?'` : ''}`)
+  }
 
   // --- no plaintext secrets ------------------------------------------------------------
   for (const [s, where] of allSteps) {
@@ -285,7 +292,7 @@ function validate(spec, { attachments = [] } = {}) {
   })
 
   const unique = issues.filter((i, n) => issues.findIndex((x) => x.message === i.message) === n)
-  return { valid: unique.length === 0, errors: unique.map((i) => i.message), issues: unique }
+  return { valid: unique.length === 0, errors: unique.map((i) => i.message), issues: unique, warnings }
 }
 
 /**

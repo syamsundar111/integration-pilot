@@ -42,6 +42,8 @@ sap.ui.define(
     /** Groovy check status of one script for the proposal panel */
     function scriptStatus(fileName, check) {
       if (!check) return { checkText: 'No check result', checkState: 'None' }
+      if (check.status === 'ok' && (check.warnings || []).length)
+        return { checkText: `Syntax checked: no errors · ${check.warnings.map((w) => `line ${w}`).join('; ')}`, checkState: 'Warning' }
       if (check.status === 'ok') return { checkText: 'Syntax checked: no errors', checkState: 'Success' }
       if (check.status === 'failed') return { checkText: `Syntax error: ${(check.errors || []).map((e) => `${fileName}:${e}`).join('; ')}`, checkState: 'Error' }
       return { checkText: `Not checked: ${check.reason || 'the Groovy check was unavailable'}`, checkState: 'Warning' }

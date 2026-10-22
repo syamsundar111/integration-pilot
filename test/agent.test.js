@@ -10,7 +10,7 @@ process.env.DEPLOY_POLL_TIMEOUT_MS = '300'
 jest.mock('../srv/lib/llm', () => ({ chat: jest.fn(), health: jest.fn() }))
 jest.mock('../srv/lib/groovy-check', () => {
   const actual = jest.requireActual('../srv/lib/groovy-check')
-  const mock = { checkScripts: jest.fn(async () => ({ checked: true, errors: [] })), required: jest.fn(() => false) }
+  const mock = { checkScripts: jest.fn(async () => ({ checked: true, errors: [] })), required: jest.fn(() => false), lint: actual.lint }
   // the real per-file logic on top of the mocked sidecar call
   mock.checkSpecScripts = (spec, attachments) => actual.checkSpecScripts(spec, attachments, { check: (s) => mock.checkScripts(s) })
   return mock
@@ -1463,5 +1463,27 @@ describe('placeholder parameter defaults (system prompt review, item 4)', () => 
     expect(step('runtime')).toMatchObject({ status: 'skipped' })
     expect(cpi.updateConfiguration).not.toHaveBeenCalled()
     expect(cpi.deployIflow).not.toHaveBeenCalled()
+  })
+})
+
+describe('receiver URL with a query (Test 3)', () => {
+  test('approval configures the parameter with the URL before the query', async () => {
+    const spec = { ...sample, id: 'Query_URL_1', name: 'Query URL 1', parameters: { ReceiverURL: 'https://services.odata.org/V2/Northwind/Northwind.svc/Products?$format=json&$top=20' } }
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec })).mockResolvedValueOnce(answer('ready'))
+    const turn = await chat({ message: 'propose Query_URL_1' })
+    cpi.updateConfiguration.mockClear()
+    await POST(`/api/Proposals/${turn.proposals[0].ID}/approve`, { deploy: false })
+    expect(await waitFor(turn.proposals[0].ID)).toMatchObject({ status: 'DONE' })
+    expect(cpi.updateConfiguration).toHaveBeenCalledWith('Query_URL_1', 'ReceiverURL', 'https://services.odata.org/V2/Northwind/Northwind.svc/Products')
+  })
+})
+
+describe('streaming lint in writeScript (Test 3)', () => {
+  test('a script that parses the body as a String is stored, with a warning', async () => {
+    const code = 'import com.sap.gateway.ip.core.customdev.util.Message\nimport groovy.json.JsonSlurper\n\ndef Message processData(Message message) {\n    def json = new JsonSlurper().parseText(message.getBody(String))\n    return message\n}\n'
+    llm.chat.mockResolvedValueOnce(toolCall('writeScript', { fileName: 'parseBody', code })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'write it' })
+    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result).toMatchObject({ stored: 'parseBody.groovy', warnings: [expect.stringMatching(/^parseBody\.groovy:5: parses the whole message body as a String/)] })
   })
 })

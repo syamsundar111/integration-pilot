@@ -174,4 +174,32 @@ realSidecar('groovy-check sidecar (real Groovy parser)', () => {
       ]
     })
   })
+
+  test('the OData example of the odata pattern passes the check', async () => {
+    const code = fs.readFileSync(path.join(__dirname, 'fixtures', 'odata', 'filterProducts.groovy'), 'utf8')
+    const result = await withEnv({ GROOVY_CHECK_URL: `http://localhost:${port}`, GROOVY_CHECK_TOKEN: '' }, () => checkScripts([{ fileName: 'filterProducts.groovy', code }]))
+    expect(result).toEqual({ checked: true, errors: [] })
+  })
 })
+
+describe('streaming lint (Test 3: CPI script check "High: parsing the message body without streaming")', () => {
+  const { lint, checkSpecScripts } = require('../srv/lib/groovy-check')
+  const advice = 'parses the whole message body as a String (CPI script check: High, no streaming); use new JsonSlurper().parse(message.getBody(java.io.Reader.class)) instead'
+
+  test('parseText of the body is reported, directly or through a variable; streamed parsing and properties are not', () => {
+    expect(lint('import groovy.json.JsonSlurper\ndef j = new JsonSlurper().parseText(message.getBody(String))')).toEqual([{ line: 2, message: advice }])
+    expect(lint("def body = message.getBody(String) ?: ''\ndef j = new JsonSlurper().parseText(body)")).toEqual([{ line: 2, message: advice }])
+    expect(lint('def x = new XmlSlurper().parseText(message.getBody(java.lang.String.class))')[0].message).toMatch(/use new XmlSlurper\(\)\.parse\(message\.getBody\(java\.io\.Reader\.class\)\)/)
+    expect(lint('def j = new JsonSlurper().parse(message.getBody(java.io.Reader.class))')).toEqual([])
+    expect(lint("def j = new JsonSlurper().parseText(message.getProperty('UsersJson'))")).toEqual([])
+    expect(lint(fs.readFileSync(path.join(__dirname, 'fixtures', 'odata', 'filterProducts.groovy'), 'utf8'))).toEqual([])
+  })
+
+  test('the proposal check keeps the script ok and adds the warning', async () => {
+    const spec = { steps: [{ type: 'groovyScript', name: 'Parse', fileName: 'parse' }] }
+    const code = 'def j = new groovy.json.JsonSlurper().parseText(message.getBody(String))'
+    const r = await checkSpecScripts(spec, { 'parse.groovy': code }, { check: async () => ({ checked: true, errors: [] }) })
+    expect(r.files['parse.groovy']).toMatchObject({ status: 'ok', warnings: [`1: ${advice}`] })
+  })
+})
+

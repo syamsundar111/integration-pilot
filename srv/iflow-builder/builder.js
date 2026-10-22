@@ -89,11 +89,31 @@ function manifestHeader(name, value) {
 const RECEIVER_AUTH_METHOD = 'None'
 const HTTP_ADDRESS_ATTRIBUTE = () => tpl('propdef-attribute-http-address.txt').trim()
 
-function splitUrl(url) {
-  if (/^\{\{.*\}\}$/.test(url)) return { address: url, query: '' }
+function splitUrl(url, params = {}) {
+  const param = String(url).match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
+  // a parameter URL: the query of its default goes to the Query field, the address stays the parameter
+  if (param) return { address: url, query: paramQueries(params)[param] || '' }
   const i = url.indexOf('?')
   return i < 0 ? { address: url, query: '' } : { address: url.slice(0, i), query: url.slice(i + 1) }
 }
+
+/**
+ * Parameter defaults with a query (https://host/Products?$format=json): CPI keeps the query in the
+ * receiver's Query field (httpAddressQuery), not in the Address, so the parameter holds the base URL.
+ * @returns {{ params: object, queries: Object<string, string> }} defaults without query, and each query
+ */
+function splitParameters(parameters = {}) {
+  const params = {}
+  const queries = {}
+  for (const [k, v] of Object.entries(parameters || {})) {
+    const s = String(v ?? '')
+    const i = /^https?:\/\//i.test(s) ? s.indexOf('?') : -1
+    params[k] = i < 0 ? v : s.slice(0, i)
+    if (i >= 0) queries[k] = s.slice(i + 1)
+  }
+  return { params, queries }
+}
+const paramQueries = (parameters) => splitParameters(parameters).queries
 
 // --- layout ----------------------------------------------------------------------
 
@@ -256,7 +276,8 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const addReceiver = (sourceNode, call, system, placement) => {
     const p = { id: nextId('Participant'), kind: 'receiver', name: system, ...placement }
     participants.push(p)
-    const { address, query } = splitUrl(call.url)
+    const { address, query } = splitUrl(call.url, spec.parameters)
+    if (address.includes('?')) throw Object.assign(new Error(`receiver ${system}: the address still contains '?'`), { errors: [`receiver ${system}: the address must not contain '?'; the query belongs in the Query field`] })
     const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id }
     mf.vars = {
       SOURCE: sourceNode.id,
@@ -333,7 +354,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
 
   // --- bundle files ------------------------------------------------------------------
   const date = javaDate(now)
-  const params = spec.parameters || {}
+  const { params } = splitParameters(spec.parameters) // defaults without their query (it is in the receiver's Query field)
   const paramNames = Object.keys(params)
 
   const files = []
@@ -440,4 +461,4 @@ function nodeToXml(n) {
   }
 }
 
-module.exports = { build, injectAttachments, javaDate, propEscape, manifestHeader }
+module.exports = { build, injectAttachments, splitParameters, javaDate, propEscape, manifestHeader }

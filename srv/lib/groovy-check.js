@@ -74,6 +74,32 @@ const describe = (e) => {
 const required = () => env('GROOVY_CHECK_REQUIRED') === 'true'
 
 /**
+ * Lint warnings (not errors) for patterns CPI's own script check reports. Today: the message body
+ * parsed as a String with JsonSlurper/XmlSlurper (CPI: "High: parsing the message body using
+ * JsonSlurper without streaming"), directly or through a variable that holds getBody(String).
+ * @returns {{ line: number, message: string }[]}
+ */
+function lint(code) {
+  const lines = String(code || '').split('\n')
+  const BODY_STRING = /message\.getBody\(\s*(?:java\.lang\.)?String(?:\.class)?\s*\)/
+  const bodyVars = new Set(lines.flatMap((l) => [...l.matchAll(/(?:def|String)\s+(\w+)\s*=\s*message\.getBody\(\s*(?:java\.lang\.)?String(?:\.class)?\s*\)/g)].map((m) => m[1])))
+  const out = []
+  lines.forEach((l, i) => {
+    for (const m of l.matchAll(/\.parseText\s*\(\s*([^)]*\)?)\s*\)/g)) {
+      const arg = m[1].trim()
+      const fromBody = BODY_STRING.test(arg) || bodyVars.has(arg.replace(/\s*\?:.*$/, ''))
+      if (!fromBody) continue
+      const xml = /XmlSlurper|XmlParser/.test(l) || /XmlSlurper|XmlParser/.test(lines.slice(Math.max(0, i - 3), i).join('\n'))
+      out.push({
+        line: i + 1,
+        message: `parses the whole message body as a String (CPI script check: High, no streaming); use new ${xml ? 'XmlSlurper' : 'JsonSlurper'}().parse(message.getBody(java.io.Reader.class)) instead`
+      })
+    }
+  })
+  return out
+}
+
+/**
  * Checks every Groovy script a spec builds (written in the spec or attached) and returns a status
  * per file, as shown in the proposal panel and checked again at approval.
  * @returns {Promise<{ scripts: number, checked: boolean, reason?: string, failed: object[],
@@ -93,10 +119,11 @@ async function checkSpecScripts(spec, attachments = {}, { check = checkScripts }
       const own = errors.filter((e) => e.fileName === fileName)
       if (!checked) return [fileName, { status: 'unchecked', reason, at }]
       if (own.length) return [fileName, { status: 'failed', errors: own.map((e) => `${e.line}:${e.column}: ${e.message}`), at }]
-      return [fileName, { status: 'ok', at }]
+      const warnings = lint(scripts.find((s) => s.fileName === fileName).code).map((w) => `${w.line}: ${w.message}`)
+      return [fileName, { status: 'ok', ...(warnings.length && { warnings }), at }]
     })
   )
   return { scripts: scripts.length, checked, reason, failed: errors, files }
 }
 
-module.exports = { checkScripts, checkSpecScripts, required }
+module.exports = { checkScripts, checkSpecScripts, required, lint }

@@ -143,7 +143,13 @@ but fails on CPI with "unable to resolve class"):
   then `ITApiFactory.getApi(ValueMappingApi, null).getMappedValue(sourceAgency, sourceIdentifier, value, targetAgency, targetIdentifier)`.
 - Credentials: `import com.sap.it.api.ITApiFactory` and `import com.sap.it.api.securestore.SecureStoreService`,
   then `ITApiFactory.getService(SecureStoreService, null).getUserCredential(alias)`.
-- JSON: `groovy.json.JsonSlurper` and `groovy.json.JsonOutput`.
+- JSON: `groovy.json.JsonSlurper` and `groovy.json.JsonOutput`. Parse the body **streamed**:
+  `new JsonSlurper().parse(message.getBody(java.io.Reader.class))` (the same with `XmlSlurper`); never
+  `parseText(message.getBody(String))`, which CPI's script check reports as High.
+- OData: when a receiver URL contains `/odata/` or `.svc`, call `getPattern` with `odata` before you write
+  a script that reads its response (V2 `d.results`, V4 `value`, decimals as strings).
+- For a public GET receiver without authentication, call `getSampleResponse` with its real URL before you
+  write a script that reads its response, and write the script against that structure.
 
 Write each script with `writeScript` before you propose the spec; it is syntax-checked right away
 and stored as a file of the conversation. Proposing checks every script again and reports

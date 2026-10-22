@@ -11,7 +11,7 @@
 const cds = require('@sap/cds')
 const cpi = require('./cpi-client')
 const { audit, audited } = require('./audit')
-const { build } = require('../iflow-builder/builder')
+const { build, splitParameters } = require('../iflow-builder/builder')
 const groovyCheck = require('./groovy-check')
 
 const LOG = cds.log('proposals')
@@ -267,7 +267,8 @@ async function execute(proposal, result, user) {
       })
 
       // a placeholder default (e.g. https://<tenant>/http/...) is never configured: the user sets the real value
-      const all = Object.entries(spec.parameters || {})
+      // configured values are the defaults without their query (as in parameters.prop; the query is in the Query field)
+      const all = Object.entries(splitParameters(spec.parameters).params)
       const placeholders = all.filter(([, v]) => PLACEHOLDER_VALUE.test(String(v))).map(([k]) => k)
       await step('configure', async () => {
         const params = all.filter(([k]) => !placeholders.includes(k))

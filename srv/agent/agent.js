@@ -260,6 +260,7 @@ function toolLabel(name, args) {
   if (name === 'writeScript') return `Writing script ${args?.fileName || ''}.groovy`
   if (name === 'editDraftSpec') return 'Writing spec'
   if (name === 'getPattern') return `Reading pattern ${args?.name || ''}`.trim()
+  if (name === 'getSampleResponse') return 'Reading a sample response'
   const id = args?.iflowId || args?.packageId
   return `Calling ${name}${id ? ` (${id})` : ''}`
 }

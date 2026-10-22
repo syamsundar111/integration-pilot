@@ -168,11 +168,32 @@ describe('system prompt: patterns loaded on demand (review item 6)', () => {
 
   test('getPattern returns a pattern; unknown names are an error', async () => {
     const def = tools.definitions.find((d) => d.function.name === 'getPattern')
-    expect(def.function.parameters.properties.name.enum).toEqual(['processDirect', 'updateIflow', 'importedIflow'])
+    expect(def.function.parameters.properties.name.enum).toEqual(['processDirect', 'updateIflow', 'importedIflow', 'odata'])
     const ok = JSON.parse(await tools.execute('getPattern', JSON.stringify({ name: 'processDirect' }), {}))
     expect(ok).toMatchObject({ name: 'processDirect', pattern: expect.stringMatching(/^# Pattern: one iFlow calls another \(ProcessDirect\)/) })
     const bad = JSON.parse(await tools.execute('getPattern', JSON.stringify({ name: 'nope' }), {}))
     expect(bad).toMatchObject({ error: { code: 'UNKNOWN_PATTERN' } })
+  })
+})
+
+describe('system prompt: OData and streaming (Test 3)', () => {
+  const tools = require('../srv/agent/tools')
+  const FIXTURE = fs.readFileSync(path.join(__dirname, 'fixtures/odata/filterProducts.groovy'), 'utf8')
+
+  test('the prompt points to the odata pattern for /odata/ and .svc URLs and asks for streamed parsing', () => {
+    expect(flat).toMatch(/when a receiver URL contains `\/odata\/` or `\.svc`, call `getPattern` with `odata`/)
+    expect(flat).toMatch(/Parse the body \*\*streamed\*\*: `new JsonSlurper\(\)\.parse\(message\.getBody\(java\.io\.Reader\.class\)\)`/)
+    expect(flat).toMatch(/never `parseText\(message\.getBody\(String\)\)`/)
+  })
+
+  test('the odata pattern covers V2, V4, string decimals and null safety, with the script that ran on CPI', async () => {
+    const { pattern } = JSON.parse(await tools.execute('getPattern', JSON.stringify({ name: 'odata' }), {}))
+    const p = pattern.replace(/\s+/g, ' ')
+    expect(p).toMatch(/`\{"d": \{"results": \[ \.\.\. \]\}\}`/)
+    expect(p).toMatch(/OData V4: `\{"value": \[ \.\.\. \]\}`/)
+    expect(p).toMatch(/`new BigDecimal\(value\.toString\(\)\)`/)
+    expect(p).toMatch(/Cannot get property 'UnitPrice' on null object/)
+    expect(pattern).toContain(FIXTURE)
   })
 })
 

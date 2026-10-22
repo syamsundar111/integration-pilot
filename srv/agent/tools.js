@@ -12,6 +12,7 @@ const { validate, normalizeTypes, schema, GROOVY_IMPORT, GROOVY_ENTRY } = requir
 const { build } = require('../iflow-builder/builder')
 const attachmentStore = require('../lib/attachments')
 const groovyCheck = require('../lib/groovy-check')
+const { sampleResponse } = require('../lib/sample-response')
 const { parse } = require('../iflow-builder/parser')
 const { specFromParsed, describeChanges } = require('../iflow-builder/to-spec')
 
@@ -20,7 +21,7 @@ const MAX_RESULT_CHARS = 12_000
 const MAX_ERRORS = 15 // validation errors returned to the model per call
 const MAX_STEPS_PER_EDIT = 8 // steps added or replaced per editDraftSpec call: keeps each answer short
 // Worked patterns (srv/agent/patterns/*.md), read on demand so the system prompt stays short
-const PATTERNS = Object.fromEntries(['processDirect', 'updateIflow', 'importedIflow'].map((n) => [n, path.join(__dirname, 'patterns', `${n}.md`)]))
+const PATTERNS = Object.fromEntries(['processDirect', 'updateIflow', 'importedIflow', 'odata'].map((n) => [n, path.join(__dirname, 'patterns', `${n}.md`)]))
 const patternCache = {}
 
 // Groovy code in a chat message: a CPI entry function or a CPI import
@@ -85,8 +86,14 @@ At most ${MAX_STEPS_PER_EDIT} steps added or replaced per call. Returns the draf
     ['ops']
   ),
   fn(
+    'getSampleResponse',
+    'Public GET endpoint without authentication only: fetches one response and returns its structure (keys, types, short example values), truncated. Call it with the real URL (not a {{parameter}}) before writing a script that reads that response.',
+    { url: { type: 'string', description: 'The full http(s) URL, query included' } },
+    ['url']
+  ),
+  fn(
     'getPattern',
-    'A short worked pattern for a situation, loaded only when needed. processDirect: one iFlow calls another. updateIflow: change an existing iFlow. importedIflow: an imported iFlow is the draft.',
+    'A short worked pattern for a situation, loaded only when needed. processDirect: one iFlow calls another. updateIflow: change an existing iFlow. importedIflow: an imported iFlow is the draft. odata: a script reads an OData response (URL with /odata/ or .svc).',
     { name: { type: 'string', enum: Object.keys(PATTERNS) } },
     ['name']
   ),
@@ -486,10 +493,13 @@ const handlers = {
     await attachmentStore.save(ctx.user, ctx.sessionId, [{ fileName: file, content: code }], 'ai')
     ctx.attachments = undefined // reload: new content
     ;(ctx.written ??= []).push(file)
+    const lintWarnings = groovyCheck.lint(code).map((w) => `${file}:${w.line}: ${w.message}`)
+    const warnings = [...(!checked ? [`Groovy syntax not checked: ${reason}`] : []), ...lintWarnings]
     return {
       stored: file,
       lines: code.split('\n').length,
-      ...(!checked && { warnings: [`Groovy syntax not checked: ${reason}`] }),
+      ...(warnings.length && { warnings }),
+      ...(lintWarnings.length && { lintNote: 'Rewrite your own script to stream the body; for a script the user gave, tell them and ask first.' }),
       next: `Use it with { "type": "groovyScript", "fileName": "${fileName}" } and no "code".`
     }
   },
@@ -580,6 +590,14 @@ const handlers = {
     }
   },
 
+  async getSampleResponse({ url } = {}) {
+    try {
+      return { ...(await sampleResponse(url)), instruction: 'Write the script against this structure; access every value null-safe.' }
+    } catch (e) {
+      return { error: { code: e.code || 'SAMPLE_FAILED', message: e.message }, instruction: 'Write the script without a sample; access every value null-safe.' }
+    }
+  },
+
   async getPattern({ name } = {}) {
     if (!PATTERNS[name]) return { error: { code: 'UNKNOWN_PATTERN', message: `No pattern '${name}'. Use one of: ${Object.keys(PATTERNS).join(', ')}.` } }
     patternCache[name] ??= fs.readFileSync(PATTERNS[name], 'utf8')
@@ -611,7 +629,7 @@ const handlers = {
     spec = typed.spec
     if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
-    const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
+    const { valid, issues, warnings: specNotes } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix only what these errors name and propose again.')
 
     // Fail early on things the user could not approve successfully
@@ -642,6 +660,7 @@ const handlers = {
       ...(groovy.warning && { warnings: [groovy.warning] }),
       ...(pkg.note && { packageIdNote: `${pkg.note} Tell the user exactly this, in one line; do not ask about it.` }),
       ...autoFixes(typed.fixes),
+      ...(specNotes?.length && { specNotes }),
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
       ...(!pkgExists &&
         (pkg.name

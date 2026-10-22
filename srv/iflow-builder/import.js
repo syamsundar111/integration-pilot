@@ -63,8 +63,8 @@ function xpathGroovy(stepName, entries) {
     `// Generated on import: the XPath values of Content Modifier ${groovyString(stepName)}.`,
     '// Namespace prefixes are not mapped; adjust the expressions if the XML uses namespaces.',
     'def Message processData(Message message) {',
-    "    def body = message.getBody(String) ?: '<empty/>'",
-    "    def doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new ByteArrayInputStream(body.getBytes('UTF-8')))",
+    "    def body = message.getBody(java.io.InputStream) ?: new ByteArrayInputStream('<empty/>'.getBytes('UTF-8'))",
+    '    def doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(body) // streamed, not read into a String',
     '    def xpath = XPathFactory.newInstance().newXPath()',
     ...sets,
     '    return message',
@@ -105,6 +105,12 @@ async function importIflow(buffer, { fileName, packageId }) {
    */
   const httpUrl = (url, system) => {
     if (!url) return null
+    // a parameter address with a literal Query field: keep {{P}}, the query joins the default (see splitParameters)
+    const withQuery = url.match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}\?(.+)$/)
+    if (withQuery && !withQuery[2].includes('{{')) {
+      params[withQuery[1]] = `${defaults[withQuery[1]] ?? ''}?${withQuery[2]}`
+      return `{{${withQuery[1]}}}`
+    }
     const whole = url.match(WHOLE_PARAM)
     if (whole) {
       params[whole[1]] ??= ''
