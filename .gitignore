@@ -15,7 +15,7 @@ app/router/resources/
 default-env.json
 default-*.json
 .env
-.env.*``
+.env.*
 
 # Local databases (dev/hybrid SQLite file in the project root)
 db.sqlite
