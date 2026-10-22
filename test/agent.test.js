@@ -6,6 +6,7 @@ process.env.LLM_MODEL = 'test/model'
 process.env.LLM_RETRY_BASE_MS = '1'
 process.env.DEPLOY_POLL_INTERVAL_MS = '10'
 process.env.DEPLOY_POLL_TIMEOUT_MS = '300'
+process.env.AGENT_ASK_PACKAGE = 'false' // the package rule has its own tests ('package not given')
 
 jest.mock('../srv/lib/llm', () => ({ chat: jest.fn(), health: jest.fn() }))
 jest.mock('../srv/lib/groovy-check', () => {
@@ -1523,5 +1524,68 @@ describe('conditional system prompt sections', () => {
     expect(system.startsWith(CORE + '\n\n## Attached files (details)\n')).toBe(true) // attachedFiles before unsupportedSteps
     expect(system.indexOf('## Attached files (details)')).toBeLessThan(system.indexOf('## Unsupported steps'))
     expect(system.indexOf('## Unsupported steps')).toBeLessThan(system.indexOf('## Context'))
+  })
+})
+
+describe('package not given (measurement (e): the model chose PilotReference itself)', () => {
+  beforeEach(() => (process.env.AGENT_ASK_PACKAGE = 'true'))
+  afterEach(() => (process.env.AGENT_ASK_PACKAGE = 'false'))
+  const lastToolResult = () => JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+  const spec = (id) => ({ ...sample, id, name: id })
+
+  test('first message without a package: refused, the model is told to ask with suggestions', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_1') })).mockResolvedValueOnce(answer('Which package should I use?'))
+    const turn = await chat({ message: 'Every hour get users from https://jsonplaceholder.typicode.com/users and post them to https://httpbin.org/post' })
+    expect(lastToolResult()).toMatchObject({
+      valid: false,
+      errors: ['PACKAGE_NOT_GIVEN packageId: the user did not name a target package and there is no session default'],
+      instruction: expect.stringMatching(/^Nothing was proposed\. Ask the user which package to use, e\.g\. PilotReference \(Pilot Reference\)/)
+    })
+    expect(turn.proposals).toEqual([])
+
+    // the user answers; from the second message on, the proposal goes through
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_1') })).mockResolvedValueOnce(answer('ready'))
+    const next = await chat({ sessionId: turn.sessionId, message: 'Use sensible defaults.' })
+    expect(next.proposals).toEqual([expect.objectContaining({ iflowId: 'Ask_Pkg_1', packageId: 'PilotReference' })])
+  })
+
+  test('a package named in the message (ID or name) or a session default is enough', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_2') })).mockResolvedValueOnce(answer('ready'))
+    expect((await chat({ message: 'Build it in package Pilot Reference' })).proposals).toHaveLength(1)
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_3') })).mockResolvedValueOnce(answer('ready'))
+    expect((await chat({ message: 'Build it in PilotReference' })).proposals).toHaveLength(1)
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_4') })).mockResolvedValueOnce(answer('ready'))
+    expect((await chat({ message: 'Build it', defaults: { packageId: 'PilotReference' } })).proposals).toHaveLength(1)
+  })
+})
+
+describe('cut-off answers keep their finished tool calls ((d) run: 3 cut-offs of up to 16k tokens each)', () => {
+  const script = (n) => `import com.sap.gateway.ip.core.customdev.util.Message\n\ndef Message processData(Message message) {\n    message.setProperty('${n}', 'x')\n    return message\n}\n`
+  const call = (id, name, args) => ({ id, type: 'function', function: { name, arguments: args } })
+  const cutOff = (calls) => ({ choices: [{ finish_reason: 'length', message: { role: 'assistant', content: null, tool_calls: calls } }] })
+
+  test('finished writeScript calls are run; only the unfinished one is redone', async () => {
+    const full = (n) => JSON.stringify({ fileName: n, code: script(n) })
+    llm.chat
+      .mockResolvedValueOnce(cutOff([call('c1', 'writeScript', full('first')), call('c2', 'writeScript', full('second')), call('c3', 'writeScript', full('third').slice(0, 40))]))
+      .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'third', code: script('third') }))
+      .mockResolvedValueOnce(answer('done'))
+    const turn = await chat({ message: 'write three scripts' })
+    const { data: files } = await GET(`/api/Attachments?$filter=session_ID eq ${turn.sessionId}&$orderby=fileName`)
+    expect(files.map((f) => f.fileName)).toEqual(['first.groovy', 'second.groovy', 'third.groovy'])
+    // the second model call sees the two results and the note; no repeated work
+    const second = llm.chat.mock.calls.at(-2)[0].messages
+    expect(second.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content).stored)).toEqual(['first.groovy', 'second.groovy'])
+    expect(second.at(-1).content).toMatch(/Its finished tool calls were run and their results are above \(writeScript first, writeScript second\); only the unfinished part was dropped\. .*at most 3 writeScript calls per answer/)
+    expect(turn.events.map((e) => e.label)).toContain('Answer cut off at the length limit — kept 2 finished tool call(s), continuing')
+    expect(turn.status).toBe('DONE')
+  })
+
+  test('without a finished tool call the answer is dropped as before', async () => {
+    llm.chat.mockResolvedValueOnce(cutOff([call('c1', 'writeScript', '{"fileName":"half","code":"impo')])).mockResolvedValueOnce(answer('done'))
+    const turn = await chat({ message: 'write one script' })
+    const { data: files } = await GET(`/api/Attachments?$filter=session_ID eq ${turn.sessionId}`)
+    expect(files).toEqual([])
+    expect(turn.events.map((e) => e.label)).toContain('Answer cut off at the length limit — continuing in parts')
   })
 })

@@ -209,12 +209,31 @@ function validate(spec, { attachments = [] } = {}) {
   const allSteps = [...steps.map((s, i) => [s, `steps[${i}]`]), ...subSteps.map((s, i) => [s, `exceptionSubprocess.steps[${i}]`])]
 
   const dupes = (list) => [...new Set(list.filter((v, i) => v && list.indexOf(v) !== i))]
-  for (const d of dupes([...names.steps, ...names.exceptionSteps, names.exceptionSubprocess]))
-    err('DUPLICATE_STEP_NAME', `steps: step name '${d}' is used more than once — step names must be unique (main flow and exception subprocess together)`)
+  // where a duplicate is, and what to do: the model cannot fix "used more than once" without the positions
+  const namedAt = [
+    ...names.steps.map((n, i) => [n, `steps[${i}]`, steps[i]]),
+    ...names.exceptionSteps.map((n, i) => [n, `exceptionSubprocess.steps[${i}]`, subSteps[i]]),
+    [names.exceptionSubprocess, 'exceptionSubprocess.name', null]
+  ]
+  const fix = (hits) => {
+    const same = hits.length > 1 && hits.every(([, , st]) => st && JSON.stringify(st) === JSON.stringify(hits[0][2]))
+    const last = hits.at(-1)[1]
+    const remove = (path) => {
+      const m = path.match(/^(exceptionSubprocess\.)?steps\[(\d+)\]$/)
+      return m ? `editDraftSpec {"op":"removeStep","index":${m[2]}${m[1] ? ',"exception":true' : ''}}` : `remove ${path}`
+    }
+    return same ? `the same step was added twice: remove ${last} (${remove(last)})` : `rename all but one, or remove the extra step (${remove(last)})`
+  }
+  for (const d of dupes([...names.steps, ...names.exceptionSteps, names.exceptionSubprocess])) {
+    const hits = namedAt.filter(([n]) => n === d)
+    err('DUPLICATE_STEP_NAME', `steps: step name '${d}' is used more than once, at ${hits.map(([, p]) => p).join(' and ')} — step names must be unique (main flow and exception subprocess together); ${fix(hits)}`)
+  }
   for (const d of dupes([...names.systems, names.endSystem]))
     err('DUPLICATE_SYSTEM', `receiver system name '${d}' is used more than once — give each receiver a unique 'system'`)
-  for (const d of dupes(allSteps.filter(([s]) => s?.type === 'groovyScript').map(([s]) => s.fileName)))
-    err('DUPLICATE_FILENAME', `steps: Groovy fileName '${d}' is used more than once — each script needs its own file`)
+  for (const d of dupes(allSteps.filter(([s]) => s?.type === 'groovyScript').map(([s]) => s.fileName))) {
+    const hits = allSteps.filter(([s]) => s?.type === 'groovyScript' && s.fileName === d).map(([st, p]) => [d, p, st])
+    err('DUPLICATE_FILENAME', `steps: Groovy fileName '${d}' is used more than once, at ${hits.map(([, p]) => p).join(' and ')} — each script needs its own file; ${fix(hits)}`)
+  }
 
   // --- attached files: scripts without code, XSLT resources --------------------------
   const attached = new Set(attachments)

@@ -207,3 +207,9 @@ describe('system prompt: core and conditional sections', () => {
   })
 })
 
+describe('system prompt: scripts in batches ((d) run)', () => {
+  test('with more than about 3 scripts: at most 3 writeScript calls per answer, then one proposeIflow', () => {
+    expect(flat).toMatch(/With more than about 3 scripts, write them in batches: at most 3 `writeScript` calls per answer \(a longer answer hits the output limit\), then the spec in one `proposeIflow` call/)
+  })
+})
+

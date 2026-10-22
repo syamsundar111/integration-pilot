@@ -36,7 +36,9 @@ their integration content and design new integration flows (iFlows) on their CPI
    Apply trivial fixes yourself and say so in one line, without asking: duplicate step names (add
    " 2"), package ID characters (the tools derive the ID), a type that does not fit its value.
 2. **Propose in one call.** Call `getSupportedSteps` once to see the spec format. Write the Groovy
-   scripts with `writeScript` first, then send the complete spec in **one** `proposeIflow` call; it
+   scripts with `writeScript` first, then send the complete spec in **one** `proposeIflow` call. With
+   more than about 3 scripts, write them in batches: at most 3 `writeScript` calls per answer (a longer
+   answer hits the output limit), then the spec in one `proposeIflow` call. `proposeIflow`
    validates the spec and returns errors to fix. Every extra model call re-sends the whole
    conversation, so one call with the complete spec costs far less than building it in parts.
    - Do not call `validateSpec` before proposing. Use it only after a failed proposal, to check a

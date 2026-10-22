@@ -149,3 +149,25 @@ describe('validator', () => {
     expect(validate(inValue).issues.map((i) => i.code)).toEqual(['PARAM_NOT_URL'])
   })
 })
+
+describe('duplicate names say where and what to do ((d) run: three identical failures in a row)', () => {
+  const { baseSpec } = require('./helpers')
+  const script = { type: 'groovyScript', name: 'Script_SetCustomHeaders_Exc', fileName: 'Script_SetCustomHeaders_Exc' }
+  const cm = { type: 'contentModifier', name: 'CM_SetMessage', properties: [{ name: 'x', type: 'constant', value: '1' }] }
+
+  test('the same step added twice: both positions and the removeStep to send', () => {
+    const r = validate(baseSpec({ steps: [{ type: 'jsonToXml', name: 'A' }], exceptionSubprocess: { steps: [cm, script, script] } }), { attachments: ['Script_SetCustomHeaders_Exc.groovy'] })
+    const fix = 'the same step was added twice: remove exceptionSubprocess.steps[2] (editDraftSpec {"op":"removeStep","index":2,"exception":true})'
+    expect(r.errors).toEqual([
+      `steps: step name 'Script_SetCustomHeaders_Exc' is used more than once, at exceptionSubprocess.steps[1] and exceptionSubprocess.steps[2] — step names must be unique (main flow and exception subprocess together); ${fix}`,
+      `steps: Groovy fileName 'Script_SetCustomHeaders_Exc' is used more than once, at exceptionSubprocess.steps[1] and exceptionSubprocess.steps[2] — each script needs its own file; ${fix}`
+    ])
+  })
+
+  test('different steps with one name: rename or remove', () => {
+    const r = validate(baseSpec({ steps: [{ type: 'jsonToXml', name: 'Convert' }, { type: 'xmlToJson', name: 'Convert' }] }))
+    expect(r.errors).toEqual([
+      `steps: step name 'Convert' is used more than once, at steps[0] and steps[1] — step names must be unique (main flow and exception subprocess together); rename all but one, or remove the extra step (editDraftSpec {"op":"removeStep","index":1})`
+    ])
+  })
+})

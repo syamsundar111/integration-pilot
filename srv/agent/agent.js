@@ -29,6 +29,20 @@ const tokenBudget = () => Number(process.env.AGENT_MAX_TOKENS_PER_MESSAGE || 300
 const CUT_OFF_NOTE =
   'Your previous response was cut off because it reached the output limit; nothing of it was used. Build the spec in parts instead: ' +
   'write each Groovy script with writeScript, then editDraftSpec with {"op":"set",...} and addSteps (at most 8 steps per call), then proposeIflow with { "useDraftSpec": true }.'
+/** True when tool-call arguments are complete JSON (the call was not cut off) */
+const completeJson = (args) => {
+  try {
+    const v = JSON.parse(args || '{}')
+    return v !== null && typeof v === 'object'
+  } catch {
+    return false
+  }
+}
+/** What the model is told after a cut-off answer whose finished tool calls were run */
+const cutOffKeptNote = (finished) => {
+  const what = finished.map((tc) => `${tc.function.name}${tc.function.arguments.match(/"fileName"\s*:\s*"([^"]+)"/)?.[1] ? ` ${tc.function.arguments.match(/"fileName"\s*:\s*"([^"]+)"/)[1]}` : ''}`)
+  return `Your previous answer was cut off at the output limit. Its finished tool calls were run and their results are above (${what.join(', ')}); only the unfinished part was dropped. Continue from there in smaller answers: at most 3 writeScript calls per answer, then the spec in one proposeIflow call.`
+}
 const HISTORY_LIMIT = 40 // earlier user messages and answers sent back to the model
 const INTERRUPTED = 'Interrupted by server restart — please send your message again.'
 const { toPackageId } = require('../lib/package-id')
@@ -444,8 +458,16 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
       const { message: msg, finish_reason: finish } = res.choices[0]
       if (res.fallbackUsed) await emit('info', `Answered by fallback model ${res.model}`)
 
-      // Cut off at the output limit: a truncated tool call cannot be used. The model continues in parts.
+      // Cut off at the output limit: the finished tool calls of the answer are run (e.g. the scripts written
+      // so far); only the unfinished one is dropped and redone. Without a finished call the answer is lost.
       if (finish === 'length') {
+        const finished = (msg.tool_calls || []).filter((tc) => tc?.function?.name && completeJson(tc.function.arguments))
+        if (finished.length) {
+          await emit('info', `Answer cut off at the length limit — kept ${finished.length} finished tool call(s), continuing`)
+          await runToolCalls(finished, null)
+          turn.push({ role: 'user', content: history.NOTE_PREFIX + cutOffKeptNote(finished) })
+          continue // progress was made: not counted against MAX_CUT_OFFS (maxIterations still bounds the loop)
+        }
         if (++cutOffs > MAX_CUT_OFFS) {
           text = 'My answers were cut off several times because they got too long. Please narrow down the request or split it into parts.'
           break
@@ -456,26 +478,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
       }
 
       if (msg.tool_calls?.length) {
-        const toolCalls = msg.tool_calls.map(({ id, type, function: f }) => ({ id, type, function: { name: f.name, arguments: f.arguments || '{}' } }))
-        turn.push({ role: 'assistant', content: msg.content || null, tool_calls: toolCalls })
-        for (const tc of toolCalls) {
-          await checkCancel()
-          const name = tc.function.name
-          const args = parseArgs(tc.function.arguments)
-          await emit('tool', toolLabel(name, args))
-          const content = await tools.execute(name, tc.function.arguments, ctx)
-          turn.push({ role: 'tool', tool_call_id: tc.id, content })
-          if (name === 'validateSpec') {
-            const r = parseArgs(content)
-            lastErrors = r.valid ? null : r.errors || lastErrors
-            if (!r.valid) await emit('validation', 'Spec has errors — revising', r.errors ? `${r.errors.length} error(s)` : r.error?.message)
-          } else if (name === 'proposeIflow' || name === 'proposeIflowUpdate' || name === 'proposePackage') {
-            const r = parseArgs(content)
-            lastErrors = r.valid ? null : r.errors || lastErrors
-            if (r.valid) await emit('proposal', name === 'proposeIflowUpdate' ? 'Update proposal ready' : 'Proposal ready', name === 'proposePackage' ? args.id : r.iflowId)
-            else await emit('validation', 'Spec has errors — revising', r.errors ? `${r.errors.length} error(s)` : r.error?.message)
-          }
-        }
+        await runToolCalls(msg.tool_calls, msg.content)
         continue
       }
 
@@ -484,6 +487,35 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
     if (text === null) text = `I stopped after ${maxIterations()} steps without finishing. Please tell me how to continue, or narrow down the request.`
     await finish(text)
   } catch (e) {
+    await failTurn(e)
+  }
+
+  /** Runs tool calls in order and appends them and their results to the turn */
+  async function runToolCalls(calls, text) {
+    const toolCalls = calls.map(({ id, type, function: f }) => ({ id, type, function: { name: f.name, arguments: f.arguments || '{}' } }))
+    turn.push({ role: 'assistant', content: text || null, tool_calls: toolCalls })
+    for (const tc of toolCalls) {
+      await checkCancel()
+      const name = tc.function.name
+      const args = parseArgs(tc.function.arguments)
+      await emit('tool', toolLabel(name, args))
+      const content = await tools.execute(name, tc.function.arguments, ctx)
+      turn.push({ role: 'tool', tool_call_id: tc.id, content })
+      if (name === 'validateSpec') {
+        const r = parseArgs(content)
+        lastErrors = r.valid ? null : r.errors || lastErrors
+        if (!r.valid) await emit('validation', 'Spec has errors — revising', r.errors ? `${r.errors.length} error(s)` : r.error?.message)
+      } else if (name === 'proposeIflow' || name === 'proposeIflowUpdate' || name === 'proposePackage') {
+        const r = parseArgs(content)
+        lastErrors = r.valid ? null : r.errors || lastErrors
+        if (r.valid) await emit('proposal', name === 'proposeIflowUpdate' ? 'Update proposal ready' : 'Proposal ready', name === 'proposePackage' ? args.id : r.iflowId)
+        else await emit('validation', 'Spec has errors — revising', r.errors ? `${r.errors.length} error(s)` : r.error?.message)
+      }
+    }
+  }
+
+  /** Ends the turn after an error or a cancel; a stored proposal still ends it DONE */
+  async function failTurn(e) {
     const wasCancelled = e.code === 'CANCELLED'
     // A proposal was already stored and only a later step (usually the model's closing summary) failed:
     // the turn did its job, so end it DONE with a note instead of an error
