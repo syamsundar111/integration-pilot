@@ -208,6 +208,16 @@ describe('streaming', () => {
     expect(executeHttpRequest).toHaveBeenCalledTimes(2)
   })
 
+  test('a character split across two chunks is not garbled (review: "€" became "��")', async () => {
+    const line = Buffer.from(`data: ${JSON.stringify(delta({ content: 'Preis: 20 € — Größe ✓ 🙂' }))}\n\n` + 'data: [DONE]\n\n', 'utf8')
+    // cut every 3 bytes, so multi-byte characters straddle the chunks
+    const parts = []
+    for (let i = 0; i < line.length; i += 3) parts.push(line.subarray(i, i + 3))
+    executeHttpRequest.mockImplementation(async () => ({ data: Readable.from(parts) }))
+    const res = await llm.chat({ messages: [] })
+    expect(res.choices[0].message.content).toBe('Preis: 20 € — Größe ✓ 🙂')
+  })
+
   test('keep-alive lines do not hold off the no-data limit (measurement: a fallback waited 900 s)', async () => {
     process.env.LLM_IDLE_TIMEOUT_MS = '80'
     // the connection stays busy with keep-alive comments and empty chunks, but the model produces nothing

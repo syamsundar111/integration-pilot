@@ -17,6 +17,7 @@
  * streaming.
  */
 const cds = require('@sap/cds')
+const { StringDecoder } = require('string_decoder')
 const { executeHttpRequest } = require('@sap-cloud-sdk/http-client')
 
 const LOG = cds.log('llm')
@@ -200,6 +201,8 @@ function readStream(stream, onProgress, capMs = TIMEOUT_MS) {
     let finish = null
     let usage
     let buffer = ''
+    // a character split across two chunks (é, €, emoji) is kept until its last byte arrives
+    const decoder = new StringDecoder('utf8')
     let done = false
     const fail = (err) => {
       if (done) return
@@ -263,7 +266,7 @@ function readStream(stream, onProgress, capMs = TIMEOUT_MS) {
     }
 
     stream.on('data', (data) => {
-      buffer += data.toString('utf8')
+      buffer += decoder.write(data)
       const lines = buffer.split(/\r?\n/)
       buffer = lines.pop()
       let progress = false
@@ -278,6 +281,7 @@ function readStream(stream, onProgress, capMs = TIMEOUT_MS) {
     stream.on('error', fail)
     stream.on('end', () => {
       if (done) return
+      buffer += decoder.end()
       take(buffer)
       done = true
       clearTimeout(idle)
