@@ -205,7 +205,11 @@ sap.ui.define(
         const sessionId = query.session || ''
         this.loadSessions()
         this.loadPackages()
-        if (sessionId === this._skipLoad) return // session just created by sending
+        if (sessionId === this._skipLoad) {
+          // the session just created by sending: shown already; only this one navigation is skipped
+          this._skipLoad = null
+          return
+        }
         this.chat().setProperty('/sessionId', sessionId)
         this.loadSession(sessionId)
       },
@@ -241,6 +245,9 @@ sap.ui.define(
 
       async loadSession(sessionId) {
         const c = this.chat()
+        // every switch to another conversation passes here: work that was waiting for the server
+        // checks this counter and is dropped if the user has moved on in the meantime
+        const view = (this._view = (this._view || 0) + 1)
         this.stopTurnPolling()
         c.setProperty('/turn', null)
         if (!sessionId) {
@@ -260,6 +267,7 @@ sap.ui.define(
             api.get(`/Proposals${api.q({ $filter: `session_ID eq ${sessionId}`, $orderby: 'createdAt desc' })}`),
             api.get(`/ChatTurns${api.q({ $filter: `session_ID eq ${sessionId} and status eq 'RUNNING'`, $top: 1 })}`)
           ])
+          if (view !== this._view) return // another conversation was opened while this one loaded
           const messages = msgs
             .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content)
             .map((m) => this.toMessage(m.role, m.content, m.usage ? JSON.parse(m.usage) : null))
@@ -279,9 +287,9 @@ sap.ui.define(
           this.setActive(proposals[0] ? proposals[0].ID : null)
           this.scrollChat()
         } catch (e) {
-          this.showError(e, 'Could not load the conversation')
+          if (view === this._view) this.showError(e, 'Could not load the conversation')
         } finally {
-          c.setProperty('/loadingSession', false)
+          if (view === this._view) c.setProperty('/loadingSession', false) // a newer load owns the busy state
         }
       },
 
@@ -409,6 +417,7 @@ sap.ui.define(
         const c = this.chat()
         const message = (text || '').trim()
         if (!message || c.getProperty('/turn') || c.getProperty('/starting')) return
+        const view = this._view // the conversation this message belongs to
         const defaults = this.currentDefaults()
         const history = c.getProperty('/messages').filter((m) => m.kind === 'user').map((m) => m.text) // checked as one conversation
         const findings = promptLint.lint(message, { defaults, history, draft: c.getProperty('/draft') })
@@ -418,6 +427,7 @@ sap.ui.define(
             setTimeout(() => this.byId('input').focus(), 50)
             return
           }
+          if (view !== this._view) return // another conversation was opened while the dialog was open
         } else if (infos.length) this.toast(infos.map((w) => w.message).join(' ')) // information only: sent without asking
         c.setProperty('/input', '')
         this.addMessage(this.toMessage('user', message))
@@ -428,6 +438,12 @@ sap.ui.define(
           const pending = c.getProperty('/files').filter((f) => f.pending)
           const attachments = pending.map((f) => ({ fileName: f.fileName, content: f.content }))
           const started = await api.post('/chat', { ...(sessionId && { sessionId }), message, defaults, ...(attachments.length && { attachments }) })
+          if (view !== this._view) {
+            // the user opened another conversation meanwhile: the answer belongs to the one it was sent from
+            this.loadSessions()
+            this.toast('Message sent. Open its conversation from the history to see the answer.')
+            return
+          }
           this.startTurnPolling(started.turnId, Date.now(), [])
           if (attachments.length) {
             // sent: no longer pending; the reload shows them as stored files
