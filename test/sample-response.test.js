@@ -2,23 +2,24 @@
  * Design-time sample of a public GET endpoint (Test 3, item 9): the structure of one response, and a
  * guard so the server only fetches public endpoints.
  */
-const { sampleResponse, checkUrl, isPublicAddress, jsonShape } = require('../srv/lib/sample-response')
+const http = require('http')
+const { sampleResponse, checkUrl, isPublicAddress, pinnedGet, jsonShape } = require('../srv/lib/sample-response')
 
 const NORTHWIND = 'https://services.odata.org/V2/Northwind/Northwind.svc/Products?$format=json&$top=2'
 const publicLookup = async () => [{ address: '20.42.65.92' }]
-const body = (text, contentType = 'application/json') => async () => new Response(text, { status: 200, headers: { 'content-type': contentType } })
+const body = (text, contentType = 'application/json') => async () => ({ status: 200, contentType, text, truncated: false })
 
 describe('getSampleResponse', () => {
   test('an OData V2 response gives its structure: d.results, decimals as strings', async () => {
     const json = JSON.stringify({ d: { results: [{ ProductID: 1, ProductName: 'Chai', UnitPrice: '18.0000', Discontinued: false, Category: null }, { ProductID: 2 }] } })
-    const r = await sampleResponse(NORTHWIND, { fetchImpl: body(json), lookup: publicLookup })
+    const r = await sampleResponse(NORTHWIND, { get: body(json), lookup: publicLookup })
     expect(r).toMatchObject({ status: 200, format: 'json', truncated: false })
     expect(r.structure).toEqual({ d: { results: { 'array(2)': { ProductID: 'number: 1', ProductName: 'string: "Chai"', UnitPrice: 'string: "18.0000"', Discontinued: 'boolean: false', Category: 'null' } } } })
   })
 
   test('XML gives its element tree', async () => {
     const xml = '<feed><entry><title>Chai</title></entry><entry><title>Chang</title></entry></feed>'
-    const r = await sampleResponse('https://example.org/feed', { fetchImpl: body(xml, 'application/xml'), lookup: publicLookup })
+    const r = await sampleResponse('https://example.org/feed', { get: body(xml, 'application/xml'), lookup: publicLookup })
     expect(r).toMatchObject({ format: 'xml', structure: { feed: { 'entry (×2)': { title: 'text: "Chai"' } } } })
   })
 
@@ -42,7 +43,37 @@ describe('getSampleResponse', () => {
   })
 
   test('redirects are not followed', async () => {
-    const redirect = async () => new Response(null, { status: 302, headers: { location: 'http://10.0.0.1/' } })
-    await expect(sampleResponse('https://example.org/x', { fetchImpl: redirect, lookup: publicLookup })).rejects.toMatchObject({ code: 'SAMPLE_REDIRECT' })
+    const redirect = async () => ({ status: 302, contentType: '', text: '', truncated: false })
+    await expect(sampleResponse('https://example.org/x', { get: redirect, lookup: publicLookup })).rejects.toMatchObject({ code: 'SAMPLE_REDIRECT' })
+  })
+
+  test('IPv6 forms that carry an internal IPv4 address are refused (review: ::ffff:a9fe:a9fe passed)', async () => {
+    for (const ip of ['::ffff:a9fe:a9fe', '::ffff:7f00:1', '0:0:0:0:0:ffff:7f00:0001', '::ffff:169.254.169.254', '::127.0.0.1', '64:ff9b::a9fe:a9fe', '2002:a9fe:a9fe::1', 'fe80::1%eth0', 'zz::1'])
+      expect([ip, isPublicAddress(ip)]).toEqual([ip, false])
+    for (const ip of ['::ffff:8.8.8.8', '64:ff9b::808:808', '2606:4700::1111']) expect([ip, isPublicAddress(ip)]).toEqual([ip, true])
+    await expect(checkUrl('http://[::ffff:a9fe:a9fe]/latest/meta-data/')).rejects.toMatchObject({ code: 'SAMPLE_NOT_PUBLIC' })
+    await expect(checkUrl('http://2130706433/')).rejects.toMatchObject({ code: 'SAMPLE_NOT_PUBLIC' }) // decimal 127.0.0.1
+  })
+
+  test('the connection uses the checked address, never a second DNS lookup (DNS rebinding)', async () => {
+    const server = http.createServer((req, res) => res.end(JSON.stringify({ host: req.headers.host })))
+    await new Promise((r) => server.listen(0, '127.0.0.1', r))
+    try {
+      // a host name that does not resolve: the request can only succeed through the pinned address
+      const url = new URL(`http://pinned.invalid:${server.address().port}/x`)
+      const r = await pinnedGet(url, { address: '127.0.0.1', family: 4 })
+      expect(r).toMatchObject({ status: 200, truncated: false })
+      expect(JSON.parse(r.text)).toEqual({ host: `pinned.invalid:${server.address().port}` }) // the name stays in the Host header
+    } finally {
+      server.close()
+    }
+  })
+
+  test('sampleResponse passes the checked address to the request', async () => {
+    let seen
+    const get = async (url, target) => ((seen = { host: url.hostname, ...target }), { status: 200, contentType: 'application/json', text: '{}', truncated: false })
+    await sampleResponse('https://api.example.org/x', { get, lookup: async () => [{ address: '20.42.65.92' }] })
+    expect(seen).toEqual({ host: 'api.example.org', address: '20.42.65.92', family: 4 })
   })
 })
+
