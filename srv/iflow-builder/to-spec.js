@@ -5,9 +5,44 @@
  * would be lost silently. Such content is reported as a blocker, and the iFlow is not
  * offered for update.
  */
+const fs = require('fs')
+const path = require('path')
 const { validate, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS } = require('./validator')
 
 const RESOURCES = 'src/main/resources/'
+
+/**
+ * Adapter settings that change behaviour and that the spec cannot hold. An update rebuilds the iFlow
+ * with the builder's values (from its templates); an iFlow with another value would silently change,
+ * e.g. a Cloud Connector receiver would become an Internet one. Version and name keys are left out.
+ */
+const SIGNIFICANT = {
+  Receiver: ['proxyType', 'locationID', 'proxyHost', 'proxyPort', 'internetProxyType', 'httpRequestTimeout', 'httpShouldSendBody', 'throwExceptionOnFailure', 'httpErrorResponseCodes', 'allowedRequestHeaders', 'allowedResponseHeaders', 'retryOnConnectionFailure', 'retryOnException', 'retryIteration', 'retryInterval', 'streaming', 'privateKeyAlias'],
+  Sender: ['senderAuthType', 'userRole', 'xsrfProtection', 'clientCertificates', 'maximumBodySize']
+}
+const TEMPLATE_DEFAULTS = (() => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, 'templates', 'iflw', f), 'utf8')
+  const values = (xml) => Object.fromEntries([...xml.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
+  return { Receiver: values(read('messageflow-http-receiver.xml')), Sender: values(read('messageflow-https-sender.xml')) }
+})()
+const LABELS = { proxyType: 'proxy type', locationID: 'Cloud Connector location ID', httpRequestTimeout: 'request timeout', senderAuthType: 'sender authentication', xsrfProtection: 'CSRF protection' }
+
+/** Blockers for adapter settings an update would reset */
+function adapterBlockers(adapters = []) {
+  const out = []
+  for (const a of adapters) {
+    const kind = a.direction === 'Receiver' && a.type === 'HTTP' ? 'Receiver' : a.direction === 'Sender' && a.type === 'HTTPS' ? 'Sender' : null
+    if (!kind || !a.settings) continue
+    for (const key of SIGNIFICANT[kind]) {
+      if (!(key in a.settings) || !(key in TEMPLATE_DEFAULTS[kind])) continue // older adapter versions lack some keys
+      const have = String(a.settings[key] ?? '')
+      const would = TEMPLATE_DEFAULTS[kind][key]
+      if (have !== would)
+        out.push(`${kind === 'Receiver' ? 'receiver' : 'sender'} ${a.system || a.name}: ${LABELS[key] || key} is '${have}'; an update would reset it to '${would || '(empty)'}'${key === 'proxyType' && have === 'sapcc' ? ' (Cloud Connector -> Internet)' : ''}`)
+    }
+  }
+  return out
+}
 
 /** Spec step from a parsed step, or a blocker text */
 function toStep(s, scripts, where) {
@@ -112,6 +147,11 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   // Current configured values win over the defaults in parameters.prop
   const parameters = { ...(parsed.parameters || {}) }
   for (const c of configurations) if (c.key in parameters || c.value) parameters[c.key] = c.value ?? ''
+
+  // settings the spec cannot hold would be reset or dropped by an update: report them, never lose them
+  blockers.push(...adapterBlockers(parsed.adapters))
+  if ((parsed.exceptionSubprocessCount || 0) > 1)
+    blockers.push(`${parsed.exceptionSubprocessCount} exception subprocesses (the spec holds one; an update would delete the others)`)
 
   if (blockers.length) return { spec: null, blockers }
 

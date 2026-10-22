@@ -96,6 +96,8 @@ function adapterOf(flow) {
   if (p.authenticationMethod) adapter.authType = p.authenticationMethod // as configured in CPI, e.g. None
   if (p.senderAuthType) adapter.authType = p.senderAuthType
   if (p.credentialName) adapter.credentialAlias = p.credentialName
+  // all adapter settings, for update checks (not enumerable: summaries sent to the model stay small)
+  Object.defineProperty(adapter, 'settings', { value: p, enumerable: false })
   return adapter
 }
 
@@ -394,6 +396,7 @@ async function parse(input) {
     linear,
     mainPath: branching, // branching flows only: { steps (routers carry routes), end }
     exceptionSubprocess: exceptionSubprocesses[0] || null,
+    exceptionSubprocessCount: exceptionSubprocesses.length,
     localProcesses: processes.filter((p) => p !== main).map((p) => p.getAttribute('name')),
     // their steps, for Process Calls the import can inline: [{ id, name, steps, linear }]
     localProcessSteps: processes
