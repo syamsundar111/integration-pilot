@@ -121,3 +121,31 @@ describe('system prompt: types (review item 3)', () => {
   })
 })
 
+describe('system prompt: review items 1, 2, 4 and 5', () => {
+  test('1: sensible defaults, questions only about real decisions, trivial fixes applied', () => {
+    expect(flat).not.toMatch(/ask concise questions about what is missing/)
+    expect(flat).toMatch(/\*\*Assume sensible defaults; ask only about real decisions\.\*\*/)
+    for (const d of ['end: `none`', 'no exception subprocess unless the user asks', 'JSON in and out unless the user says otherwise', 'none needed when the user says "no authentication"'])
+      expect(flat).toContain(d)
+    expect(flat).toMatch(/the \*\*trigger\*\*, if neither the message nor the session defaults give it/)
+    expect(flat).toMatch(/the \*\*target package\*\*, if neither the message nor the session defaults give it/)
+    expect(flat).toMatch(/\*\*values only the user can know\*\*: real URLs, field rules/)
+    expect(flat).toMatch(/Apply trivial fixes yourself and say so in one line, without asking: duplicate step names .*package ID characters/)
+  })
+
+  test('2: user code is used verbatim; check errors are reported with file:line:column and the quoted line', () => {
+    expect(flat).toMatch(/\*\*User code is the user's code\.\*\* Code the user gives in the message or attaches is used verbatim/)
+    expect(flat).toMatch(/do not fix it on your own: report each error as file:line:column, quote that line, and ask whether you may fix it/)
+    expect(flat).toMatch(/"Fix your own scripts" applies only to scripts you wrote/)
+  })
+
+  test('4: a placeholder default must be set before deploying; approve without deploy', () => {
+    expect(flat).toMatch(/the parameter must be set in the CPI web editor \(Configure\) before deploying, and recommend approving \*\*without\*\* deploy/)
+    expect(flat).toMatch(/never configures a placeholder default as the parameter's value/)
+  })
+
+  test('5: callers of an HTTPS-triggered iFlow need ESBMessaging.send', () => {
+    expect(flat).toMatch(/For an \*\*HTTPS-triggered\*\* iFlow, tell the user that its callers need credentials with the role `ESBMessaging\.send`: a service key of a \*\*Process Integration Runtime\*\* instance with plan \*\*integration-flow\*\*/)
+  })
+})
+

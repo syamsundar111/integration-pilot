@@ -1445,3 +1445,23 @@ describe('header and property types (system prompt review, item 3)', () => {
     expect(turn.proposals[0].spec.steps[0].properties).toEqual([{ name: 'Source', type: 'constant', value: 'Shop' }])
   })
 })
+
+describe('placeholder parameter defaults (system prompt review, item 4)', () => {
+  test('a placeholder default is not configured, and the iFlow is not deployed while one is left', async () => {
+    const spec = { ...sample, id: 'Placeholder_URL_1', name: 'Placeholder URL 1', parameters: { ReceiverURL: 'https://<tenant>-rt.example.com/http/notify' } }
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec })).mockResolvedValueOnce(answer('ready'))
+    const turn = await chat({ message: 'propose Placeholder_URL_1' })
+    cpi.updateConfiguration.mockClear()
+    cpi.deployIflow.mockClear()
+
+    await POST(`/api/Proposals/${turn.proposals[0].ID}/approve`, { deploy: true })
+    const done = await waitFor(turn.proposals[0].ID)
+    expect(done.status).toBe('DONE')
+    const step = (key) => done.result.steps.find((s) => s.key === key)
+    expect(step('configure')).toMatchObject({ status: 'warning', detail: expect.stringMatching(/^Not configured, the default is a placeholder: ReceiverURL\. Set the real value in the CPI web editor \(Configure\) before deploying\.$/) })
+    expect(step('deploy')).toMatchObject({ status: 'warning', detail: expect.stringMatching(/^Not deployed: ReceiverURL still has a placeholder/) })
+    expect(step('runtime')).toMatchObject({ status: 'skipped' })
+    expect(cpi.updateConfiguration).not.toHaveBeenCalled()
+    expect(cpi.deployIflow).not.toHaveBeenCalled()
+  })
+})

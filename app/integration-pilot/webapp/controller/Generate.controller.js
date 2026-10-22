@@ -799,6 +799,11 @@ sap.ui.define(
               : [])
           ]
           active.params = Object.entries(spec.parameters || {}).map(([key, value]) => ({ key, value }))
+          // same rule as srv/lib/proposals.js: a placeholder default is not configured on approval
+          const placeholderParams = active.params.filter((x) => /<[^<>\s][^<>]*>/.test(String(x.value))).map((x) => x.key)
+          active.placeholderText = placeholderParams.length
+            ? `${placeholderParams.join(', ')}: the default is a placeholder. It is not configured on approval — set the real value in the CPI web editor (Configure) before deploying. Approve without deploy.`
+            : ''
           const attached = p.attachments || {}
           active.scripts = [...spec.steps, ...((spec.exceptionSubprocess && spec.exceptionSubprocess.steps) || [])]
             .filter((s) => s.type === 'groovyScript')

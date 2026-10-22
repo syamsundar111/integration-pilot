@@ -16,6 +16,8 @@ const groovyCheck = require('./groovy-check')
 
 const LOG = cds.log('proposals')
 const POLL_INTERVAL_MS = Number(process.env.DEPLOY_POLL_INTERVAL_MS || 5_000)
+// a parameter default that is a placeholder, not a value: https://<tenant>/http/..., <your-host>
+const PLACEHOLDER_VALUE = /<[^<>\s][^<>]*>/
 const POLL_TIMEOUT_MS = Number(process.env.DEPLOY_POLL_TIMEOUT_MS || 120_000)
 const INTERRUPTED = 'Execution interrupted by server restart — retry'
 
@@ -264,16 +266,25 @@ async function execute(proposal, result, user) {
         return detail
       })
 
+      // a placeholder default (e.g. https://<tenant>/http/...) is never configured: the user sets the real value
+      const all = Object.entries(spec.parameters || {})
+      const placeholders = all.filter(([, v]) => PLACEHOLDER_VALUE.test(String(v))).map(([k]) => k)
       await step('configure', async () => {
-        const params = Object.entries(spec.parameters || {})
-        if (!params.length) return 'skipped'
-        await audited(req, { action: 'UPDATE_CONFIGURATION', targetType: 'Iflow', targetId: spec.id, details: { keys: params.map(([k]) => k), proposal: proposal.ID } }, async () => {
-          for (const [key, value] of params) await cpi.updateConfiguration(spec.id, key, value)
-        })
-        return `Set ${params.map(([k]) => k).join(', ')}`
+        const params = all.filter(([k]) => !placeholders.includes(k))
+        if (params.length)
+          await audited(req, { action: 'UPDATE_CONFIGURATION', targetType: 'Iflow', targetId: spec.id, details: { keys: params.map(([k]) => k), proposal: proposal.ID } }, async () => {
+            for (const [key, value] of params) await cpi.updateConfiguration(spec.id, key, value)
+          })
+        if (!placeholders.length) return params.length ? `Set ${params.map(([k]) => k).join(', ')}` : 'skipped'
+        result.warning = `Not configured, the default is a placeholder: ${placeholders.join(', ')}. Set the real value in the CPI web editor (Configure) before deploying.`
+        return { status: 'warning', detail: `${params.length ? `Set ${params.map(([k]) => k).join(', ')}. ` : ''}${result.warning}` }
       })
 
-      if (result.deploy) {
+      if (result.deploy && placeholders.length) {
+        // deploying with a placeholder URL would only fail at runtime
+        await step('deploy', async () => ({ status: 'warning', detail: `Not deployed: ${placeholders.join(', ')} still has a placeholder. Set it, then deploy from the iFlows page.` }))
+        await step('runtime', async () => 'skipped')
+      } else if (result.deploy) {
         let taskId
         await step('deploy', async () => {
           ;({ taskId } = await audited(req, { action: 'DEPLOY_IFLOW', targetType: 'Iflow', targetId: spec.id, details: { proposal: proposal.ID } }, () => cpi.deployIflow(spec.id)))

@@ -318,6 +318,7 @@
                   </VBox>
 
                   <Title text="Externalized parameters" level="H5" visible="{= ${chat>/active/params}.length > 0 }" />
+                  <MessageStrip text="{chat>/active/placeholderText}" type="Warning" showIcon="true" visible="{= !!${chat>/active/placeholderText} }" class="sapUiTinyMarginBottom" />
                   <Table items="{chat>/active/params}" visible="{= ${chat>/active/params}.length > 0 }">
                     <columns>
                       <Column width="35%"><Text text="Parameter" /></Column>
