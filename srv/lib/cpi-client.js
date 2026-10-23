@@ -483,9 +483,10 @@ async function undeployIflow(id) {
 
 /**
  * Message processing logs, newest first.
- * @param {{ status?: string, top?: number, sinceHours?: number }} options
+ * @param {{ status?: string, top?: number, skip?: number, sinceHours?: number }} options
+ *   skip: for paging ("load more"); CPI keeps the logs for a limited time (30 days by default)
  */
-async function listMessageLogs({ status, top = 50, sinceHours } = {}) {
+async function listMessageLogs({ status, top = 50, skip = 0, sinceHours } = {}) {
   const filters = []
   if (status) {
     status = String(status).toUpperCase()
@@ -499,7 +500,8 @@ async function listMessageLogs({ status, top = 50, sinceHours } = {}) {
     filters.push(`LogStart gt datetime'${since}'`)
   }
   top = Math.min(Math.max(Number(top) || 50, 1), 500)
-  let path = `/MessageProcessingLogs?$orderby=LogEnd%20desc&$top=${top}`
+  skip = Math.max(Number(skip) || 0, 0)
+  let path = `/MessageProcessingLogs?$orderby=LogEnd%20desc&$top=${top}${skip ? `&$skip=${skip}` : ''}`
   if (filters.length) path += `&$filter=${encodeURIComponent(filters.join(' and '))}`
   return results(await get(path, { role: 'MonitoringDataRead' })).map(mapMessageLog)
 }

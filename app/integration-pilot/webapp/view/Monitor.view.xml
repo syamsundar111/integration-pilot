@@ -82,6 +82,7 @@
                 <core:Item key="1" text="Last hour" />
                 <core:Item key="24" text="Last 24 hours" />
                 <core:Item key="168" text="Last 7 days" />
+                <core:Item key="720" text="Last 30 days (all CPI keeps)" />
               </Select>
             </OverflowToolbar>
           </headerToolbar>
@@ -112,6 +113,10 @@
             </ColumnListItem>
           </items>
         </Table>
+        <!-- the server sends 100 at a time; older ones on request (CPI keeps logs for a limited time) -->
+        <HBox justifyContent="Center" visible="{view>/logsMore}" class="sapUiSmallMarginTop">
+          <Button text="Load more" icon="sap-icon://drill-down" press=".onLoadMoreLogs" busy="{view>/logsBusy}" busyIndicatorDelay="0" />
+        </HBox>
       </VBox>
     </f:content>
   </f:DynamicPage>

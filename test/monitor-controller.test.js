@@ -30,7 +30,18 @@ function monitor() {
     { id: 'a', name: 'A', status: 'STARTED' },
     { id: 'b', name: 'B', status: 'ERROR' }
   ]
-  const api = { q: () => '', get: jest.fn(async (url) => (url.startsWith('/RuntimeArtifacts') ? runtime : [])) }
+  const api = {
+    q: (o) => `?${new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined))}`,
+    // message logs: 230 on the tenant, served in pages
+    get: jest.fn(async (url) => {
+      if (url.startsWith('/RuntimeArtifacts')) return runtime
+      if (!url.startsWith('/messageLogs')) return []
+      const q = new URLSearchParams(url.split('?')[1])
+      const skip = Number(q.get('skip') || 0)
+      const top = Number(q.get('top'))
+      return Array.from({ length: Math.max(0, Math.min(top, 230 - skip)) }, (_, i) => ({ messageGuid: `m${skip + i}` }))
+    })
+  }
   const BaseController = { extend: (_n, proto) => proto }
   const proto = factoryOf(path.join(__dirname, '../app/integration-pilot/webapp/controller/Monitor.controller.js'))(BaseController, JSONModel, null, null, null, null, api)
   const ctl = Object.create(proto)
@@ -74,3 +85,26 @@ describe('Monitor page filters follow the link that opened it', () => {
     ctl.onExit()
   })
 })
+
+describe('Monitor page: message logs over 30 days, loaded in pages', () => {
+  test('100 at a time; "Load more" continues where the list ends and stops after a short page', async () => {
+    const { open, view, ctl, api } = monitor()
+    await open({ hours: '720' })
+    expect(view.getProperty('/hours')).toBe('720')
+    expect(view.getProperty('/logs')).toHaveLength(100)
+    expect(view.getProperty('/logsMore')).toBe(true)
+    await ctl.onLoadMoreLogs()
+    expect(api.get).toHaveBeenLastCalledWith(expect.stringMatching(/skip=100/))
+    expect(view.getProperty('/logs')).toHaveLength(200)
+    await ctl.onLoadMoreLogs()
+    expect(view.getProperty('/logs').map((l) => l.messageGuid).slice(-1)).toEqual(['m229'])
+    expect(view.getProperty('/logs')).toHaveLength(230)
+    expect(view.getProperty('/logsMore')).toBe(false) // 30 < 100: the end
+    // a filter change starts over
+    view.setProperty('/logStatus', 'FAILED')
+    await ctl.loadLogs()
+    expect(view.getProperty('/logs')).toHaveLength(100)
+    ctl.onExit()
+  })
+})
+

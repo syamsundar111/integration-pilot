@@ -4,6 +4,7 @@ sap.ui.define(
     'use strict'
 
     const REFRESH_MS = 60000
+    const LOG_PAGE = 100 // message logs per request
 
     return BaseController.extend('integration.pilot.controller.Monitor', {
       onInit() {
@@ -17,6 +18,7 @@ sap.ui.define(
             pending: [],
             pendingText: '',
             logs: [],
+            logsMore: false,
             logsBusy: true,
             logsError: null,
             logStatus: '',
@@ -91,14 +93,30 @@ sap.ui.define(
         this.applyFilter()
       },
 
-      async loadLogs() {
+      /** First page of logs for the current filters (a filter change starts over) */
+      loadLogs() {
+        return this.fetchLogs(false)
+      },
+
+      /** Next page: the server sends LOG_PAGE logs at a time */
+      onLoadMoreLogs() {
+        return this.fetchLogs(true)
+      },
+
+      async fetchLogs(more) {
         const m = this.getModel('view')
+        const filters = { status: m.getProperty('/logStatus') || undefined, sinceHours: m.getProperty('/hours') }
+        const key = JSON.stringify(filters)
+        const skip = more ? m.getProperty('/logs').length : 0
         m.setProperty('/logsBusy', true)
         m.setProperty('/logsError', null)
         try {
-          m.setProperty('/logs', await api.get(`/messageLogs${api.q({ status: m.getProperty('/logStatus') || undefined, sinceHours: m.getProperty('/hours'), top: 100 })}`))
+          const page = await api.get(`/messageLogs${api.q({ ...filters, top: LOG_PAGE, ...(skip && { skip }) })}`)
+          if (key !== JSON.stringify({ status: m.getProperty('/logStatus') || undefined, sinceHours: m.getProperty('/hours') })) return // filters changed meanwhile
+          m.setProperty('/logs', more ? [...m.getProperty('/logs'), ...page] : page)
+          m.setProperty('/logsMore', page.length === LOG_PAGE) // a full page: there may be more
         } catch (e) {
-          m.setProperty('/logs', [])
+          if (!more) m.setProperty('/logs', [])
           m.setProperty('/logsError', e.hint ? `${e.message} — ${e.hint}` : e.message)
         } finally {
           m.setProperty('/logsBusy', false)

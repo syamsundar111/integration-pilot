@@ -212,8 +212,8 @@ service ApiService {
     logEnd               : String;
   }
 
-  /** GET /api/messageLogs?status=FAILED&top=50&sinceHours=24 (all optional) */
-  function messageLogs(status : String, top : Integer, sinceHours : Integer) returns many MessageLog;
+  /** GET /api/messageLogs?status=FAILED&top=50&skip=0&sinceHours=24 (all optional; skip pages through) */
+  function messageLogs(status : String, top : Integer, skip : Integer, sinceHours : Integer) returns many MessageLog;
 
   // --- AI agent -------------------------------------------------------------
 
