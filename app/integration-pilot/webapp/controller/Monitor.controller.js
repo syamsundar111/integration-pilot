@@ -28,8 +28,12 @@ sap.ui.define(
         route.attachPatternMatched((e) => {
           const query = e.getParameter('arguments')['?query'] || {}
           const m = this.getModel('view')
-          if (query.status) m.setProperty('/status', query.status)
-          if (query.logs !== undefined) m.setProperty('/logStatus', query.logs)
+          // every link sets the whole filter state: what it does not name goes back to the default
+          // (the Error tile's filter must not stay when the Deployed tile opens the page)
+          m.setProperty('/status', query.status || 'ALL')
+          m.setProperty('/logStatus', query.logs || '')
+          m.setProperty('/hours', query.hours || '24')
+          this.applyFilter() // the table follows at once, not only after the refresh
           this.onRefresh()
           clearInterval(this._timer)
           this._timer = setInterval(() => this.loadRuntime(), REFRESH_MS)
