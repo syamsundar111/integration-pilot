@@ -70,16 +70,6 @@
                 </List>
               </f:content>
             </f:Card>
-            <!-- quick actions -->
-            <f:Card>
-              <f:header><card:Header xmlns:card="sap.f.cards" title="Quick actions" /></f:header>
-              <f:content>
-                <List showSeparators="Inner" width="100%">
-                  <StandardListItem title="New iFlow with AI" description="Describe it, review the proposal, approve." icon="sap-icon://lightbulb" type="Navigation" press=".onNewIflow" />
-                  <StandardListItem title="Create package" description="A home for new integration flows." icon="sap-icon://product" type="Navigation" press=".onCreatePackage" />
-                </List>
-              </f:content>
-            </f:Card>
           </VBox>
         </HBox>
         <MessageStrip text="Message logs unavailable — the API key may lack the MonitoringDataRead role." type="Warning" showIcon="true" visible="{= !!${view>/stats} &amp;&amp; ${view>/stats/failedMessages24h} === null }" class="sapUiSmallMarginTop" />
