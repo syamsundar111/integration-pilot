@@ -48,6 +48,7 @@ function monitor() {
   let matched
   const models = {}
   Object.assign(ctl, {
+    byId: () => null, // no rendered panels in the test: scrolling is skipped
     setModel: (m, name) => (models[name] = m),
     getModel: (name) => models[name],
     getRouter: () => ({ getRoute: () => ({ attachPatternMatched: (fn) => (matched = fn) }), attachRouteMatched: () => {} })
@@ -104,6 +105,43 @@ describe('Monitor page: message logs over 30 days, loaded in pages', () => {
     view.setProperty('/logStatus', 'FAILED')
     await ctl.loadLogs()
     expect(view.getProperty('/logs')).toHaveLength(100)
+    ctl.onExit()
+  })
+})
+
+describe('Monitor page: collapsible sections', () => {
+  const store = {}
+  beforeEach(() => {
+    for (const k of Object.keys(store)) delete store[k]
+    global.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => (store[k] = String(v)) }
+  })
+  afterEach(() => delete global.localStorage)
+
+  test('both sections start open; a collapsed section is remembered for the next visit', async () => {
+    const first = monitor()
+    expect(first.view.getProperty('/open')).toEqual({ artifacts: true, logs: true })
+    first.ctl.onArtifactsToggle({ getParameter: () => false })
+    first.ctl.onExit()
+    const next = monitor() // the page opened again later
+    expect(next.view.getProperty('/open')).toEqual({ artifacts: false, logs: true })
+    next.ctl.onExit()
+  })
+
+  test('a link opens the section it points to, even if it was collapsed', async () => {
+    store['integrationPilot.monitor.open'] = JSON.stringify({ artifacts: false, logs: false })
+    const { open, view, ctl } = monitor()
+    await open({ logs: 'FAILED' }) // Dashboard: failed messages
+    expect(view.getProperty('/open/logs')).toBe(true)
+    await open({ status: 'ERROR' }) // Dashboard: in error
+    expect(view.getProperty('/open/artifacts')).toBe(true)
+    ctl.onExit()
+  })
+
+  test('the logs header counts the failed messages among those loaded', async () => {
+    const { open, view, api, ctl } = monitor()
+    api.get.mockImplementation(async (url) => (url.startsWith('/messageLogs') ? [{ status: 'FAILED' }, { status: 'COMPLETED' }, { status: 'FAILED' }] : []))
+    await open()
+    expect(view.getProperty('/logsFailed')).toBe(2)
     ctl.onExit()
   })
 })

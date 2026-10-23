@@ -11,13 +11,13 @@
     </f:title>
     <f:content>
       <VBox class="ipGapM" renderType="Bare">
-        <!-- runtime artifacts -->
-        <Table items="{view>/runtimeRows}" busy="{view>/runtimeBusy}" busyIndicatorDelay="0" class="ipCard" sticky="ColumnHeaders">
+        <!-- runtime artifacts: collapsible; the list scrolls inside a limited height, so the logs stay in view -->
+        <Panel id="artifactsPanel" expandable="true" expanded="{view>/open/artifacts}" expand=".onArtifactsToggle" class="ipCard ipMonitorPanel">
           <headerToolbar>
             <OverflowToolbar>
-              <Title text="Runtime artifacts" level="H3" />
+              <Title text="{= 'Runtime artifacts · ' + ${view>/counts/ALL} + (${view>/counts/ERROR} ? ' · ' + ${view>/counts/ERROR} + ' error' : '') }" level="H3" />
               <ToolbarSpacer />
-              <SegmentedButton selectedKey="{view>/status}" selectionChange=".onStatusFilter">
+              <SegmentedButton selectedKey="{view>/status}" selectionChange=".onStatusFilter" visible="{view>/open/artifacts}">
                 <items>
                   <SegmentedButtonItem key="ALL" text="All ({view>/counts/ALL})" />
                   <SegmentedButtonItem key="STARTED" text="Started ({view>/counts/STARTED})" />
@@ -27,6 +27,8 @@
               </SegmentedButton>
             </OverflowToolbar>
           </headerToolbar>
+          <VBox renderType="Bare" class="ipArtifactsScroll">
+        <Table items="{view>/runtimeRows}" busy="{view>/runtimeBusy}" busyIndicatorDelay="0" sticky="ColumnHeaders">
           <infoToolbar>
             <OverflowToolbar visible="{= ${view>/pending}.length > 0 }" design="Info">
               <core:Icon src="sap-icon://alert" />
@@ -62,14 +64,16 @@
             </ColumnListItem>
           </items>
         </Table>
+          </VBox>
+        </Panel>
 
-        <!-- message processing logs -->
-        <Table items="{view>/logs}" busy="{view>/logsBusy}" busyIndicatorDelay="0" class="ipCard" growing="true" growingThreshold="25">
+        <!-- message processing logs: collapsible -->
+        <Panel id="logsPanel" expandable="true" expanded="{view>/open/logs}" expand=".onLogsToggle" class="ipCard ipMonitorPanel">
           <headerToolbar>
             <OverflowToolbar>
-              <Title text="Message processing logs" level="H3" />
+              <Title text="{= 'Message processing logs · ' + ${view>/logs}.length + (${view>/logsMore} ? '+' : '') + (${view>/logsFailed} ? ' · ' + ${view>/logsFailed} + ' failed' : '') }" level="H3" />
               <ToolbarSpacer />
-              <Select selectedKey="{view>/logStatus}" change=".loadLogs" width="11rem" tooltip="Message status">
+              <Select selectedKey="{view>/logStatus}" change=".loadLogs" width="11rem" tooltip="Message status" visible="{view>/open/logs}">
                 <core:Item key="" text="All statuses" />
                 <core:Item key="FAILED" text="Failed" />
                 <core:Item key="COMPLETED" text="Completed" />
@@ -78,7 +82,7 @@
                 <core:Item key="ESCALATED" text="Escalated" />
                 <core:Item key="CANCELLED" text="Cancelled" />
               </Select>
-              <Select selectedKey="{view>/hours}" change=".loadLogs" width="10rem" tooltip="Time window">
+              <Select selectedKey="{view>/hours}" change=".loadLogs" width="10rem" tooltip="Time window" visible="{view>/open/logs}">
                 <core:Item key="1" text="Last hour" />
                 <core:Item key="24" text="Last 24 hours" />
                 <core:Item key="168" text="Last 7 days" />
@@ -86,6 +90,7 @@
               </Select>
             </OverflowToolbar>
           </headerToolbar>
+        <Table items="{view>/logs}" busy="{view>/logsBusy}" busyIndicatorDelay="0" growing="true" growingThreshold="25">
           <infoToolbar>
             <OverflowToolbar visible="{= !!${view>/logsError} }" design="Info">
               <Text text="{view>/logsError}" />
@@ -117,6 +122,7 @@
         <HBox justifyContent="Center" visible="{view>/logsMore}" class="sapUiSmallMarginTop">
           <Button text="Load more" icon="sap-icon://drill-down" press=".onLoadMoreLogs" busy="{view>/logsBusy}" busyIndicatorDelay="0" />
         </HBox>
+        </Panel>
       </VBox>
     </f:content>
   </f:DynamicPage>

@@ -550,3 +550,14 @@
 .ipUsage {
   font-size: var(--sapFontSmallSize);
 }
+
+/* Monitor: collapsible sections; the artifact list scrolls inside a limited height, so the message
+   logs below stay in view with many artifacts (column headers stick to the top of the list) */
+.ipMonitorPanel > .sapMPanelContent {
+  padding: 0;
+}
+.ipArtifactsScroll {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+

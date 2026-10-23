@@ -5,6 +5,17 @@ sap.ui.define(
 
     const REFRESH_MS = 60000
     const LOG_PAGE = 100 // message logs per request
+    const OPEN_KEY = 'integrationPilot.monitor.open' // which sections are expanded, remembered in this browser
+
+    function readOpen() {
+      try {
+        const v = JSON.parse(localStorage.getItem(OPEN_KEY))
+        if (v && typeof v === 'object') return { artifacts: v.artifacts !== false, logs: v.logs !== false }
+      } catch (e) {
+        // not remembered (private window or blocked storage): both open
+      }
+      return { artifacts: true, logs: true }
+    }
 
     return BaseController.extend('integration.pilot.controller.Monitor', {
       onInit() {
@@ -17,8 +28,10 @@ sap.ui.define(
             status: 'ALL',
             pending: [],
             pendingText: '',
+            open: readOpen(),
             logs: [],
             logsMore: false,
+            logsFailed: 0,
             logsBusy: true,
             logsError: null,
             logStatus: '',
@@ -36,12 +49,42 @@ sap.ui.define(
           m.setProperty('/logStatus', query.logs || '')
           m.setProperty('/hours', query.hours || '24')
           this.applyFilter() // the table follows at once, not only after the refresh
+          // a link opens the section it points to, even if it was collapsed, and scrolls to it
+          if (query.status) this.openSection('artifacts', 'artifactsPanel')
+          else if (query.logs) this.openSection('logs', 'logsPanel')
           this.onRefresh()
           clearInterval(this._timer)
           this._timer = setInterval(() => this.loadRuntime(), REFRESH_MS)
         })
         // stop auto-refresh when leaving the page
         this.getRouter().attachRouteMatched((e) => e.getParameter('name') !== 'monitor' && clearInterval(this._timer))
+      },
+
+      onArtifactsToggle(e) {
+        this.saveOpen('artifacts', e.getParameter('expand'))
+      },
+
+      onLogsToggle(e) {
+        this.saveOpen('logs', e.getParameter('expand'))
+      },
+
+      saveOpen(section, expanded) {
+        const m = this.getModel('view')
+        m.setProperty(`/open/${section}`, expanded)
+        try {
+          localStorage.setItem(OPEN_KEY, JSON.stringify(m.getProperty('/open')))
+        } catch (e) {
+          // not remembered
+        }
+      },
+
+      /** Expands a section for a link that points to it, and scrolls it into view once rendered */
+      openSection(section, panelId) {
+        this.getModel('view').setProperty(`/open/${section}`, true)
+        setTimeout(() => {
+          const dom = this.byId && this.byId(panelId) && this.byId(panelId).getDomRef()
+          if (dom && dom.scrollIntoView) dom.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        }, 300)
       },
 
       onExit() {
@@ -114,6 +157,7 @@ sap.ui.define(
           const page = await api.get(`/messageLogs${api.q({ ...filters, top: LOG_PAGE, ...(skip && { skip }) })}`)
           if (key !== JSON.stringify({ status: m.getProperty('/logStatus') || undefined, sinceHours: m.getProperty('/hours') })) return // filters changed meanwhile
           m.setProperty('/logs', more ? [...m.getProperty('/logs'), ...page] : page)
+          m.setProperty('/logsFailed', m.getProperty('/logs').filter((l) => l.status === 'FAILED').length)
           m.setProperty('/logsMore', page.length === LOG_PAGE) // a full page: there may be more
         } catch (e) {
           if (!more) m.setProperty('/logs', [])
