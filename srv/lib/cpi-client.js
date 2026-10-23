@@ -483,11 +483,15 @@ async function undeployIflow(id) {
 
 /**
  * Message processing logs, newest first.
- * @param {{ status?: string, top?: number, skip?: number, sinceHours?: number }} options
+ * @param {{ status?: string, top?: number, skip?: number, sinceHours?: number, iflowId?: string, search?: string }} options
  *   skip: for paging ("load more"); CPI keeps the logs for a limited time (30 days by default)
+ *   iflowId: one iFlow exactly; search: part of the iFlow name, any case (both checked on the tenant)
  */
-async function listMessageLogs({ status, top = 50, skip = 0, sinceHours } = {}) {
+async function listMessageLogs({ status, top = 50, skip = 0, sinceHours, iflowId, search } = {}) {
   const filters = []
+  const str = (v) => `'${String(v).replace(/'/g, "''")}'` // OData string literal
+  if (iflowId) filters.push(`IntegrationArtifact/Id eq ${str(iflowId)}`)
+  else if (search && String(search).trim()) filters.push(`substringof(${str(String(search).trim().toLowerCase())},tolower(IntegrationFlowName))`)
   if (status) {
     status = String(status).toUpperCase()
     if (!MESSAGE_STATUSES.includes(status))

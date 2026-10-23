@@ -30,3 +30,23 @@ describe('listMessageLogs', () => {
     expect(lastUrl()).not.toContain('$skip')
   })
 })
+
+describe('listMessageLogs: one iFlow or a name search (filters checked on a real tenant)', () => {
+  test('iflowId: the exact iFlow', async () => {
+    await cpi.listMessageLogs({ iflowId: 'Test03_Northwind', sinceHours: 24 })
+    expect(lastUrl()).toMatch(/\$filter=IntegrationArtifact\/Id eq 'Test03_Northwind' and LogStart gt/)
+  })
+
+  test('search: part of the name, any case; quotes are escaped', async () => {
+    await cpi.listMessageLogs({ search: '  NorthWind ' })
+    expect(lastUrl()).toMatch(/\$filter=substringof\('northwind',tolower\(IntegrationFlowName\)\)$/)
+    await cpi.listMessageLogs({ search: "o'brien" })
+    expect(lastUrl()).toContain("substringof('o''brien',tolower(IntegrationFlowName))")
+  })
+
+  test('iflowId wins over search', async () => {
+    await cpi.listMessageLogs({ iflowId: 'A', search: 'b' })
+    expect(lastUrl()).toMatch(/IntegrationArtifact\/Id eq 'A'/)
+    expect(lastUrl()).not.toContain('substringof')
+  })
+})

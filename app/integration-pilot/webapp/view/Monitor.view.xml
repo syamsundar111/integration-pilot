@@ -17,6 +17,7 @@
             <OverflowToolbar>
               <Title text="{= 'Runtime artifacts · ' + ${view>/counts/ALL} + (${view>/counts/ERROR} ? ' · ' + ${view>/counts/ERROR} + ' error' : '') }" level="H3" />
               <ToolbarSpacer />
+              <SearchField value="{view>/artifactSearch}" liveChange=".onArtifactSearch" placeholder="Search iFlows" width="14rem" visible="{view>/open/artifacts}" />
               <SegmentedButton selectedKey="{view>/status}" selectionChange=".onStatusFilter" visible="{view>/open/artifacts}">
                 <items>
                   <SegmentedButtonItem key="ALL" text="All ({view>/counts/ALL})" />
@@ -38,8 +39,8 @@
           <noData>
             <IllustratedMessage
               illustrationType="sapIllus-NoActivities"
-              title="{= ${view>/status} === 'ALL' ? 'Nothing deployed' : 'No artifacts with status ' + ${view>/status} }"
-              description="{= ${view>/status} === 'ALL' ? 'Deploy an iFlow to see it here.' : 'Everything else looks fine.' }"
+              title="{= ${view>/artifactSearch} ? 'No match for ' + ${view>/artifactSearch} : ${view>/status} === 'ALL' ? 'Nothing deployed' : 'No artifacts with status ' + ${view>/status} }"
+              description="{= ${view>/artifactSearch} ? 'Search by iFlow name or ID.' : ${view>/status} === 'ALL' ? 'Deploy an iFlow to see it here.' : 'Everything else looks fine.' }"
             />
           </noData>
           <columns>
@@ -48,6 +49,7 @@
             <Column minScreenWidth="Tablet" demandPopin="true"><Text text="Version" /></Column>
             <Column minScreenWidth="Desktop" demandPopin="true"><Text text="Deployed" /></Column>
             <Column><Text text="Status" /></Column>
+            <Column width="3rem" hAlign="End"><Text text="" /></Column>
           </columns>
           <items>
             <ColumnListItem type="{= ${view>status} === 'ERROR' ? 'Navigation' : 'Inactive' }" press=".onShowError">
@@ -60,6 +62,7 @@
                   <Text text="{view>deployedBy}" class="ipSubtle" />
                 </VBox>
                 <ObjectStatus text="{view>status}" state="{path: 'view>status', formatter: '.formatter.statusState'}" inverted="true" class="ipNoWrap" />
+                <Button icon="sap-icon://message-popup" type="Transparent" tooltip="Messages of this iFlow" press=".onShowMessages" />
               </cells>
             </ColumnListItem>
           </items>
@@ -73,6 +76,9 @@
             <OverflowToolbar>
               <Title text="{= 'Message processing logs · ' + ${view>/logs}.length + (${view>/logsMore} ? '+' : '') + (${view>/logsFailed} ? ' · ' + ${view>/logsFailed} + ' failed' : '') }" level="H3" />
               <ToolbarSpacer />
+              <!-- one iFlow (from an artifact row's Messages button), or a name search sent to CPI so older messages are found too -->
+              <Button text="iFlow: {view>/logIflowName}" icon="sap-icon://decline" iconFirst="false" tooltip="Show all iFlows" press=".onClearIflow" visible="{= ${view>/open/logs} &amp;&amp; !!${view>/logIflow} }" />
+              <SearchField value="{view>/logSearch}" search=".onLogSearch" placeholder="Search iFlow name" width="14rem" visible="{= ${view>/open/logs} &amp;&amp; !${view>/logIflow} }" />
               <Select selectedKey="{view>/logStatus}" change=".loadLogs" width="11rem" tooltip="Message status" visible="{view>/open/logs}">
                 <core:Item key="" text="All statuses" />
                 <core:Item key="FAILED" text="Failed" />

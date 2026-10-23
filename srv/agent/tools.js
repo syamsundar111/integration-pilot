@@ -39,7 +39,8 @@ const definitions = [
   fn('listIflows', 'iFlows of one package.', { packageId: { type: 'string' } }, ['packageId']),
   fn('getIflowDetails', 'Details, parameters and runtime status of one iFlow.', { iflowId: { type: 'string' } }, ['iflowId']),
   fn('getRuntimeStatus', 'Runtime status of deployed artifacts; with iflowId one iFlow, incl. its error.', { iflowId: { type: 'string' } }),
-  fn('getMessageLogs', 'Recent message processing logs, newest first.', {
+  fn('getMessageLogs', 'Recent message processing logs, newest first; iflowId for one iFlow.', {
+    iflowId: { type: 'string' },
     status: { type: 'string', enum: cpi.MESSAGE_STATUSES },
     sinceHours: { type: 'integer', minimum: 1, maximum: 720 },
     top: { type: 'integer', minimum: 1, maximum: 50 }
@@ -411,8 +412,8 @@ const handlers = {
     return { counts, artifacts: all.slice(0, 50).map(({ id, name, type, status, deployedOn }) => ({ id, name, type, status, deployedOn })) }
   },
 
-  async getMessageLogs({ status, sinceHours = 24, top = 20 } = {}) {
-    return cpi.listMessageLogs({ status, sinceHours, top })
+  async getMessageLogs({ iflowId, status, sinceHours = 24, top = 20 } = {}) {
+    return cpi.listMessageLogs({ iflowId, status, sinceHours, top })
   },
 
   async getSupportedSteps({ full } = {}) {

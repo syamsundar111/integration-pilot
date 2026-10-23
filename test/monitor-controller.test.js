@@ -146,3 +146,45 @@ describe('Monitor page: collapsible sections', () => {
   })
 })
 
+
+describe('iFlow search and the Messages button', () => {
+  const press = (ctl, row) => ({ getSource: () => ({ getBindingContext: () => ({ getObject: () => row }) }) })
+  const logQuery = (api) => new URLSearchParams(api.get.mock.calls.filter(([u]) => u.startsWith('/messageLogs')).at(-1)[0].split('?')[1])
+
+  test('artifact search narrows the rows by name or ID, together with the status filter', async () => {
+    const { open, view, ctl } = monitor()
+    await open()
+    ctl.onArtifactSearch({ getParameter: () => ' b ' })
+    expect(view.getProperty('/runtimeRows').map((r) => r.id)).toEqual(['b'])
+    view.setProperty('/status', 'STARTED')
+    ctl.onStatusFilter()
+    expect(view.getProperty('/runtimeRows')).toEqual([])
+    ctl.onExit()
+  })
+
+  test('Messages on a row: the logs of that iFlow, opened; clearing shows all again', async () => {
+    const { open, view, ctl, api } = monitor()
+    await open()
+    view.setProperty('/open/logs', false)
+    await ctl.onShowMessages(press(ctl, { id: 'a', name: 'A' }))
+    expect(view.getProperty('/open/logs')).toBe(true)
+    expect(view.getProperty('/logIflowName')).toBe('A')
+    expect(logQuery(api).get('iflowId')).toBe('a')
+    await ctl.onClearIflow()
+    expect(logQuery(api).has('iflowId')).toBe(false)
+    ctl.onExit()
+  })
+
+  test('log search is sent to the server; a later plain link clears it and the iFlow', async () => {
+    const { open, view, ctl, api } = monitor()
+    await open({ iflow: 'a' })
+    expect(logQuery(api).get('iflowId')).toBe('a')
+    await ctl.onLogSearch({ getParameter: () => ' north ' })
+    expect(logQuery(api).get('search')).toBe('north')
+    await open()
+    expect(view.getProperty('/logIflow')).toBe('')
+    expect(view.getProperty('/logSearch')).toBe('')
+    expect(logQuery(api).has('search')).toBe(false)
+    ctl.onExit()
+  })
+})

@@ -26,6 +26,7 @@ sap.ui.define(
             runtimeBusy: true,
             counts: { ALL: 0, STARTED: 0, ERROR: 0, STARTING: 0 },
             status: 'ALL',
+            artifactSearch: '',
             pending: [],
             pendingText: '',
             open: readOpen(),
@@ -35,6 +36,9 @@ sap.ui.define(
             logsBusy: true,
             logsError: null,
             logStatus: '',
+            logIflow: '', // one iFlow by ID (Messages button on an artifact row)
+            logIflowName: '',
+            logSearch: '', // part of the iFlow name, filtered by CPI
             hours: '24'
           }),
           'view'
@@ -48,10 +52,14 @@ sap.ui.define(
           m.setProperty('/status', query.status || 'ALL')
           m.setProperty('/logStatus', query.logs || '')
           m.setProperty('/hours', query.hours || '24')
+          m.setProperty('/logIflow', query.iflow || '')
+          m.setProperty('/logIflowName', query.iflow || '')
+          m.setProperty('/logSearch', '')
+          m.setProperty('/artifactSearch', '')
           this.applyFilter() // the table follows at once, not only after the refresh
           // a link opens the section it points to, even if it was collapsed, and scrolls to it
           if (query.status) this.openSection('artifacts', 'artifactsPanel')
-          else if (query.logs) this.openSection('logs', 'logsPanel')
+          else if (query.logs || query.iflow) this.openSection('logs', 'logsPanel')
           this.onRefresh()
           clearInterval(this._timer)
           this._timer = setInterval(() => this.loadRuntime(), REFRESH_MS)
@@ -125,15 +133,55 @@ sap.ui.define(
       applyFilter() {
         const m = this.getModel('view')
         const status = m.getProperty('/status')
+        const search = (m.getProperty('/artifactSearch') || '').trim().toLowerCase()
         const rows = m
           .getProperty('/runtime')
           .filter((r) => status === 'ALL' || r.status === status)
+          .filter((r) => !search || `${r.name}\n${r.id}`.toLowerCase().includes(search))
           .sort((a, b) => (b.status === 'ERROR') - (a.status === 'ERROR') || a.name.localeCompare(b.name))
         m.setProperty('/runtimeRows', rows)
       },
 
       onStatusFilter() {
         this.applyFilter()
+      },
+
+      onArtifactSearch(e) {
+        this.getModel('view').setProperty('/artifactSearch', e.getParameter('newValue'))
+        this.applyFilter()
+      },
+
+      /** Messages button on an artifact row: the logs of that iFlow */
+      onShowMessages(e) {
+        const r = e.getSource().getBindingContext('view').getObject()
+        const m = this.getModel('view')
+        m.setProperty('/logIflow', r.id)
+        m.setProperty('/logIflowName', r.name || r.id)
+        m.setProperty('/logSearch', '')
+        this.openSection('logs', 'logsPanel')
+        return this.loadLogs()
+      },
+
+      onClearIflow() {
+        this.getModel('view').setProperty('/logIflow', '')
+        return this.loadLogs()
+      },
+
+      /** Enter or the clear icon in the log search field */
+      onLogSearch(e) {
+        this.getModel('view').setProperty('/logSearch', (e.getParameter('query') || '').trim())
+        return this.loadLogs()
+      },
+
+      /** The filters sent to the server for the message logs */
+      logFilters() {
+        const m = this.getModel('view')
+        return {
+          status: m.getProperty('/logStatus') || undefined,
+          sinceHours: m.getProperty('/hours'),
+          iflowId: m.getProperty('/logIflow') || undefined,
+          search: m.getProperty('/logSearch') || undefined
+        }
       },
 
       /** First page of logs for the current filters (a filter change starts over) */
@@ -148,14 +196,14 @@ sap.ui.define(
 
       async fetchLogs(more) {
         const m = this.getModel('view')
-        const filters = { status: m.getProperty('/logStatus') || undefined, sinceHours: m.getProperty('/hours') }
+        const filters = this.logFilters()
         const key = JSON.stringify(filters)
         const skip = more ? m.getProperty('/logs').length : 0
         m.setProperty('/logsBusy', true)
         m.setProperty('/logsError', null)
         try {
           const page = await api.get(`/messageLogs${api.q({ ...filters, top: LOG_PAGE, ...(skip && { skip }) })}`)
-          if (key !== JSON.stringify({ status: m.getProperty('/logStatus') || undefined, sinceHours: m.getProperty('/hours') })) return // filters changed meanwhile
+          if (key !== JSON.stringify(this.logFilters())) return // filters changed meanwhile
           m.setProperty('/logs', more ? [...m.getProperty('/logs'), ...page] : page)
           m.setProperty('/logsFailed', m.getProperty('/logs').filter((l) => l.status === 'FAILED').length)
           m.setProperty('/logsMore', page.length === LOG_PAGE) // a full page: there may be more
