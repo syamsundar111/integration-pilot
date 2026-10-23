@@ -16,12 +16,12 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
       )
       m.setProperty('/failedBusy', true)
       api
-        .get(`/messageLogs${api.q({ status: 'FAILED', sinceHours: 24, top: 6 })}`)
+        .get(`/messageLogs${api.q({ status: 'FAILED', sinceHours: 24, top: 20 })}`) // the card scrolls its list
         .then((d) => m.setProperty('/failed', d), () => m.setProperty('/failed', []))
         .finally(() => m.setProperty('/failedBusy', false))
       m.setProperty('/proposalsBusy', true)
       api
-        .get(`/Proposals${api.q({ $orderby: 'createdAt desc', $top: 6, $select: 'ID,kind,status,iflowId,packageId,createdAt,session_ID' })}`)
+        .get(`/Proposals${api.q({ $orderby: 'createdAt desc', $top: 20, $select: 'ID,kind,status,iflowId,packageId,createdAt,session_ID' })}`)
         .then((d) => m.setProperty('/proposals', d), () => m.setProperty('/proposals', []))
         .finally(() => m.setProperty('/proposalsBusy', false))
     },

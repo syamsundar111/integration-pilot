@@ -1,5 +1,5 @@
 <mvc:View controllerName="integration.pilot.controller.Dashboard" xmlns:mvc="sap.ui.core.mvc" xmlns="sap.m" xmlns:f="sap.f" xmlns:core="sap.ui.core">
-  <f:DynamicPage id="page" toggleHeaderOnTitleClick="false">
+  <f:DynamicPage id="page" toggleHeaderOnTitleClick="false" fitContent="true">
     <f:title>
       <f:DynamicPageTitle>
         <f:heading><Title text="Dashboard" level="H2" /></f:heading>
@@ -12,8 +12,10 @@
       </f:DynamicPageTitle>
     </f:title>
     <f:content>
-      <VBox>
+      <!-- wide screens: the page is fixed and each card scrolls its own list; narrow screens: the page scrolls -->
+      <VBox renderType="Bare" class="ipDashPage">
         <MessageStrip text="{view>/statsError/message}" type="Error" showIcon="true" visible="{= !!${view>/statsError} }" class="sapUiSmallMarginBottom" />
+        <MessageStrip text="Message logs unavailable — the API key may lack the MonitoringDataRead role." type="Warning" showIcon="true" visible="{= !!${view>/stats} &amp;&amp; ${view>/stats/failedMessages24h} === null }" class="sapUiSmallMarginBottom" />
 
         <!-- KPI tiles -->
         <HBox class="ipKpiRow" renderType="Bare">
@@ -34,12 +36,12 @@
 
         <HBox renderType="Bare" class="ipDashGrid sapUiSmallMarginTop">
           <!-- failed messages -->
-          <f:Card>
+          <f:Card class="ipDashCard">
             <f:header>
               <card:Header xmlns:card="sap.f.cards" title="Failed messages · last 24h" subtitle="{= ${view>/stats/failedMessages24h} !== undefined &amp;&amp; ${view>/stats/failedMessages24h} !== null ? ${view>/stats/failedMessages24h} + (${view>/stats/failedMessages24hCapped} ? '+' : '') + ' failed' : '' }" iconSrc="sap-icon://message-error" press=".onMonitorFailed" />
             </f:header>
             <f:content>
-              <List items="{view>/failed}" busy="{view>/failedBusy}" busyIndicatorDelay="0" showSeparators="Inner" noData="Nothing failed in the last 24 hours." width="100%">
+              <List items="{view>/failed}" busy="{view>/failedBusy}" busyIndicatorDelay="0" showSeparators="Inner" noData="Nothing failed in the last 24 hours." width="100%" class="ipDashList">
                 <noData>
                   <IllustratedMessage illustrationType="sapIllus-NoActivities" illustrationSize="ExtraSmall" title="No failed messages" description="Nothing failed in the last 24 hours." enableVerticalResponsiveness="true" />
                 </noData>
@@ -48,14 +50,13 @@
             </f:content>
           </f:Card>
 
-          <VBox class="ipGapM" renderType="Bare">
-            <!-- recent proposals -->
-            <f:Card>
+          <!-- recent proposals -->
+          <f:Card class="ipDashCard">
               <f:header>
                 <card:Header xmlns:card="sap.f.cards" title="Recent proposals" iconSrc="sap-icon://lightbulb" press=".onNewIflow" />
               </f:header>
               <f:content>
-                <List items="{view>/proposals}" busy="{view>/proposalsBusy}" busyIndicatorDelay="0" showSeparators="Inner" width="100%">
+                <List items="{view>/proposals}" busy="{view>/proposalsBusy}" busyIndicatorDelay="0" showSeparators="Inner" width="100%" class="ipDashList">
                   <noData>
                     <IllustratedMessage illustrationType="sapIllus-NoData" illustrationSize="ExtraSmall" title="No proposals yet" description="Describe an integration in Generate and the AI proposes an iFlow for you to approve." enableVerticalResponsiveness="true" />
                   </noData>
@@ -69,10 +70,8 @@
                   />
                 </List>
               </f:content>
-            </f:Card>
-          </VBox>
+          </f:Card>
         </HBox>
-        <MessageStrip text="Message logs unavailable — the API key may lack the MonitoringDataRead role." type="Warning" showIcon="true" visible="{= !!${view>/stats} &amp;&amp; ${view>/stats/failedMessages24h} === null }" class="sapUiSmallMarginTop" />
       </VBox>
     </f:content>
   </f:DynamicPage>

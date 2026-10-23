@@ -71,6 +71,45 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* Dashboard, wide screens: the page fills the window, the tiles keep their size, and the two cards
+   share the rest; each card scrolls its own list under a header that stays visible */
+@media (min-width: 1101px) {
+  .ipDashPage {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .ipDashPage > .ipDashGrid {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .ipDashCard {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+  .ipDashCard .sapFCardContent {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  /* an empty list: its note in the middle of the card */
+  .ipDashCard .ipDashList {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .ipDashCard .ipDashList .sapMListUl:has(.sapMListNoData) {
+    flex: 1 1 auto;
+    display: flex;
+  }
+  .ipDashCard .ipDashList .sapMListNoData {
+    margin: auto;
+  }
+}
 .ipKpiRow .sapMGT {
   width: 100%;
   margin: 0;
