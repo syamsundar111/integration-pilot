@@ -3,10 +3,13 @@ sap.ui.define(
   (BaseController, JSONModel, Dialog, Button, Text, api) => {
     'use strict'
 
+    // before the first load and after a failed one: zeros, not "undefined failed"
+    const emptyUsage = () => ({ totals: { requests: 0, failed: 0, modelCalls: 0, inputTokens: 0, outputTokens: 0 }, byDay: [], byModel: [] })
+
     return BaseController.extend('integration.pilot.controller.Activity', {
       onInit() {
         this.setModel(
-          new JSONModel({ entries: [], filtered: [], actions: [], action: '', status: '', search: '', busy: true, usage: { totals: {}, byDay: [], byModel: [] }, usageDays: '30', usageBusy: false, usageError: null }),
+          new JSONModel({ entries: [], filtered: [], actions: [], action: '', status: '', search: '', busy: true, usage: emptyUsage(), usageDays: '30', usageBusy: false, usageError: null }),
           'view'
         )
         this.getRouter()
@@ -23,7 +26,7 @@ sap.ui.define(
           m.setProperty('/usageError', null)
         } catch (e) {
           // shown in the usage panel; the audit log below still works without the usage summary
-          m.setProperty('/usage', { totals: {}, byDay: [], byModel: [] }) // not the numbers of the previous period
+          m.setProperty('/usage', emptyUsage()) // not the numbers of the previous period
           m.setProperty('/usageError', e.hint ? `${e.message} — ${e.hint}` : e.message)
         } finally {
           m.setProperty('/usageBusy', false)

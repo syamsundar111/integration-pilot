@@ -120,13 +120,14 @@ describe('Activity AI usage', () => {
     const { ctl, view } = controller('Activity', [null, null, null, api])
     ctl.formatter = { humanize: (s) => s }
     ctl.applyFilter = () => {}
+    expect(view.getProperty('/usage/totals/failed')).toBe(0) // before the first load
     await ctl.loadUsage()
     expect(view.getProperty('/usage/totals/requests')).toBe(3)
     failing.add('/usage')
     ctl.onRefresh()
     await flush()
     expect(view.getProperty('/usageError')).toBe('CPI not reachable — check the destination')
-    expect(view.getProperty('/usage/totals/requests')).toBeUndefined()
+    expect(view.getProperty('/usage/totals')).toMatchObject({ requests: 0, failed: 0 }) // zeros, not "undefined failed"
     expect(view.getProperty('/entries')).toEqual([{ action: 'deploy' }])
     expect(ctl.showError).not.toHaveBeenCalled()
     failing.clear()
