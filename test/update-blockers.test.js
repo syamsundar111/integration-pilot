@@ -80,3 +80,22 @@ describe('update blockers: JSON <-> XML converter settings (review: an update re
     ])
   })
 })
+
+describe('update blockers: Error / Escalation / Terminate ends (review: an update made them Message Ends)', () => {
+  // end events of the built iFlow: the main end first, the exception subprocess end second
+  const endDef = (which, def) => (xml) => {
+    let i = 0
+    return xml.replace(/<bpmn2:messageEventDefinition\/>(\s*<\/bpmn2:endEvent>)/g, (m, close) => (i++ === which ? `<bpmn2:${def}/>${close}` : m))
+  }
+
+  test('an Error End in the exception subprocess is a blocker', async () => {
+    const r = await readBack(endDef(1, 'errorEventDefinition'))
+    expect(r.spec).toBeNull()
+    expect(r.blockers).toEqual(['the exception subprocess ends with an Error End; an update would make it a Message End (failed messages would show as COMPLETED)'])
+  })
+
+  test('an Escalation End of the main flow is a blocker', async () => {
+    const r = await readBack(endDef(0, 'escalationEventDefinition'))
+    expect(r.blockers).toEqual(['the main flow ends with an Escalation End; an update would make it a Message End'])
+  })
+})

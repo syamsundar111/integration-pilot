@@ -348,6 +348,9 @@ async function parse(input) {
     : endAdapter.type === 'HTTP'
       ? { type: 'httpReceiver', system: endAdapter.system, url: endAdapter.address, method: endAdapter.method, authType: endAdapter.authType, credentialAlias: endAdapter.credentialAlias }
       : { type: 'receiver', adapter: endAdapter.type, system: endAdapter.system, address: endAdapter.address }
+  // an Error, Escalation or Terminate end (not a plain/message end): kept for update checks
+  const mainEndKind = endNodes.length === 1 ? endKind(endNodes[0]) : null
+  if (mainEndKind && mainEndKind !== 'message') end.kind = mainEndKind
   if (endNodes.length > 1) linear = false
 
   // Branching flows: the main path alone, with its end, and what the side branches do

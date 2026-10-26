@@ -143,6 +143,12 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     exceptionSubprocess = { ...(sub.name && { name: sub.name }), steps: subSteps }
   }
 
+  // the builder writes Message Ends: another end kind would change how failed messages are reported
+  const END_KINDS = { error: 'an Error End', escalation: 'an Escalation End', terminate: 'a Terminate End' }
+  if (END_KINDS[parsed.end?.kind]) blockers.push(`the main flow ends with ${END_KINDS[parsed.end.kind]}; an update would make it a Message End`)
+  if (END_KINDS[parsed.exceptionSubprocess?.end])
+    blockers.push(`the exception subprocess ends with ${END_KINDS[parsed.exceptionSubprocess.end]}; an update would make it a Message End (failed messages would show as COMPLETED)`)
+
   const e = parsed.end || {}
   let end = null
   if (e.type === 'none') end = { type: 'none' }
