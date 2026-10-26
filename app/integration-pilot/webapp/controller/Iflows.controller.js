@@ -46,7 +46,8 @@ sap.ui.define(
             configsError: null,
             runtime: null,
             runtimeBusy: false,
-            runtimeError: null
+            runtimeError: null,
+            writing: null // 'deploy' | 'undeploy' while that request runs: the buttons wait
           }),
           'view'
         )
@@ -413,7 +414,20 @@ sap.ui.define(
         }
       },
 
+      /** Runs a write once at a time; its buttons are disabled meanwhile */
+      async writing(kind, run) {
+        const m = this.getModel('view')
+        if (m.getProperty('/writing')) return
+        m.setProperty('/writing', kind)
+        try {
+          await run()
+        } finally {
+          m.setProperty('/writing', null)
+        }
+      },
+
       async onDeploy() {
+        if (this.getModel('view').getProperty('/writing')) return
         const id = this.getModel('view').getProperty('/iflowId')
         const ok = await this.confirm({
           title: `Deploy ${id}?`,
@@ -421,26 +435,31 @@ sap.ui.define(
           action: 'Deploy'
         })
         if (!ok) return
-        try {
-          await api.post(`/Iflows/${api.seg(id)}/deploy`)
-          this.toast(`Deployment triggered. It can take a few minutes until ${id} shows a runtime status (longer on trial tenants).`)
-          this.afterRuntimeChange()
-        } catch (e) {
-          this.showError(e, 'Deployment failed')
-        }
+        await this.writing('deploy', async () => {
+          try {
+            await api.post(`/Iflows/${api.seg(id)}/deploy`)
+            this.toast(`Deployment triggered. It can take a few minutes until ${id} shows a runtime status (longer on trial tenants).`)
+            this.afterRuntimeChange()
+          } catch (e) {
+            this.showError(e, 'Deployment failed')
+          }
+        })
       },
 
       async onUndeploy() {
+        if (this.getModel('view').getProperty('/writing')) return
         const id = this.getModel('view').getProperty('/iflowId')
         const ok = await this.confirm({ title: `Undeploy ${id}?`, message: 'The iFlow stops processing messages. The design-time artifact is kept.', action: 'Undeploy', danger: true })
         if (!ok) return
-        try {
-          await api.post(`/Iflows/${api.seg(id)}/undeploy`)
-          this.toast(`Undeployed ${id}`)
-          this.afterRuntimeChange()
-        } catch (e) {
-          this.showError(e, 'Undeploy failed')
-        }
+        await this.writing('undeploy', async () => {
+          try {
+            await api.post(`/Iflows/${api.seg(id)}/undeploy`)
+            this.toast(`Undeployed ${id}`)
+            this.afterRuntimeChange()
+          } catch (e) {
+            this.showError(e, 'Undeploy failed')
+          }
+        })
       },
 
       afterRuntimeChange() {

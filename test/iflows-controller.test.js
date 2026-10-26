@@ -267,3 +267,54 @@ describe('the package list follows new packages', () => {
     expect(s.packageLoads()).toBe(2)
   })
 })
+
+describe('Deploy / Undeploy run once at a time', () => {
+  function setup() {
+    let release
+    const api = { get: jest.fn(async () => []), post: jest.fn(() => new Promise((resolve, reject) => (release = { resolve, reject }))), seg: encodeURIComponent, q: () => '' }
+    const BaseController = { extend: (_n, proto) => proto }
+    const flowDiagram = { toHtml: () => '', fromParsed: () => ({}) }
+    const ctl = Object.create(factoryOf(path.join(__dirname, '../app/integration-pilot/webapp/controller/Iflows.controller.js'))(BaseController, JSONModel, api, flowDiagram))
+    const models = {}
+    Object.assign(ctl, {
+      setModel: (m, name) => (models[name] = m),
+      getModel: (name) => models[name],
+      getRouter: () => ({ getRoute: () => ({ attachPatternMatched: () => {} }) }),
+      confirm: jest.fn(async () => true),
+      toast: jest.fn(),
+      showError: jest.fn(),
+      afterRuntimeChange: jest.fn()
+    })
+    ctl.onInit()
+    models.view.setProperty('/iflowId', 'A')
+    const flush = async () => {
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+    }
+    return { ctl, view: models.view, api, release: () => release, flush }
+  }
+
+  test('while a deploy runs, Deploy and Undeploy wait: no second confirm, no second request', async () => {
+    const s = setup()
+    const first = s.ctl.onDeploy()
+    await s.flush()
+    expect(s.view.getProperty('/writing')).toBe('deploy')
+    await s.ctl.onDeploy()
+    await s.ctl.onUndeploy()
+    expect(s.ctl.confirm).toHaveBeenCalledTimes(1)
+    expect(s.api.post).toHaveBeenCalledTimes(1)
+    s.release().resolve({})
+    await first
+    expect(s.view.getProperty('/writing')).toBeNull()
+  })
+
+  test('a failed deploy enables the buttons again', async () => {
+    const s = setup()
+    const first = s.ctl.onUndeploy()
+    await s.flush()
+    expect(s.view.getProperty('/writing')).toBe('undeploy')
+    s.release().reject(new Error('deployment already in progress'))
+    await first
+    expect(s.ctl.showError).toHaveBeenCalled()
+    expect(s.view.getProperty('/writing')).toBeNull()
+  })
+})

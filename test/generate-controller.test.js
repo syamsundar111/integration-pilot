@@ -132,3 +132,51 @@ describe('Generate page: switching conversations while requests are in flight', 
     expect(chat.getProperty('/sessionId')).toBe('X')
   })
 })
+
+describe('Generate page: approve runs once at a time, and not with failed Groovy checks', () => {
+  function setup(proposal) {
+    const { ctl, chat, api } = controller()
+    chat.setProperty('/packages', [{ id: 'P', name: 'P' }])
+    chat.setProperty('/active', { isIflow: true, isUpdate: false })
+    Object.assign(ctl, {
+      currentProposal: () => proposal,
+      confirm: jest.fn(async () => true),
+      updateProposal: jest.fn(),
+      startProposalPolling: jest.fn(),
+      fetchProposal: jest.fn()
+    })
+    const flush = async () => {
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+    }
+    return { ctl, chat, api, flush }
+  }
+  const pending = { ID: 'p1', status: 'PENDING', iflowId: 'A', packageId: 'P', scriptChecks: { 'a.groovy': { status: 'ok' } } }
+
+  test('a second Approve while the first runs sends nothing; the buttons are enabled again afterwards', async () => {
+    const s = setup(pending)
+    const first = s.ctl.onApprove()
+    await s.flush()
+    expect(s.chat.getProperty('/writing')).toBe(true)
+    await s.ctl.onApproveDeploy()
+    expect(s.ctl.confirm).toHaveBeenCalledTimes(1)
+    expect(s.api.post).toHaveBeenCalledTimes(1)
+    s.api.calls.find((c) => c.url.endsWith('/approve')).resolve({ ID: 'p1', status: 'APPROVED' })
+    await first
+    expect(s.chat.getProperty('/writing')).toBe(false)
+  })
+
+  test('a failed Groovy check blocks approval; an unchecked script does not', () => {
+    const s = setup(pending)
+    expect(s.ctl.approvalBlocked({ scriptChecks: { 'a.groovy': { status: 'failed' }, 'b.groovy': { status: 'ok' } } })).toBe(true)
+    expect(s.ctl.approvalBlocked({ scriptChecks: { 'a.groovy': { status: 'unchecked' } } })).toBe(false)
+    expect(s.ctl.approvalBlocked({ scriptChecks: { 'a.groovy': { status: 'ok' } } })).toBe(false)
+    expect(s.ctl.approvalBlocked({})).toBe(false)
+  })
+
+  test('Approve with a failed script does not ask or send', async () => {
+    const s = setup({ ...pending, scriptChecks: { 'a.groovy': { status: 'failed' } } })
+    await s.ctl.onApprove()
+    expect(s.ctl.confirm).not.toHaveBeenCalled()
+    expect(s.api.post).not.toHaveBeenCalled()
+  })
+})

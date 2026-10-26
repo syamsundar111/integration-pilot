@@ -278,7 +278,9 @@
                         text="{= ${chat>/pkg/mode} === 'existing' ? 'Use this package' : 'Create on approval' }"
                         type="Emphasized"
                         press=".onPackageApply"
-                        enabled="{= ${chat>/pkg/mode} === 'existing' ? !!${chat>/pkg/existingId} : (!!${chat>/pkg/newId} &amp;&amp; !${chat>/pkg/newIdError} &amp;&amp; !!${chat>/pkg/newName}.trim()) }"
+                        busy="{chat>/writing}"
+                        busyIndicatorDelay="0"
+                        enabled="{= !${chat>/writing} &amp;&amp; (${chat>/pkg/mode} === 'existing' ? !!${chat>/pkg/existingId} : (!!${chat>/pkg/newId} &amp;&amp; !${chat>/pkg/newIdError} &amp;&amp; !!${chat>/pkg/newName}.trim())) }"
                       />
                     </HBox>
                   </VBox>
@@ -295,7 +297,7 @@
                   <link><Link text="Monitor" href="#/monitor" /></link>
                 </MessageStrip>
                 <MessageStrip text="{chat>/active/errorText}" type="Error" showIcon="true" visible="{= !!${chat>/active/errorText} }">
-                  <link><Link text="Retry" press=".onRetry" /></link>
+                  <link><Link text="Retry" press=".onRetry" enabled="{= !${chat>/writing} }" /></link>
                 </MessageStrip>
                 <MessageStrip text="{chat>/active/rejectedText}" type="Information" showIcon="true" visible="{= !!${chat>/active/rejectedText} }" />
 
@@ -365,11 +367,13 @@
 
           <!-- actions wrap onto a second line instead of hiding in an overflow menu -->
           <HBox visible="{= !!${chat>/active/pending} }" class="ipPanelFooter ipFooterActions" wrap="Wrap" alignItems="Center" renderType="Bare">
-            <Button text="Approve &amp; create" icon="sap-icon://accept" type="Emphasized" press=".onApprove" enabled="{= !${chat>/active/needsPackage} }" />
-            <Button text="Approve, create &amp; deploy" icon="sap-icon://upload-to-cloud" press=".onApproveDeploy" visible="{chat>/active/isIflow}" enabled="{= !${chat>/active/needsPackage} }" />
+            <!-- disabled while a write runs, and while a script fails the Groovy check (the server refuses then) -->
+            <Button text="Approve &amp; create" icon="sap-icon://accept" type="Emphasized" press=".onApprove" enabled="{= !${chat>/active/needsPackage} &amp;&amp; !${chat>/active/groovyBlocked} &amp;&amp; !${chat>/writing} }" busy="{chat>/writing}" busyIndicatorDelay="0" tooltip="{= ${chat>/active/groovyBlocked} ? 'Fix the Groovy errors first (ask the assistant)' : '' }" />
+            <Button text="Approve, create &amp; deploy" icon="sap-icon://upload-to-cloud" press=".onApproveDeploy" visible="{chat>/active/isIflow}" enabled="{= !${chat>/active/needsPackage} &amp;&amp; !${chat>/active/groovyBlocked} &amp;&amp; !${chat>/writing} }" tooltip="{= ${chat>/active/groovyBlocked} ? 'Fix the Groovy errors first (ask the assistant)' : '' }" />
             <Button text="Request changes" icon="sap-icon://comment" type="Transparent" press=".onRequestChanges" />
             <Button text="Reject" icon="sap-icon://decline" type="Reject" press=".onReject" />
             <Text text="Choose the target package above first." class="ipWarnText" visible="{chat>/active/needsPackage}" />
+            <Text text="Fix the Groovy errors first: ask the assistant." class="ipWarnText" visible="{= !!${chat>/active/groovyBlocked} }" />
           </HBox>
         </VBox>
       </HBox>

@@ -97,6 +97,7 @@ sap.ui.define(
             proposals: [],
             activeId: null,
             active: null,
+            writing: false, // approve / retry / package change running: their buttons wait
             packages: [],
             pkg: { editing: false },
             defaults: { ...NO_DEFAULTS },
@@ -780,6 +781,7 @@ sap.ui.define(
           resourcesText: '',
           groovyText: '',
           groovyState: 'None',
+          groovyBlocked: this.approvalBlocked(p),
           hasHttpReceiver: false
         }
 
@@ -904,19 +906,39 @@ sap.ui.define(
         const pkg = c.getProperty('/pkg')
         const p = this.currentProposal()
         c.setProperty('/pkg/error', null)
-        try {
-          const body = pkg.mode === 'existing' ? { packageId: pkg.existingId } : { packageId: pkg.newId, packageName: pkg.newName.trim() }
-          this.updateProposal(await api.post(`/Proposals/${api.seg(p.ID)}/setPackage`, body))
-          c.setProperty('/pkg/editing', false)
-        } catch (e) {
-          c.setProperty('/pkg/error', e.hint ? `${e.message} — ${e.hint}` : e.message)
-        }
+        await this.writing(async () => {
+          try {
+            const body = pkg.mode === 'existing' ? { packageId: pkg.existingId } : { packageId: pkg.newId, packageName: pkg.newName.trim() }
+            this.updateProposal(await api.post(`/Proposals/${api.seg(p.ID)}/setPackage`, body))
+            c.setProperty('/pkg/editing', false)
+          } catch (e) {
+            c.setProperty('/pkg/error', e.hint ? `${e.message} — ${e.hint}` : e.message)
+          }
+        })
       },
 
       // --- approve / reject / retry --------------------------------------------------------------------
 
+      /** A script failed the Groovy check: the server refuses approval until the assistant fixes it */
+      approvalBlocked(p) {
+        return Object.values((p && p.scriptChecks) || {}).some((c) => c && c.status === 'failed')
+      },
+
+      /** Runs a write once at a time; approve/retry/package buttons are disabled meanwhile */
+      async writing(run) {
+        const c = this.chat()
+        if (c.getProperty('/writing')) return
+        c.setProperty('/writing', true)
+        try {
+          await run()
+        } finally {
+          c.setProperty('/writing', false)
+        }
+      },
+
       async approve(deploy) {
         const p = this.currentProposal()
+        if (this.chat().getProperty('/writing') || this.approvalBlocked(p)) return
         const a = this.chat().getProperty('/active')
         const target = p.packageName && !this.chat().getProperty('/packages').some((x) => x.id === p.packageId) ? `the new package "${p.packageName}" (${p.packageId})` : `package ${p.packageId}`
         const ok = await this.confirm({
@@ -929,7 +951,7 @@ sap.ui.define(
           action: deploy ? 'Approve, create & deploy' : 'Approve & create'
         })
         if (!ok) return
-        await this.runChecked(p, 'approve', { deploy }, deploy ? 'Approved — creating and deploying…' : 'Approved — creating…', 'Approval failed')
+        await this.writing(() => this.runChecked(p, 'approve', { deploy }, deploy ? 'Approved — creating and deploying…' : 'Approved — creating…', 'Approval failed'))
       },
 
       /**
@@ -963,18 +985,18 @@ sap.ui.define(
       },
 
       onApprove() {
-        this.approve(false)
+        return this.approve(false)
       },
 
       onApproveDeploy() {
-        this.approve(true)
+        return this.approve(true)
       },
 
       async onRetry() {
         const p = this.currentProposal()
         const ok = await this.confirm({ title: 'Retry execution?', message: 'All steps run again. An iFlow already created by the earlier attempt is updated, not duplicated.', action: 'Retry' })
         if (!ok) return
-        await this.runChecked(p, 'retry', {}, null, 'Retry failed')
+        await this.writing(() => this.runChecked(p, 'retry', {}, null, 'Retry failed'))
       },
 
       onRequestChanges() {
