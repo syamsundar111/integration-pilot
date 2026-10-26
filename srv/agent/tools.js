@@ -814,12 +814,17 @@ const parseJsonString = (v) => {
  */
 function normalizeSpecArgs(args) {
   const { useValidatedSpec, useDraftSpec, ...rest } = args
-  let spec = rest.spec === undefined && (rest.id || rest.steps || rest.trigger) ? rest : parseJsonString(rest.spec)
+  const useDraft = useDraftSpec === true || useDraftSpec === 'true'
+  const useValidated = useValidatedSpec === true || useValidatedSpec === 'true'
+  // a spec sent without the "spec" wrapper; not when the draft or validated spec is asked for: a stray
+  // field next to { "useDraftSpec": true } (e.g. "id") would otherwise replace the draft with a stub
+  const unwrapped = rest.spec === undefined && !useDraft && !useValidated && (rest.steps || rest.trigger)
+  let spec = unwrapped ? rest : parseJsonString(rest.spec)
   if (spec && typeof spec === 'object' && !Array.isArray(spec)) {
     spec = { ...spec }
     for (const f of SPEC_OBJECT_FIELDS) if (f in spec) spec[f] = parseJsonString(spec[f])
   }
-  return { spec, useValidatedSpec: useValidatedSpec === true || useValidatedSpec === 'true', useDraftSpec: useDraftSpec === true || useDraftSpec === 'true' }
+  return { spec, useValidatedSpec: useValidated, useDraftSpec: useDraft }
 }
 
 /**
@@ -853,4 +858,4 @@ async function execute(name, rawArgs, ctx) {
   return json
 }
 
-module.exports = { definitions, execute, nameSession }
+module.exports = { definitions, execute, nameSession, normalizeSpecArgs }

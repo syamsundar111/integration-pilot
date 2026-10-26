@@ -32,3 +32,19 @@ test('writeScript refuses a hard-coded secret, like inline code (review: the che
   expect(JSON.stringify(result)).toContain('SECRET')
   expect(result.stored).toBeUndefined()
 })
+
+describe('spec arguments (review: a stray "id" next to useDraftSpec replaced the draft with a stub)', () => {
+  const { normalizeSpecArgs } = require('../srv/agent/tools')
+
+  test('useDraftSpec with a stray id: the draft is used, no stub spec', () => {
+    expect(normalizeSpecArgs({ useDraftSpec: true, id: 'Orders_To_ERP' })).toEqual({ spec: undefined, useDraftSpec: true, useValidatedSpec: false })
+    expect(normalizeSpecArgs({ useValidatedSpec: 'true', id: 'X' }).spec).toBeUndefined()
+  })
+
+  test('a complete spec without the wrapper is still accepted; an id alone is not a spec', () => {
+    const spec = { id: 'A', trigger: { type: 'httpsSender', address: '/a' }, steps: [] }
+    expect(normalizeSpecArgs(spec).spec).toEqual(spec)
+    expect(normalizeSpecArgs({ id: 'A' }).spec).toBeUndefined()
+    expect(normalizeSpecArgs({ spec: JSON.stringify(spec) }).spec).toEqual(spec)
+  })
+})
