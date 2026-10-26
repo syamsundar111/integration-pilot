@@ -262,7 +262,7 @@ async function execute(proposal, result, user) {
       })
 
       await step('create', async () => {
-        const detail = await createOrUpdateIflow(spec, zip.zipBase64, proposal, req)
+        const detail = await createOrUpdateIflow(spec, zip.zipBase64, proposal, req, result)
         result.created = { iflowId: spec.id, packageId: spec.packageId }
         return detail
       })
@@ -423,11 +423,24 @@ async function restoreBackup(iflowId, proposalId, user) {
 }
 
 /**
- * Creates the iFlow, or updates its content if it already exists in the target package
- * (e.g. created by an earlier, interrupted attempt). An iFlow with the same id in a
- * different package is never overwritten.
+ * True if an earlier attempt of this proposal tried to create the iFlow (the CREATE_IFLOW call was
+ * made, even if its answer was lost), or was interrupted by a restart (which may have cut off the
+ * audit entry). Only then may a new-iFlow proposal update an iFlow that exists.
  */
-async function createOrUpdateIflow(spec, zipBase64, proposal, req) {
+async function createdByEarlierAttempt(spec, proposal, req, result) {
+  if (result?.previousError === INTERRUPTED) return true
+  const rows = await db(req?.user, (tx) =>
+    tx.run(SELECT.from('iflowpilot.AuditLog').columns('details').where({ action: 'CREATE_IFLOW', targetId: spec.id }))
+  )
+  return rows.some((r) => parse(r.details).proposal === proposal.ID)
+}
+
+/**
+ * Creates the iFlow, or, for an update or an earlier attempt of this proposal, updates its content.
+ * A new-iFlow proposal never overwrites an iFlow that appeared after it was proposed (another
+ * proposal, or created by hand), and an iFlow with the same id in a different package is never overwritten.
+ */
+async function createOrUpdateIflow(spec, zipBase64, proposal, req, result) {
   let existing = null
   try {
     existing = await cpi.getIflow(spec.id)
@@ -438,6 +451,12 @@ async function createOrUpdateIflow(spec, zipBase64, proposal, req) {
     throw fail(404, 'IFLOW_NOT_FOUND', `iFlow '${spec.id}' no longer exists, so it cannot be updated. Ask the assistant for a new iFlow instead.`)
   if (existing && existing.packageId !== spec.packageId)
     throw fail(409, 'IFLOW_EXISTS_ELSEWHERE', `An iFlow '${spec.id}' already exists in package '${existing.packageId}'; it is not overwritten. Choose a different id.`)
+  if (existing && proposal.operation !== 'UPDATE' && !(await createdByEarlierAttempt(spec, proposal, req, result)))
+    throw fail(
+      409,
+      'IFLOW_EXISTS',
+      `An iFlow '${spec.id}' already exists in package '${spec.packageId}' (created after this proposal was made). A new-iFlow proposal does not overwrite it: ask the assistant to update '${spec.id}', or for a different id.`
+    )
 
   const details = { packageId: spec.packageId, proposal: proposal.ID }
   if (existing) {

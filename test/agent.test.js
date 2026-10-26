@@ -488,6 +488,31 @@ describe('proposal execution', () => {
     expect(done).toMatchObject({ status: 'DONE', result: { runtimeStatus: 'STARTED' } })
   })
 
+  test('a new-iFlow proposal does not overwrite an iFlow that appeared after it was proposed', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Taken' } })).mockResolvedValueOnce(answer('ready'))
+    const data = await chat({ message: 'create it' })
+    cpi.getIflow.mockResolvedValueOnce({ id: 'Exec_Taken', packageId: 'PilotReference' }) // created meanwhile, e.g. by another proposal
+    cpi.updateIflowContent.mockClear()
+    await POST(`/api/Proposals/${data.proposals[0].ID}/approve`, { deploy: false })
+    const failed = await waitFor(data.proposals[0].ID)
+    expect(failed).toMatchObject({ status: 'FAILED', error: expect.stringContaining("An iFlow 'Exec_Taken' already exists") })
+    expect(cpi.updateIflowContent).not.toHaveBeenCalled()
+  })
+
+  test('a retry updates the iFlow its own earlier attempt created', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Mine' } })).mockResolvedValueOnce(answer('ready'))
+    const data = await chat({ message: 'create mine' })
+    const id = data.proposals[0].ID
+    cpi.updateConfiguration.mockRejectedValueOnce(new Error('configure failed')) // created, then failed
+    await POST(`/api/Proposals/${id}/approve`, { deploy: false })
+    expect(await waitFor(id)).toMatchObject({ status: 'FAILED' })
+    cpi.getIflow.mockResolvedValueOnce({ id: 'Exec_Mine', packageId: 'PilotReference' })
+    await POST(`/api/Proposals/${id}/retry`, {})
+    const done = await waitFor(id)
+    expect(done.status).toBe('DONE')
+    expect(done.result.steps.find((s) => s.key === 'create').detail).toBe('Updated existing Exec_Mine in PilotReference')
+  })
+
   test('deploy task FAIL ends FAILED', async () => {
     llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_TaskFail' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'task fails' })
