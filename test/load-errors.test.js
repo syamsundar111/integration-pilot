@@ -159,3 +159,38 @@ describe('Dashboard proposals card: only your own', () => {
     expect(view.getProperty('/proposalsError')).toMatch(/CPI not reachable/)
   })
 })
+
+describe('Dashboard proposals whose conversation was deleted', () => {
+  function click(p) {
+    const { api } = apiStub({})
+    const { ctl } = controller('Dashboard', [api])
+    const navTo = jest.fn()
+    ctl.getRouter = () => ({ navTo })
+    ctl.toast = jest.fn()
+    ctl.onProposal({ getSource: () => ({ getBindingContext: () => ({ getObject: () => p }) }) })
+    return { navTo, toast: ctl.toast }
+  }
+
+  test('with its conversation: opens it', () => {
+    const { navTo } = click({ session_ID: 'S1', kind: 'IFLOW', status: 'PENDING' })
+    expect(navTo).toHaveBeenCalledWith('generate', { '?query': { session: 'S1' } })
+  })
+
+  test('done iFlow without conversation: opens the iFlow', () => {
+    const { navTo } = click({ session_ID: null, kind: 'IFLOW', status: 'DONE', packageId: 'P', iflowId: 'Orders' })
+    expect(navTo).toHaveBeenCalledWith('iflows', { '?query': { package: 'P', iflow: 'Orders' } })
+  })
+
+  test('done package without conversation: opens Packages', () => {
+    const { navTo } = click({ session_ID: null, kind: 'PACKAGE', status: 'DONE', packageId: 'P' })
+    expect(navTo).toHaveBeenCalledWith('packages')
+  })
+
+  test('failed or rejected without conversation: a message, no navigation', () => {
+    for (const status of ['FAILED', 'REJECTED']) {
+      const { navTo, toast } = click({ session_ID: null, kind: 'IFLOW', status })
+      expect(navTo).not.toHaveBeenCalled()
+      expect(toast).toHaveBeenCalledWith('The conversation of this proposal was deleted.')
+    }
+  })
+})

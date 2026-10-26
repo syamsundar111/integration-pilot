@@ -68,7 +68,11 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
 
     onProposal(e) {
       const p = e.getSource().getBindingContext('view').getObject()
-      this.getRouter().navTo('generate', { '?query': { session: p.session_ID } })
+      if (p.session_ID) return this.getRouter().navTo('generate', { '?query': { session: p.session_ID } })
+      // its conversation was deleted (executed proposals are kept): open what it created, if anything
+      if (p.status === 'DONE' && p.kind === 'IFLOW') return this.getRouter().navTo('iflows', { '?query': { package: p.packageId, iflow: p.iflowId } })
+      if (p.status === 'DONE') return this.getRouter().navTo('packages')
+      this.toast('The conversation of this proposal was deleted.')
     }
   })
 })

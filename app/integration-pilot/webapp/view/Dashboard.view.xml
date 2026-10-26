@@ -62,7 +62,7 @@
                   </noData>
                   <StandardListItem
                     title="{= ${view>kind} === 'IFLOW' ? ${view>iflowId} : ${view>packageId} }"
-                    description="{= (${view>kind} === 'IFLOW' ? 'iFlow' : 'Package') + ' · ' + ${path: 'view>createdAt', formatter: '.formatter.relativeTime'} }"
+                    description="{= (${view>kind} === 'IFLOW' ? 'iFlow' : 'Package') + ' · ' + ${path: 'view>createdAt', formatter: '.formatter.relativeTime'} + (${view>session_ID} ? '' : ' · chat deleted') }"
                     info="{view>status}"
                     infoState="{path: 'view>status', formatter: '.formatter.statusState'}"
                     type="Navigation"
