@@ -456,6 +456,38 @@ describe('proposal execution', () => {
     expect(done.result.steps.find((s) => s.key === 'runtime')).toMatchObject({ status: 'warning' })
   })
 
+  test("an update of a failed iFlow: the previous deployment's ERROR does not fail the new one", async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_OldError' } })).mockResolvedValueOnce(answer('ready'))
+    const data = await chat({ message: 'redeploy' })
+    const hourAgo = new Date(Date.now() - 3600_000).toISOString()
+    cpi.getRuntimeArtifact.mockResolvedValue({ status: 'ERROR', deployedOn: hourAgo }) // the old version
+    cpi.getDeployStatus.mockResolvedValue('DEPLOYING')
+    await POST(`/api/Proposals/${data.proposals[0].ID}/approve`, { deploy: true })
+    const done = await waitFor(data.proposals[0].ID)
+    expect(done).toMatchObject({ status: 'DONE', result: { warning: expect.stringContaining('not running yet') } })
+  })
+
+  test("an update of a running iFlow: the previous deployment's STARTED is not taken as success", async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_OldStarted' } })).mockResolvedValueOnce(answer('ready'))
+    const data = await chat({ message: 'redeploy running' })
+    cpi.getRuntimeArtifact.mockResolvedValue({ status: 'STARTED', deployedOn: new Date(Date.now() - 3600_000).toISOString() })
+    cpi.getDeployStatus.mockResolvedValue('DEPLOYING')
+    await POST(`/api/Proposals/${data.proposals[0].ID}/approve`, { deploy: true })
+    const done = await waitFor(data.proposals[0].ID)
+    expect(done.result.runtimeStatus).not.toBe('STARTED')
+    expect(done.result.warning).toMatch(/not running yet/)
+  })
+
+  test('the new deployment (deployed after the start) counts', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_NewStarted' } })).mockResolvedValueOnce(answer('ready'))
+    const data = await chat({ message: 'deploy new' })
+    cpi.getRuntimeArtifact.mockImplementation(async () => ({ status: 'STARTED', deployedOn: new Date().toISOString() }))
+    cpi.getDeployStatus.mockResolvedValue('DEPLOYING')
+    await POST(`/api/Proposals/${data.proposals[0].ID}/approve`, { deploy: true })
+    const done = await waitFor(data.proposals[0].ID)
+    expect(done).toMatchObject({ status: 'DONE', result: { runtimeStatus: 'STARTED' } })
+  })
+
   test('deploy task FAIL ends FAILED', async () => {
     llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_TaskFail' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'task fails' })

@@ -288,12 +288,13 @@ async function execute(proposal, result, user) {
         await step('runtime', async () => 'skipped')
       } else if (result.deploy) {
         let taskId
+        const deployStartedAt = Date.now()
         await step('deploy', async () => {
           ;({ taskId } = await audited(req, { action: 'DEPLOY_IFLOW', targetType: 'Iflow', targetId: spec.id, details: { proposal: proposal.ID } }, () => cpi.deployIflow(spec.id)))
           return `Deployment triggered${taskId ? ` (task ${taskId})` : ''}`
         })
         await step('runtime', async () => {
-          const { status, pending } = await waitForRuntime(spec.id, taskId)
+          const { status, pending } = await waitForRuntime(spec.id, taskId, deployStartedAt)
           result.runtimeStatus = status
           if (!pending) return `Runtime status ${status}`
           // CPI accepted the deployment but has not started it yet: not a failure (common on trial tenants)
@@ -449,13 +450,19 @@ async function createOrUpdateIflow(spec, zipBase64, proposal, req) {
   return `Created ${spec.id} in ${spec.packageId}`
 }
 
+/** CPI's clock against ours, for comparing the runtime's deployedOn with the deployment start */
+const CLOCK_SKEW_MS = 60_000
+
 /**
  * Polls the deploy task and the runtime artifact (every 5s, up to 2 min).
  * Fails only on a real error (task FAIL or runtime ERROR); if CPI is merely slow,
  * returns { pending: true } with the last status.
+ * The runtime artifact may still be the previous deployment (an update of a running or failed
+ * iFlow): its status counts only once it was deployed after this deployment started, or, when
+ * CPI gives no deployedOn, once the deploy task succeeded.
  * @returns {Promise<{ status: string, pending: boolean }>}
  */
-async function waitForRuntime(iflowId, taskId) {
+async function waitForRuntime(iflowId, taskId, startedAt = Date.now()) {
   const deadline = Date.now() + POLL_TIMEOUT_MS
   let last = 'NOT_DEPLOYED'
   let task = null
@@ -467,7 +474,10 @@ async function waitForRuntime(iflowId, taskId) {
       if (task === 'FAIL') throw fail(502, 'DEPLOY_ERROR', `Deployment failed: ${(await runtimeError()) || 'CPI reported the build/deploy task as FAIL. Open the iFlow in the CPI web editor to see the problem.'}`)
     }
     const rt = await cpi.getRuntimeArtifact(iflowId, { noCache: true })
-    last = rt?.status || (task && task !== 'SUCCESS' ? task : 'NOT_DEPLOYED')
+    const deployedOn = rt?.deployedOn ? Date.parse(rt.deployedOn) : NaN
+    const current = rt && (Number.isFinite(deployedOn) ? deployedOn >= startedAt - CLOCK_SKEW_MS : !taskId || task === 'SUCCESS')
+    last = (current && rt.status) || (task && task !== 'SUCCESS' ? task : 'NOT_DEPLOYED')
+    if (!current) continue
     if (rt?.status === 'STARTED') return { status: 'STARTED', pending: false }
     if (rt?.status === 'ERROR') throw fail(502, 'DEPLOY_ERROR', `Deployment failed: ${(await runtimeError()) || 'no error details from CPI'}`)
   }
