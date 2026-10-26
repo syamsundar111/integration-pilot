@@ -51,6 +51,15 @@ sap.ui.define(
           'view'
         )
         this.getRouter().getRoute('iflows').attachPatternMatched(this.onRoute, this)
+        // closing or reloading the browser tab with unsaved parameter changes: the browser asks
+        this._beforeUnload = (e) => {
+          if (this.getModel('view').getProperty('/changes') > 0) e.preventDefault()
+        }
+        if (typeof window !== 'undefined') window.addEventListener('beforeunload', this._beforeUnload)
+      },
+
+      onExit() {
+        if (typeof window !== 'undefined') window.removeEventListener('beforeunload', this._beforeUnload)
       },
 
       // --- routing: #/iflows?package=<id>&iflow=<id> ---------------------------------------
@@ -58,6 +67,17 @@ sap.ui.define(
       async onRoute(e) {
         const query = e.getParameter('arguments')['?query'] || {}
         const m = this.getModel('view')
+        // every way of leaving the open iFlow comes through here (list, close, package, back button,
+        // links, the menu and back): unsaved parameter changes are not dropped without asking
+        const current = m.getProperty('/iflowId')
+        if (current && m.getProperty('/changes') > 0 && (query.iflow !== current || query.package !== m.getProperty('/packageId'))) {
+          if (!(await this.confirmDiscard())) {
+            this.navigate(current, true) // back to the iFlow being edited
+            if (m.refresh) m.refresh(true) // the list selection follows /iflowId again
+            return
+          }
+          this.onResetParams()
+        }
         if (!m.getProperty('/packages').length) await this.loadPackages()
         const packages = m.getProperty('/packages')
         if (!query.package) {
@@ -77,10 +97,39 @@ sap.ui.define(
         }
       },
 
-      navigate(iflow) {
+      navigate(iflow, replace) {
         const query = { package: this.getModel('view').getProperty('/packageId') }
         if (iflow) query.iflow = iflow
-        this.getRouter().navTo('iflows', { '?query': query })
+        this.getRouter().navTo('iflows', { '?query': query }, replace)
+      },
+
+      /** Resolves true when there are no unsaved parameter changes or the user discards them */
+      confirmDiscard() {
+        const m = this.getModel('view')
+        return new Promise((resolve) => {
+          let discard = false
+          const dialog = new Dialog({
+            title: 'Unsaved parameter changes',
+            type: 'Message',
+            state: 'Warning',
+            content: new Text({ text: `You changed ${m.getProperty('/changes')} parameter(s) of ${m.getProperty('/selected/name') || m.getProperty('/iflowId')} and did not save them.` }),
+            beginButton: new Button({
+              text: 'Discard changes',
+              type: 'Emphasized',
+              press: () => {
+                discard = true
+                dialog.close()
+              }
+            }),
+            endButton: new Button({ text: 'Keep editing', press: () => dialog.close() }),
+            afterClose: () => {
+              dialog.destroy()
+              resolve(discard)
+            }
+          })
+          this.getView().addDependent(dialog)
+          dialog.open()
+        })
       },
 
       // --- list ------------------------------------------------------------------------------
@@ -210,6 +259,7 @@ sap.ui.define(
             renderType: 'Bare',
             items: [
               new Text({ text: 'The content this iFlow had before the chosen update is put back. Its current content is saved as a CPI version first. The restored iFlow is not deployed.' }),
+              new MessageStrip({ type: 'Warning', showIcon: true, visible: m.getProperty('/changes') > 0, text: `Your ${m.getProperty('/changes')} unsaved parameter change(s) are discarded.` }),
               select,
               new MessageStrip({ type: 'Information', showIcon: true, text: 'Deploy the iFlow afterwards to run the restored version.' })
             ]
