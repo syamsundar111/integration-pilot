@@ -78,10 +78,13 @@ sap.ui.define(
           }
           this.onResetParams()
         }
-        if (!m.getProperty('/packages').length) await this.loadPackages()
+        // the list is loaded once; a package it does not know yet (created since, e.g. by an approved
+        // proposal: "Open in iFlows") loads it again
+        const known = (id) => m.getProperty('/packages').some((p) => p.id === id)
+        if (!m.getProperty('/packages').length || (query.package && !known(query.package))) await this.loadPackages()
         const packages = m.getProperty('/packages')
-        if (!query.package) {
-          // default to the first package
+        if (!query.package || (packages.length && !known(query.package))) {
+          // default to the first package (also for one that no longer exists)
           if (packages.length) this.getRouter().navTo('iflows', { '?query': { package: [...packages].sort((a, b) => a.name.localeCompare(b.name))[0].id } }, true)
           return
         }
@@ -199,6 +202,7 @@ sap.ui.define(
       },
 
       onRefresh() {
+        this.loadPackages()
         this.loadIflows()
         this.loadRuntimeMap()
         if (this.getModel('view').getProperty('/iflowId')) this.loadRuntime()

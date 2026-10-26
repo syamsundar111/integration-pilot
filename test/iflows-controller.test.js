@@ -210,3 +210,60 @@ describe('unsaved parameter changes are not dropped without asking', () => {
     expect(s.view.getProperty('/iflowId')).toBe('B')
   })
 })
+
+describe('the package list follows new packages', () => {
+  function setup(packages) {
+    const api = {
+      get: jest.fn(async (url) => (url === '/Packages' ? packages.slice() : [])),
+      seg: encodeURIComponent,
+      q: () => ''
+    }
+    const BaseController = { extend: (_n, proto) => proto }
+    const flowDiagram = { toHtml: () => '', fromParsed: () => ({}) }
+    const proto = factoryOf(path.join(__dirname, '../app/integration-pilot/webapp/controller/Iflows.controller.js'))(BaseController, JSONModel, api, flowDiagram)
+    const ctl = Object.create(proto)
+    const models = {}
+    const navTo = jest.fn()
+    Object.assign(ctl, {
+      setModel: (m, name) => (models[name] = m),
+      getModel: (name) => models[name],
+      getRouter: () => ({ getRoute: () => ({ attachPatternMatched: () => {} }), navTo })
+    })
+    ctl.onInit()
+    const route = (query) => ctl.onRoute({ getParameter: () => ({ '?query': query }) })
+    const packageLoads = () => api.get.mock.calls.filter(([u]) => u === '/Packages').length
+    return { ctl, view: models.view, route, navTo, packageLoads }
+  }
+
+  test('a link to a package created since the page was opened loads the packages again', async () => {
+    const packages = [{ id: 'P', name: 'P' }]
+    const s = setup(packages)
+    await s.route({ package: 'P' })
+    packages.push({ id: 'New', name: 'New' }) // e.g. created by an approved proposal
+    await s.route({ package: 'New', iflow: 'X' })
+    expect(s.packageLoads()).toBe(2)
+    expect(s.view.getProperty('/packages').map((p) => p.id)).toEqual(['P', 'New'])
+    expect(s.view.getProperty('/packageId')).toBe('New')
+    expect(s.navTo).not.toHaveBeenCalled()
+  })
+
+  test('a known package does not reload the list', async () => {
+    const s = setup([{ id: 'P', name: 'P' }, { id: 'Q', name: 'Q' }])
+    await s.route({ package: 'P' })
+    await s.route({ package: 'Q' })
+    expect(s.packageLoads()).toBe(1)
+  })
+
+  test('a package that no longer exists falls back to the first package', async () => {
+    const s = setup([{ id: 'B', name: 'Beta' }, { id: 'A', name: 'Alpha' }])
+    await s.route({ package: 'Gone' })
+    expect(s.navTo).toHaveBeenCalledWith('iflows', { '?query': { package: 'A' } }, true)
+  })
+
+  test('Refresh reloads the packages', async () => {
+    const s = setup([{ id: 'P', name: 'P' }])
+    await s.route({ package: 'P' })
+    s.ctl.onRefresh()
+    expect(s.packageLoads()).toBe(2)
+  })
+})
