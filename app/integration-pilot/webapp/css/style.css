@@ -522,7 +522,9 @@
 .ipNoWrap .sapMObjStatusText {
   white-space: nowrap;
 }
-/* a toolbar label that keeps its full width; the text after it is shortened instead */
+/* a toolbar label that keeps its full width; the text after it is shortened instead
+   (more specific than the toolbar's own .sapMTBShrinkItem rule, which would shrink it) */
+.sapMTB > .ipNoShrink.sapMTBShrinkItem,
 .ipNoShrink {
   flex-shrink: 0;
 }
