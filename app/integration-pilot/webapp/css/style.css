@@ -14,10 +14,11 @@
   color: var(--sapContent_LabelColor);
   font-size: var(--sapFontSmallSize);
 }
+/* technical values (IDs, URLs, keys, model names): smaller, in the app's normal font "72" like
+   everything else (one font on every screen; no typewriter font, also not for code) */
 .ipMono,
 .ipMono.sapMText {
-  font-family: var(--sapFontFamily), monospace;
-  font-family: '72Mono', monospace;
+  font-family: var(--sapFontFamily);
   font-size: var(--sapFontSmallSize);
 }
 .ipTenant .ipTenantLabel {
@@ -165,7 +166,7 @@
   color: var(--sapTextColor);
 }
 .ipFlowMono {
-  font-family: '72Mono', monospace;
+  font-family: var(--sapFontFamily);
   font-size: 0.6875rem;
   color: var(--sapContent_LabelColor);
   white-space: nowrap;
@@ -404,14 +405,14 @@
   padding-left: 1.25rem;
 }
 .ipBubble .sapMFT code {
-  font-family: '72Mono', monospace;
+  font-family: var(--sapFontFamily);
   font-size: 0.8125rem;
   background: var(--sapNeutralBackgroundColor);
   padding: 0 0.25rem;
   border-radius: 0.25rem;
 }
 .ipBubble .sapMFT pre {
-  font-family: '72Mono', monospace;
+  font-family: var(--sapFontFamily);
   font-size: 0.75rem;
   background: var(--sapShell_Background, #1d2d3e);
   color: var(--sapShell_TextColor, #fff);
@@ -505,7 +506,7 @@
   background: transparent;
 }
 .ipPre {
-  font-family: '72Mono', monospace;
+  font-family: var(--sapFontFamily);
   font-size: 0.75rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
