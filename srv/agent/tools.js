@@ -355,7 +355,17 @@ async function nameSession(user, sessionId, title) {
 async function currentSpec(iflowId) {
   const iflow = await iflowExists(iflowId)
   if (!iflow) return null
-  const [zip, configurations] = await Promise.all([cpi.downloadIflowZip(iflowId), cpi.getConfigurations(iflowId).catch(() => [])])
+  // the current parameter values are required: without them the spec would carry the defaults,
+  // and approving the update would write those over the values configured on the tenant
+  const [zip, configurations] = await Promise.all([
+    cpi.downloadIflowZip(iflowId),
+    cpi.getConfigurations(iflowId).catch((e) => {
+      throw Object.assign(new Error(`The current parameter values of iFlow '${iflowId}' could not be read (${e.message}). An update needs them; try again.`), {
+        code: 'CONFIGURATIONS_UNREADABLE',
+        status: e.status
+      })
+    })
+  ])
   const result = specFromParsed(await parse(zip), { packageId: iflow.packageId, configurations })
   if (result.spec) Object.assign(result.spec, { id: iflowId, name: iflow.name || result.spec.name }) // CPI's id and display name win over the bundle headers
   return { ...result, packageId: iflow.packageId }
