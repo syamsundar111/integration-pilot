@@ -316,7 +316,7 @@ service ApiService {
    * check -> 409 GROOVY_NOT_CHECKED unless acceptUnchecked is true.
    */
   @readonly
-  entity Proposals    as projection on db.Proposal excluding { backupZip } actions {
+  entity Proposals    as projection on db.Proposal { *, session.ID as session_ID } excluding { backupZip, session } actions {
     action approve(deploy : Boolean, acceptUnchecked : Boolean) returns Proposals;
     action reject(reason : String)   returns Proposals;
     action retry(deploy : Boolean, acceptUnchecked : Boolean)   returns Proposals;

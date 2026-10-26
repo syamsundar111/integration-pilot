@@ -1650,6 +1650,19 @@ describe('conversations are private (full review #5)', () => {
     const a = await chat({ message: 'propose it' })
     expect((await GET(`/api/Proposals/${a.proposals[0].ID}`, asB)).data).toMatchObject({ iflowId: 'Shared_Proposal' })
   })
+
+  test("a proposal does not lead into its private conversation: no $expand or $filter through it (review: B read A's messages)", async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Secret_Proposal', name: 'Secret Proposal' } })).mockResolvedValueOnce(answer('ready'))
+    const a = await chat({ message: 'SECRET request of A' })
+    const id = a.proposals[0].ID
+    expect(await status(GET(`/api/Proposals/${id}?$expand=session($expand=messages)`, asB))).toBe(400)
+    expect(await status(GET(`/api/Proposals?$expand=session`, asB))).toBe(400)
+    expect(await status(GET(`/api/Proposals?$filter=session/messages/any(m:contains(m/content,'SECRET'))`, asB))).toBe(400)
+    expect(await status(GET(`/api/Proposals/${id}/session`, asB))).toBe(404)
+    // what the UI uses still works: the conversation's id, and filtering by it
+    expect((await GET(`/api/Proposals/${id}`, asB)).data.session_ID).toBe(a.sessionId)
+    expect((await GET(`/api/Proposals?$filter=session_ID eq ${a.sessionId}`)).data.map((p) => p.ID)).toEqual([id])
+  })
 })
 
 describe('stuck turns (one instance; review: a RUNNING turn blocked its conversation forever)', () => {
