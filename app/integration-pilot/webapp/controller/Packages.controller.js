@@ -9,7 +9,9 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
       this.getRouter()
         .getRoute('packages')
         .attachPatternMatched((e) => {
-          this.load()
+          // the list is already current after the create dialog dropped "?new=1" (see onDialogClosed)
+          if (this._skipLoad) this._skipLoad = false
+          else this.load()
           const query = e.getParameter('arguments')['?query'] || {}
           if (query.new === '1') this.onCreate()
         })
@@ -20,7 +22,7 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
       m.setProperty('/busy', true)
       m.setProperty('/error', null)
       try {
-        m.setProperty('/packages', (await api.get('/Packages')).sort((a, b) => a.name.localeCompare(b.name)))
+        m.setProperty('/packages', (await api.get('/Packages')).sort((a, b) => (a.name || '').localeCompare(b.name || '')))
         this.applyFilter()
       } catch (e) {
         m.setProperty('/error', { message: e.hint ? `${e.message} — ${e.hint}` : e.message })
@@ -63,12 +65,14 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
 
     onEdit(e) {
       const p = e.getSource().getBindingContext('view').getObject()
+      const description = (p.description || '').replace(/<[^>]+>/g, '') // shown as plain text
       this.openDialog({
         mode: 'edit',
         id: p.id,
         name: p.name,
         shortText: p.shortText || '',
-        description: (p.description || '').replace(/<[^>]+>/g, ''),
+        description,
+        descriptionShown: description,
         version: p.version || '1.0.0'
       })
     },
@@ -84,7 +88,10 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
       m.setProperty('/form/busy', true)
       m.setProperty('/form/error', null)
       try {
-        const body = { name: f.name, shortText: f.shortText || f.name, description: f.description, version: f.version }
+        // an unchanged description is not sent: CPI keeps it with its formatting (HTML), which the
+        // plain-text field above would otherwise strip
+        const description = f.mode === 'create' || f.description !== f.descriptionShown ? f.description : undefined
+        const body = { name: f.name, shortText: f.shortText || f.name, description, version: f.version }
         const saved = f.mode === 'create' ? await api.post('/Packages', { id: f.id, ...body }) : await api.patch(`/Packages/${api.seg(f.id)}`, body)
         this.toast(f.mode === 'create' ? `Package created: ${saved.name}` : `Package updated: ${saved.name}`)
         this._dialog.close()
@@ -103,7 +110,10 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
     onDialogClosed() {
       // drop "?new=1" so a refresh does not reopen the dialog
       const hash = window.location.hash
-      if (/new=1/.test(hash)) this.getRouter().navTo('packages', {}, true)
+      if (/new=1/.test(hash)) {
+        this._skipLoad = true
+        this.getRouter().navTo('packages', {}, true)
+      }
     },
 
     // --- delete ----------------------------------------------------------------------

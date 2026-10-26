@@ -50,3 +50,13 @@ describe('listMessageLogs: one iFlow or a name search (filters checked on a real
     expect(lastUrl()).not.toContain('substringof')
   })
 })
+
+describe('updatePackage', () => {
+  test('a change without description keeps the current one, with its formatting (PUT replaces the entity)', async () => {
+    const current = { Id: 'P', Name: 'P', ShortText: 'P', Version: '1.0.0', Description: '<p>Orders <b>inbound</b></p>' }
+    executeHttpRequest.mockImplementation(async (_dest, req) => ({ data: { d: req.method === 'PUT' ? {} : current }, headers: { 'x-csrf-token': 't' } }))
+    await cpi.updatePackage('P', { name: 'P', shortText: 'P', description: undefined, version: '1.0.1' })
+    const put = executeHttpRequest.mock.calls.map(([, req]) => req).find((req) => req.method === 'PUT')
+    expect(put.data).toMatchObject({ Version: '1.0.1', Description: '<p>Orders <b>inbound</b></p>' })
+  })
+})
