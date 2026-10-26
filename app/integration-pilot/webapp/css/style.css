@@ -522,6 +522,10 @@
 .ipNoWrap .sapMObjStatusText {
   white-space: nowrap;
 }
+/* a toolbar label that keeps its full width; the text after it is shortened instead */
+.ipNoShrink {
+  flex-shrink: 0;
+}
 
 .ipWarnText.sapMText {
   color: var(--sapCriticalTextColor);

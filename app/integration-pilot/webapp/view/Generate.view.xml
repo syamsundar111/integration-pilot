@@ -120,9 +120,11 @@
             <headerToolbar>
               <Toolbar style="Clear" design="Transparent">
                 <core:Icon src="sap-icon://action-settings" />
-                <Text text="Session defaults" class="sapMTextBold" />
+                <Text text="Session defaults" class="sapMTextBold ipNoShrink" wrapping="false" />
+                <!-- shortened with "…" in a narrow panel; the full summary on hover -->
                 <Text
                   text="{parts: ['chat>/defaults/packageId', 'chat>/defaults/timer', 'chat>/defaults/authNote'], formatter: '.defaultsSummary'}"
+                  tooltip="{parts: ['chat>/defaults/packageId', 'chat>/defaults/timer', 'chat>/defaults/authNote'], formatter: '.defaultsSummary'}"
                   class="ipSubtle"
                   wrapping="false"
                 />
