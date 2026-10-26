@@ -253,24 +253,29 @@ sap.ui.define(
           m.setProperty('/parsed', parsed)
           m.setProperty('/diagramHtml', flowDiagram.toHtml(flowDiagram.fromParsed(parsed)))
         } catch (e) {
-          m.setProperty('/parsedError', e.hint ? `${e.message} — ${e.hint}` : e.message)
+          if (m.getProperty('/iflowId') === id) m.setProperty('/parsedError', e.hint ? `${e.message} — ${e.hint}` : e.message)
         } finally {
-          m.setProperty('/parsedBusy', false)
+          if (m.getProperty('/iflowId') === id) m.setProperty('/parsedBusy', false)
         }
       },
 
       async loadConfigs() {
         const m = this.getModel('view')
+        const id = m.getProperty('/iflowId')
         m.setProperty('/configsBusy', true)
         try {
-          const configs = await api.get(`/Iflows/${api.seg(m.getProperty('/iflowId'))}/configurations`)
+          const configs = await api.get(`/Iflows/${api.seg(id)}/configurations`)
+          if (m.getProperty('/iflowId') !== id) return // another iFlow was opened meanwhile: its parameters must not be overwritten
           m.setProperty('/configs', configs.map((c) => ({ ...c, value: c.value || '' })))
           m.setProperty('/original', Object.fromEntries(configs.map((c) => [c.key, c.value || ''])))
         } catch (e) {
+          if (m.getProperty('/iflowId') !== id) return
           m.setProperty('/configs', [])
         } finally {
-          m.setProperty('/changes', 0)
-          m.setProperty('/configsBusy', false)
+          if (m.getProperty('/iflowId') === id) {
+            m.setProperty('/changes', 0)
+            m.setProperty('/configsBusy', false)
+          }
         }
       },
 
@@ -281,16 +286,17 @@ sap.ui.define(
         m.setProperty('/runtimeBusy', true)
         try {
           const runtime = await api.get(`/Iflows/${api.seg(id)}/runtime`)
+          if (m.getProperty('/iflowId') !== id) return // another iFlow was opened meanwhile
           m.setProperty('/runtime', runtime)
           m.setProperty('/runtimeError', null)
           if (runtime && runtime.status === 'ERROR') {
             const err = await api.get(`/RuntimeArtifacts/${api.seg(id)}/errorInfo`).catch(() => null)
-            m.setProperty('/runtimeError', err && err.message)
+            if (m.getProperty('/iflowId') === id) m.setProperty('/runtimeError', err && err.message)
           }
         } catch (e) {
-          m.setProperty('/runtime', null)
+          if (m.getProperty('/iflowId') === id) m.setProperty('/runtime', null)
         } finally {
-          m.setProperty('/runtimeBusy', false)
+          if (m.getProperty('/iflowId') === id) m.setProperty('/runtimeBusy', false)
         }
       },
 
