@@ -485,6 +485,7 @@ sap.ui.define(
         })
         if (deleted) {
           this.toast(`iFlow deleted: ${id}`)
+          this.onResetParams() // its unsaved parameter changes are gone with it: no "discard?" question
           this.navigate(null)
           this.loadIflows()
         }

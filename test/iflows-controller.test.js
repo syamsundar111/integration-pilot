@@ -355,3 +355,36 @@ describe('Explain from ZIP', () => {
     expect(s.uploader.clear).toHaveBeenCalled()
   })
 })
+
+describe('deleting an iFlow with unsaved parameter changes', () => {
+  test('closes the detail without asking to discard them', async () => {
+    const opened = []
+    function Dialog(o) {
+      this.open = () => opened.push(o)
+    }
+    const api = { get: jest.fn(async () => []), del: jest.fn(async () => ({})), seg: encodeURIComponent, q: () => '' }
+    const BaseController = { extend: (_n, proto) => proto }
+    const flowDiagram = { toHtml: () => '', fromParsed: () => ({}) }
+    const ctl = Object.create(factoryOf(path.join(__dirname, '../app/integration-pilot/webapp/controller/Iflows.controller.js'))(BaseController, JSONModel, api, flowDiagram, null, Dialog))
+    const models = {}
+    const navTo = jest.fn()
+    Object.assign(ctl, {
+      setModel: (m, name) => (models[name] = m),
+      getModel: (name) => models[name],
+      getView: () => ({ addDependent: () => {} }),
+      getRouter: () => ({ getRoute: () => ({ attachPatternMatched: () => {} }), navTo }),
+      toast: jest.fn(),
+      typeToConfirm: jest.fn(async (o) => (await o.run(), true))
+    })
+    ctl.onInit()
+    const view = models.view
+    Object.assign(view.data, { packageId: 'P', iflowId: 'A', iflows: [{ id: 'A', name: 'A' }], configs: [{ key: 'URL', value: 'edited' }], original: { URL: 'old' }, changes: 1 })
+    ctl._listPackageId = 'P'
+    await ctl.onDelete()
+    expect(api.del).toHaveBeenCalled()
+    expect(navTo).toHaveBeenCalledWith('iflows', { '?query': { package: 'P' } }, undefined)
+    await ctl.onRoute({ getParameter: () => ({ '?query': { package: 'P' } }) }) // the route the navigation fires
+    expect(opened).toEqual([]) // no "Unsaved parameter changes" dialog
+    expect(view.getProperty('/iflowId')).toBeNull()
+  })
+})
