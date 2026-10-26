@@ -5,9 +5,16 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'integration/pilot
 
   return BaseController.extend('integration.pilot.controller.App', {
     onInit() {
-      this.getOwnerComponent().getRouter().attachRouteMatched((e) => {
+      const router = this.getOwnerComponent().getRouter()
+      router.attachRouteMatched((e) => {
         const name = e.getParameter('name')
         this.getModel('app').setProperty('/selectedKey', name)
+      })
+      // "Page not found" is no route: no menu entry is highlighted (not the page shown before);
+      // an empty key alone leaves the previous item selected in the SideNavigation
+      router.attachBypassed(() => {
+        this.getModel('app').setProperty('/selectedKey', '')
+        this.byId('sideNav').setSelectedItem(null)
       })
       this.loadUser()
       this.loadHealth()
