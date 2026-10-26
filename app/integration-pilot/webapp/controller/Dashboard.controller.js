@@ -63,7 +63,7 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
     },
 
     onNewIflow() {
-      this.getRouter().navTo('generate')
+      this.getRouter().navTo('generate', { '?query': { new: '1' } }) // a new conversation, not the last one
     },
 
     onProposal(e) {

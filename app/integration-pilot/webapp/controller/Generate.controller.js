@@ -203,12 +203,18 @@ sap.ui.define(
 
       onRoute(e) {
         const query = e.getParameter('arguments')['?query'] || {}
+        // the menu (#/generate) returns to the conversation open last; "New conversation" is ?new=1
+        if (!query.session && !query.new && this._lastSessionId) {
+          this.getRouter().navTo('generate', { '?query': { session: this._lastSessionId } }, true)
+          return
+        }
         const sessionId = query.session || ''
         this.loadSessions()
         this.loadPackages()
         if (sessionId === this._skipLoad) {
           // the session just created by sending: shown already; only this one navigation is skipped
           this._skipLoad = null
+          this._loadedSessionId = this._lastSessionId = sessionId
           return
         }
         this.chat().setProperty('/sessionId', sessionId)
@@ -249,13 +255,19 @@ sap.ui.define(
         // every switch to another conversation passes here: work that was waiting for the server
         // checks this counter and is dropped if the user has moved on in the meantime
         const view = (this._view = (this._view || 0) + 1)
+        // text typed and files attached but not sent belong to their conversation: kept when it is
+        // opened again (e.g. back from another page), dropped when another conversation opens
+        const switched = sessionId !== this._loadedSessionId
+        this._loadedSessionId = this._lastSessionId = sessionId
+        if (switched) c.setProperty('/input', '')
+        const unsent = switched ? [] : (c.getProperty('/files') || []).filter((f) => f.pending)
         this.stopTurnPolling()
         c.setProperty('/turn', null)
         if (!sessionId) {
           c.setProperty('/messages', [])
           c.setProperty('/proposals', [])
           c.setProperty('/defaults', { ...NO_DEFAULTS })
-          c.setProperty('/files', [])
+          c.setProperty('/files', unsent)
           c.setProperty('/draft', null)
           this.setActive(null)
           return
@@ -281,14 +293,17 @@ sap.ui.define(
           const stored = session.defaults ? JSON.parse(session.defaults) : {}
           // show the package as the user typed it: a Name ("test_1") is stored with its derived ID
           c.setProperty('/defaults', { ...NO_DEFAULTS, ...stored, packageId: stored.packageName || stored.packageId || '' })
-          c.setProperty('/files', [])
+          c.setProperty('/files', unsent)
           c.setProperty('/draft', draftInfo(session.draftSpec))
           this.loadAttachments(sessionId)
           c.setProperty('/proposals', proposals)
           this.setActive(proposals[0] ? proposals[0].ID : null)
           this.scrollChat()
         } catch (e) {
-          if (view === this._view) this.showError(e, 'Could not load the conversation')
+          if (view === this._view) {
+            this._lastSessionId = '' // e.g. deleted: the menu opens a new conversation next time
+            this.showError(e, 'Could not load the conversation')
+          }
         } finally {
           if (view === this._view) c.setProperty('/loadingSession', false) // a newer load owns the busy state
         }
@@ -344,7 +359,8 @@ sap.ui.define(
       onNewChat() {
         this._skipLoad = null
         this.chat().setProperty('/input', '')
-        this.getRouter().navTo('generate')
+        this.chat().setProperty('/files', [])
+        this.getRouter().navTo('generate', { '?query': { new: '1' } })
         setTimeout(() => this.byId('input').focus(), 100)
       },
 

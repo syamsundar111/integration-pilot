@@ -126,7 +126,7 @@ describe('Generate page: switching conversations while requests are in flight', 
     ctl._skipLoad = 'X'
     ctl.onRoute(route('X')) // the navTo right after the first send: skipped
     expect(ctl.loadSession).not.toHaveBeenCalled()
-    ctl.onRoute(route('')) // the side nav opens an empty chat
+    ctl.onRoute(route('')) // the side nav: back to the last conversation (a redirect, no load here)
     ctl.onRoute(route('X')) // browser Back to X: loaded, not skipped again
     expect(ctl.loadSession).toHaveBeenLastCalledWith('X')
     expect(chat.getProperty('/sessionId')).toBe('X')
@@ -178,5 +178,75 @@ describe('Generate page: approve runs once at a time, and not with failed Groovy
     await s.ctl.onApprove()
     expect(s.ctl.confirm).not.toHaveBeenCalled()
     expect(s.api.post).not.toHaveBeenCalled()
+  })
+})
+
+describe('Generate page: coming back keeps the conversation, its unsent text and files', () => {
+  function setup() {
+    const { ctl, chat, api } = controller()
+    const navTo = jest.fn()
+    ctl.getRouter = () => ({ navTo })
+    const route = (query) => ctl.onRoute({ getParameter: () => ({ '?query': query }) })
+    return { ctl, chat, api, navTo, route }
+  }
+
+  async function openA(s) {
+    s.route({ session: 'A' })
+    answerSession(s.api, 'A')
+    await flush()
+    s.chat.setProperty('/input', 'Use the attached script')
+    s.chat.setProperty('/files', [{ fileName: 'mapOrders.groovy', pending: true, content: 'x' }])
+  }
+
+  test('the menu (#/generate) returns to the conversation open last', async () => {
+    const s = setup()
+    await openA(s)
+    s.route({}) // left menu → Generate
+    expect(s.navTo).toHaveBeenCalledWith('generate', { '?query': { session: 'A' } }, true)
+  })
+
+  test('back in the same conversation: the unsent file and the typed text are still there', async () => {
+    const s = setup()
+    await openA(s)
+    s.route({ session: 'A' }) // e.g. back from Monitor
+    answerSession(s.api, 'A')
+    await flush()
+    expect(s.chat.getProperty('/files')).toEqual([{ fileName: 'mapOrders.groovy', pending: true, content: 'x' }])
+    expect(s.chat.getProperty('/input')).toBe('Use the attached script')
+  })
+
+  test('another conversation: the unsent file and text of A are dropped', async () => {
+    const s = setup()
+    await openA(s)
+    s.route({ session: 'B' })
+    answerSession(s.api, 'B')
+    await flush()
+    expect(s.chat.getProperty('/files')).toEqual([])
+    expect(s.chat.getProperty('/input')).toBe('')
+  })
+
+  test('"New conversation" (?new=1) opens an empty one, and the menu then stays on it', async () => {
+    const s = setup()
+    await openA(s)
+    s.ctl.onNewChat()
+    expect(s.navTo).toHaveBeenLastCalledWith('generate', { '?query': { new: '1' } })
+    s.route({ new: '1' })
+    expect(s.chat.getProperty('/messages')).toEqual([])
+    expect(s.chat.getProperty('/files')).toEqual([])
+    s.navTo.mockClear()
+    s.route({}) // left menu → Generate: the new (empty) conversation, no redirect to A
+    expect(s.navTo).not.toHaveBeenCalled()
+  })
+
+  test('a last conversation that cannot be loaded (e.g. deleted) is not reopened by the menu', async () => {
+    const s = setup()
+    s.route({ session: 'Gone' })
+    for (const c of s.api.calls.filter((x) => x.url.includes('Gone'))) {
+      c.resolve(c.url === '/ChatSessions/Gone' ? Promise.reject(new Error('not found')) : [])
+    }
+    await flush()
+    s.navTo.mockClear()
+    s.route({})
+    expect(s.navTo).not.toHaveBeenCalled()
   })
 })
