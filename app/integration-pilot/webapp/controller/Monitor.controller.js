@@ -24,6 +24,7 @@ sap.ui.define(
             runtime: [],
             runtimeRows: [],
             runtimeBusy: true,
+            runtimeError: null,
             counts: { ALL: 0, STARTED: 0, ERROR: 0, STARTING: 0 },
             status: 'ALL',
             artifactSearch: '',
@@ -123,8 +124,11 @@ sap.ui.define(
           m.setProperty('/pending', pending)
           m.setProperty('/pendingText', pending.map((p) => p.iflowId).join(', '))
           this.applyFilter()
+          m.setProperty('/runtimeError', null)
         } catch (e) {
-          this.showError(e, 'Runtime artifacts could not be loaded')
+          // shown in the panel, not as a dialog: the 60 s auto-refresh would stack one dialog per minute;
+          // the last loaded list stays, and the next good refresh clears the error
+          m.setProperty('/runtimeError', e.hint ? `${e.message} — ${e.hint}` : e.message)
         } finally {
           m.setProperty('/runtimeBusy', false)
         }

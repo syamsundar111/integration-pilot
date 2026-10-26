@@ -29,6 +29,7 @@
               </SegmentedButton>
             </OverflowToolbar>
           </headerToolbar>
+          <MessageStrip text="{= 'Runtime artifacts could not be loaded: ' + ${view>/runtimeError} + (${view>/runtime}.length ? ' — showing the last loaded list.' : '') }" type="Error" showIcon="true" visible="{= !!${view>/runtimeError} }" class="sapUiSmallMarginBottom" />
           <VBox renderType="Bare" class="ipArtifactsScroll">
         <Table items="{view>/runtimeRows}" busy="{view>/runtimeBusy}" busyIndicatorDelay="0" sticky="ColumnHeaders">
           <infoToolbar>
@@ -42,8 +43,8 @@
               illustrationType="sapIllus-NoActivities"
               illustrationSize="ExtraSmall"
               enableVerticalResponsiveness="true"
-              title="{= ${view>/artifactSearch} ? 'No match for ' + ${view>/artifactSearch} : ${view>/status} === 'ALL' ? 'Nothing deployed' : 'No artifacts with status ' + ${view>/status} }"
-              description="{= ${view>/artifactSearch} ? 'Search by iFlow name or ID.' : ${view>/status} === 'ALL' ? 'Deploy an iFlow to see it here.' : 'Everything else looks fine.' }"
+              title="{= ${view>/runtimeError} &amp;&amp; !${view>/runtime}.length ? 'No runtime data' : ${view>/artifactSearch} ? 'No match for ' + ${view>/artifactSearch} : ${view>/status} === 'ALL' ? 'Nothing deployed' : 'No artifacts with status ' + ${view>/status} }"
+              description="{= ${view>/runtimeError} &amp;&amp; !${view>/runtime}.length ? 'The list could not be loaded (see above). Refresh to try again.' : ${view>/artifactSearch} ? 'Search by iFlow name or ID.' : ${view>/status} === 'ALL' ? 'Deploy an iFlow to see it here.' : 'Everything else looks fine.' }"
             />
           </noData>
           <columns>

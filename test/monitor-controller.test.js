@@ -54,6 +54,7 @@ function monitor() {
     getRouter: () => ({ getRoute: () => ({ attachPatternMatched: (fn) => (matched = fn) }), attachRouteMatched: () => {} })
   })
   ctl.onInit()
+  started.push(ctl)
   const open = async (query) => {
     matched({ getParameter: () => (query ? { '?query': query } : {}) })
     await new Promise((r) => setImmediate(r))
@@ -61,7 +62,12 @@ function monitor() {
   return { ctl, open, view: models.view, api }
 }
 
-afterEach(() => jest.useRealTimers())
+// every Monitor stops its auto-refresh timer, also when a test fails before its own onExit()
+const started = []
+afterEach(() => {
+  while (started.length) started.pop().onExit()
+  jest.useRealTimers()
+})
 
 describe('Monitor page filters follow the link that opened it', () => {
   test('"In error" tile, then "Deployed / started" tile: all artifacts again', async () => {
@@ -185,6 +191,29 @@ describe('iFlow search and the Messages button', () => {
     expect(view.getProperty('/logIflow')).toBe('')
     expect(view.getProperty('/logSearch')).toBe('')
     expect(logQuery(api).has('search')).toBe(false)
+    ctl.onExit()
+  })
+})
+
+describe('runtime auto-refresh errors', () => {
+  test('failing refreshes show one error in the panel, no dialogs, and keep the last list; a good one clears it', async () => {
+    const { open, view, ctl, api } = monitor()
+    ctl.showError = jest.fn()
+    await open()
+    expect(view.getProperty('/runtime')).toHaveLength(2)
+    const get = api.get.getMockImplementation()
+    api.get.mockImplementation(async (url) => {
+      if (url.startsWith('/RuntimeArtifacts')) throw Object.assign(new Error('CPI not reachable'), { hint: 'check the destination' })
+      return get(url)
+    })
+    for (let i = 0; i < 3; i++) await ctl.loadRuntime() // three auto-refreshes
+    expect(ctl.showError).not.toHaveBeenCalled()
+    expect(view.getProperty('/runtimeError')).toBe('CPI not reachable — check the destination')
+    expect(view.getProperty('/runtimeRows').map((r) => r.id)).toEqual(['b', 'a'])
+    expect(view.getProperty('/runtimeBusy')).toBe(false)
+    api.get.mockImplementation(get)
+    await ctl.loadRuntime()
+    expect(view.getProperty('/runtimeError')).toBeNull()
     ctl.onExit()
   })
 })
