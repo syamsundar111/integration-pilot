@@ -371,6 +371,19 @@ async function currentSpec(iflowId) {
   return { ...result, packageId: iflow.packageId }
 }
 
+/** File names used by proposals or the draft of other iFlows in this conversation */
+async function filesOfOtherIflows(ctx, iflowId) {
+  if (!ctx.sessionId) return new Set()
+  const proposals = await cds.tx({ user: ctx.user }, (tx) =>
+    tx.run(SELECT.from('iflowpilot.Proposal').columns('iflowId', 'attachments').where({ session_ID: ctx.sessionId, iflowId: { '!=': iflowId } }))
+  )
+  const names = proposals.flatMap((p) => Object.keys(p.attachments ? JSON.parse(p.attachments) : {}))
+  const draft = (await draftOf(ctx))?.spec
+  if (draft && draft.id !== iflowId)
+    for (const s of [...(draft.steps || []), ...(draft.exceptionSubprocess?.steps || [])]) if (s.type === 'groovyScript' && s.fileName) names.push(`${s.fileName}.groovy`)
+  return new Set(names)
+}
+
 /**
  * Moves the scripts and XSLT files of an existing iFlow's spec into the conversation's
  * attachments and returns the spec without code, so the model never receives script bodies.
@@ -379,14 +392,20 @@ async function currentSpec(iflowId) {
 async function detachFiles(ctx, spec, resources = {}) {
   const steps = [...spec.steps, ...(spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript' && s.code != null)
   const files = [...steps.map((s) => ({ fileName: `${s.fileName}.groovy`, content: s.code })), ...Object.entries(resources).map(([fileName, content]) => ({ fileName, content }))]
-  const stored = new Set(files.length ? await attachmentStore.save(ctx.user, ctx.sessionId, files, 'iflow') : [])
+  // a script written earlier with writeScript wins (the model may write the new version before loading
+  // the iFlow), unless it belongs to another iFlow of this conversation: then this iFlow's file is loaded
+  const otherIflows = files.length ? await filesOfOtherIflows(ctx, spec.id) : new Set()
+  const replaceAi = files.map((f) => f.fileName).filter((f) => otherIflows.has(f))
+  const stored = new Set(files.length ? await attachmentStore.save(ctx.user, ctx.sessionId, files, 'iflow', { replaceAi }) : [])
   ctx.attachments = undefined // reload: new files
   const strip = (s) => (s.type === 'groovyScript' && s.code != null ? (({ code, ...rest }) => rest)(s) : s)
   return {
     spec: { ...spec, steps: spec.steps.map(strip), ...(spec.exceptionSubprocess && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: spec.exceptionSubprocess.steps.map(strip) } }) },
     attachedFiles: files.map((f) => f.fileName).filter((f) => stored.has(f)),
     // files of the conversation that replace the iFlow's: uploads of the user and scripts written with writeScript
-    keptFiles: files.map((f) => f.fileName).filter((f) => !stored.has(f))
+    keptFiles: files.map((f) => f.fileName).filter((f) => !stored.has(f)),
+    // scripts of another iFlow with the same name: this iFlow's current file is loaded instead
+    replacedScripts: replaceAi
   }
 }
 
@@ -693,13 +712,17 @@ const handlers = {
         instruction:
           'This iFlow cannot be updated here: an update rebuilds it from the spec and would lose the blockers. Tell the user, list the blockers, and suggest changing it in the CPI web editor or creating a new iFlow.'
       }
-    const { spec, attachedFiles, keptFiles } = await detachFiles(ctx, current.spec, current.resources)
+    const { spec, attachedFiles, keptFiles, replacedScripts } = await detachFiles(ctx, current.spec, current.resources)
     await saveDraft(ctx, spec, { source: `current content of iFlow ${iflowId}` })
     return {
       editable: true,
       spec,
       ...(attachedFiles.length && { attachedFiles }),
       ...(keptFiles.length && { keptFiles }),
+      ...(replacedScripts.length && {
+        replacedScripts,
+        replacedNote: `${replacedScripts.join(', ')}: the script of that name you wrote for another iFlow was replaced by this iFlow's current file. To change this iFlow's script, write it again with writeScript.`
+      }),
       instruction:
         'Change only what the user asked for, keep everything else as it is, edit the draft with editDraftSpec and call proposeIflowUpdate with { "useDraftSpec": true }. Scripts and XSLT files are attached files: keep their steps without code' +
         (keptFiles.length ? `; ${keptFiles.join(', ')} (uploaded by the user or written with writeScript in this conversation) replace the iFlow's current files.` : '.')

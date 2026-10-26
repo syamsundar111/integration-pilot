@@ -1458,6 +1458,21 @@ def Message processData(Message message) {
     expect(turn.text).toContain('- Script `addNotificationAttachment.groovy`: changed')
   })
 
+  test("a script of the same name written for another iFlow does not replace this iFlow's script (review)", async () => {
+    // conversation: a script written for Other_Flow and proposed with it
+    llm.chat.mockResolvedValueOnce(toolCall('writeScript', { fileName: 'addNotificationAttachment', code: NEW })).mockResolvedValueOnce(answer('written'))
+    const first = await chat({ message: 'write the script for Other_Flow' })
+    await INSERT.into('iflowpilot.Proposal').entries({ session_ID: first.sessionId, kind: 'IFLOW', iflowId: 'Other_Flow', packageId: 'PilotReference', spec: '{}', attachments: JSON.stringify({ 'addNotificationAttachment.groovy': NEW }), createdBy: 'local-dev' })
+    // then Notify_Update is loaded in the same conversation
+    llm.chat.mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: current.id })).mockResolvedValueOnce(answer('loaded'))
+    await chat({ sessionId: first.sessionId, message: 'now look at Notify_Update' })
+    const read = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(read).toMatchObject({ editable: true, replacedScripts: ['addNotificationAttachment.groovy'] })
+    expect(read.keptFiles).toBeUndefined()
+    const { data: files } = await GET(`/api/Attachments?$filter=session_ID eq ${first.sessionId}`)
+    expect(files).toEqual([expect.objectContaining({ fileName: 'addNotificationAttachment.groovy', origin: 'iflow' })])
+  })
+
   test('code in the message but the script left unchanged: refused before proposing (SCRIPT_UNCHANGED)', async () => {
     llm.chat
       .mockResolvedValueOnce(toolCall('getIflowSpec', { iflowId: current.id }))

@@ -42,7 +42,11 @@ function check({ fileName, content }) {
  * an existing iFlow (origin iflow/import) never replace an upload of the user.
  * @returns {Promise<string[]>} the file names stored
  */
-async function save(user, sessionId, files, origin = 'upload') {
+/**
+ * opts.replaceAi: file names of scripts written in the conversation (origin 'ai') that this save
+ * replaces anyway, e.g. scripts of another iFlow with the same name as the iFlow's files
+ */
+async function save(user, sessionId, files, origin = 'upload', { replaceAi = [] } = {}) {
   const rows = files.map(check)
   const names = rows.map((r) => r.fileName)
   if (new Set(names).size !== names.length) throw fail(400, 'INVALID_ATTACHMENT', 'Two attachments have the same file name')
@@ -55,7 +59,7 @@ async function save(user, sessionId, files, origin = 'upload') {
     for (const row of rows) {
       const old = byName[row.fileName]
       // the user's uploads and the scripts written in this conversation win over copies from an iFlow or an import
-      if (old && origin !== 'upload' && (old.origin === 'upload' || (origin !== 'ai' && old.origin === 'ai'))) continue
+      if (old && origin !== 'upload' && (old.origin === 'upload' || (origin !== 'ai' && old.origin === 'ai' && !replaceAi.includes(row.fileName)))) continue
       if (old) await tx.run(UPDATE(Attachment()).set({ ...row, origin }).where({ session_ID: sessionId, fileName: row.fileName }))
       else await tx.run(INSERT.into(Attachment()).entries({ ...row, origin, session_ID: sessionId }))
       stored.push(row.fileName)
