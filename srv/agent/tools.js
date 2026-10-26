@@ -8,7 +8,7 @@ const fs = require('fs')
 const path = require('path')
 const cds = require('@sap/cds')
 const cpi = require('../lib/cpi-client')
-const { validate, normalizeTypes, schema, GROOVY_IMPORT, GROOVY_ENTRY } = require('../iflow-builder/validator')
+const { validate, normalizeTypes, hasScriptSecret, schema, GROOVY_IMPORT, GROOVY_ENTRY } = require('../iflow-builder/validator')
 const { build } = require('../iflow-builder/builder')
 const attachmentStore = require('../lib/attachments')
 const groovyCheck = require('../lib/groovy-check')
@@ -486,6 +486,9 @@ const handlers = {
     else {
       if (!GROOVY_IMPORT.test(code)) errors.push({ code: 'GROOVY_IMPORT', message: `${fileName}.groovy: must import com.sap.gateway.ip.core.customdev.util.Message` })
       if (!GROOVY_ENTRY.test(code)) errors.push({ code: 'GROOVY_ENTRY', message: `${fileName}.groovy: must define 'def Message processData(Message message)' and return the message` })
+      // the same rule as for inline code: scripts are always written here, so this is where it applies
+      if (hasScriptSecret(code))
+        errors.push({ code: 'SECRET', message: `${fileName}.groovy: contains a hard-coded secret — read credentials from deployed security material (SecureStoreService) instead` })
     }
     if (errors.length) return compactInvalid(errors, 'Fix the script and call writeScript again.')
     const file = `${fileName}.groovy`

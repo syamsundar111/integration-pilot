@@ -40,6 +40,8 @@ const WHOLE_PARAM = /^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/
 const AUTH_HINT = 'create the receiver with authType None, then set authentication and credentials in the CPI web editor after creation'
 
 const SECRET_NAME = /pass(word|wd)?|pwd|secret|api[-_]?key|token|authorization|client[-_]?secret/i
+/** A Groovy script with a hard-coded password, token or Basic credentials (inline code and writeScript) */
+const hasScriptSecret = (code) => /(password|passwd|pwd|secret|token)\w*\s*=\s*["'][^"'$]{3,}["']/i.test(code) || /Basic\s+[A-Za-z0-9+/]{12,}={0,2}/.test(code)
 
 /** Steps of the exception subprocess, [] without one */
 const exceptionSteps = (spec) => (Array.isArray(spec?.exceptionSubprocess?.steps) ? spec.exceptionSubprocess.steps : [])
@@ -287,7 +289,7 @@ function validate(spec, { attachments = [] } = {}) {
   }
   for (const [s, where] of allSteps) {
     if (s?.type !== 'groovyScript' || typeof s.code !== 'string') continue
-    if (/(password|passwd|pwd|secret|token)\w*\s*=\s*["'][^"'$]{3,}["']/i.test(s.code) || /Basic\s+[A-Za-z0-9+/]{12,}={0,2}/.test(s.code))
+    if (hasScriptSecret(s.code))
       err('SECRET', `${where}.code: contains a hard-coded secret — read credentials from deployed security material (SecureStoreService) instead`)
   }
 
@@ -354,4 +356,4 @@ function normalizeTypes(spec) {
   return { spec: out, fixes }
 }
 
-module.exports = { validate, normalizeTypes, effectiveNames, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }
+module.exports = { validate, normalizeTypes, effectiveNames, hasScriptSecret, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }

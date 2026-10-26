@@ -25,3 +25,10 @@ test('getIflowSpec: parameters that cannot be read are an error, not the default
   expect(result.error).toMatchObject({ code: 'CONFIGURATIONS_UNREADABLE', message: expect.stringContaining("current parameter values of iFlow 'Orders_To_ERP' could not be read") })
   expect(result.spec).toBeUndefined()
 })
+
+test('writeScript refuses a hard-coded secret, like inline code (review: the check never ran for written scripts)', async () => {
+  const code = 'import com.sap.gateway.ip.core.customdev.util.Message\ndef Message processData(Message message) {\n  def password = "hunter2"\n  return message\n}\n'
+  const result = JSON.parse(await execute('writeScript', JSON.stringify({ fileName: 'callErp', code }), { user: { id: 'u' }, sessionId: 's' }))
+  expect(JSON.stringify(result)).toContain('SECRET')
+  expect(result.stored).toBeUndefined()
+})
