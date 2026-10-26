@@ -500,14 +500,19 @@ sap.ui.define(
       onZipSelected(e) {
         const file = (e.getParameter('files') || [])[0]
         if (!file) return
+        // kept for after the read (as Generate's attach/import do); also cleared when reading fails
+        const uploader = e.getSource()
         if (file.size > MAX_ZIP_MB * 1024 * 1024) return this.showError({ message: `The file is larger than ${MAX_ZIP_MB} MB.` })
         const reader = new FileReader()
         reader.onload = () => {
           const zipBase64 = String(reader.result).replace(/^data:[^,]*,/, '')
           ExplainDialog.open(this.getView(), { zipBase64, label: file.name })
-          e.getSource().clear()
+          uploader.clear()
         }
-        reader.onerror = () => this.showError({ message: 'The file could not be read.' })
+        reader.onerror = () => {
+          uploader.clear()
+          this.showError({ message: 'The file could not be read.' })
+        }
         reader.readAsDataURL(file)
       },
 

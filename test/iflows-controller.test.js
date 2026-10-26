@@ -318,3 +318,40 @@ describe('Deploy / Undeploy run once at a time', () => {
     expect(s.view.getProperty('/writing')).toBeNull()
   })
 })
+
+describe('Explain from ZIP', () => {
+  function setup(readOk) {
+    const ExplainDialog = { open: jest.fn() }
+    const BaseController = { extend: (_n, proto) => proto }
+    const flowDiagram = { toHtml: () => '', fromParsed: () => ({}) }
+    const ctl = Object.create(factoryOf(path.join(__dirname, '../app/integration-pilot/webapp/controller/Iflows.controller.js'))(BaseController, JSONModel, {}, flowDiagram, ExplainDialog))
+    Object.assign(ctl, { getView: () => ({}), showError: jest.fn() })
+    const readers = []
+    global.FileReader = function () {
+      readers.push(this)
+      this.readAsDataURL = () => {}
+      this.finish = () => (readOk ? ((this.result = 'data:application/zip;base64,UEsDBA=='), this.onload()) : this.onerror())
+    }
+    const uploader = { clear: jest.fn() }
+    const event = { getParameter: () => [{ name: 'flow.zip', size: 100 }], getSource: () => uploader }
+    const select = () => ctl.onZipSelected(event)
+    return { ctl, ExplainDialog, uploader, readers, select }
+  }
+  afterEach(() => delete global.FileReader)
+
+  test('after reading, the dialog opens and the uploader is cleared', () => {
+    const s = setup(true)
+    s.select()
+    s.readers[0].finish()
+    expect(s.ExplainDialog.open).toHaveBeenCalledWith({}, { zipBase64: 'UEsDBA==', label: 'flow.zip' })
+    expect(s.uploader.clear).toHaveBeenCalled()
+  })
+
+  test('a read error shows the message and clears the uploader (the same file can be chosen again)', () => {
+    const s = setup(false)
+    s.select()
+    s.readers[0].finish()
+    expect(s.ctl.showError).toHaveBeenCalledWith({ message: 'The file could not be read.' })
+    expect(s.uploader.clear).toHaveBeenCalled()
+  })
+})
