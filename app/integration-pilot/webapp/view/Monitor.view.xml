@@ -11,7 +11,8 @@
     </f:title>
     <f:content>
       <VBox class="ipGapM" renderType="Bare">
-        <!-- runtime artifacts: collapsible; the list scrolls inside a limited height, so the logs stay in view -->
+        <!-- runtime artifacts: collapsible; the list scrolls inside a limited height, so the logs stay in view
+             (empty states use the small illustration, so their text fits in that height) -->
         <Panel id="artifactsPanel" expandable="true" expanded="{view>/open/artifacts}" expand=".onArtifactsToggle" class="ipCard ipMonitorPanel">
           <headerToolbar>
             <OverflowToolbar>
@@ -39,6 +40,8 @@
           <noData>
             <IllustratedMessage
               illustrationType="sapIllus-NoActivities"
+              illustrationSize="ExtraSmall"
+              enableVerticalResponsiveness="true"
               title="{= ${view>/artifactSearch} ? 'No match for ' + ${view>/artifactSearch} : ${view>/status} === 'ALL' ? 'Nothing deployed' : 'No artifacts with status ' + ${view>/status} }"
               description="{= ${view>/artifactSearch} ? 'Search by iFlow name or ID.' : ${view>/status} === 'ALL' ? 'Deploy an iFlow to see it here.' : 'Everything else looks fine.' }"
             />
@@ -103,7 +106,7 @@
             </OverflowToolbar>
           </infoToolbar>
           <noData>
-            <IllustratedMessage illustrationType="sapIllus-NoMail" title="No messages" description="No messages match these filters. Widen the time window or clear the status filter." />
+            <IllustratedMessage illustrationType="sapIllus-NoMail" illustrationSize="ExtraSmall" enableVerticalResponsiveness="true" title="No messages" description="No messages match these filters. Widen the time window or clear the status filter." />
           </noData>
           <columns>
             <Column width="9rem"><Text text="Status" /></Column>
