@@ -250,3 +250,35 @@ describe('Generate page: coming back keeps the conversation, its unsent text and
     expect(s.navTo).not.toHaveBeenCalled()
   })
 })
+
+describe('Generate page: import', () => {
+  test('import into a new conversation keeps the suggested prompt (routing runs later and must not clear it)', async () => {
+    const { ctl, chat, api } = controller()
+    const navTo = jest.fn()
+    ctl.getRouter = () => ({ navTo })
+    ctl.currentDefaults = () => ({})
+    global.FileReader = function () {
+      this.readAsDataURL = () => {
+        this.result = 'data:application/zip;base64,UEsDBA=='
+        this.onload()
+      }
+    }
+    try {
+      chat.setProperty('/sessionId', '')
+      const importing = ctl.onImport({ getParameter: () => [{ name: 'flow.zip', size: 10 }], getSource: () => ({ clear() {} }) })
+      await flush()
+      api.calls.find((c) => c.url === '/importIflow').resolve({ sessionId: 'NEW', spec: { id: 'Flow' }, placeholders: 0 })
+      await flush()
+      answerSession(api, 'NEW')
+      await importing
+      // the route fires afterwards (asynchronous routing)
+      ctl.onRoute({ getParameter: () => ({ '?query': { session: 'NEW' } }) })
+      await flush()
+      expect(navTo).toHaveBeenCalledWith('generate', { '?query': { session: 'NEW' } })
+      expect(chat.getProperty('/sessionId')).toBe('NEW')
+      expect(chat.getProperty('/input')).toBe('Propose the imported iFlow as a new iFlow.')
+    } finally {
+      delete global.FileReader
+    }
+  })
+})

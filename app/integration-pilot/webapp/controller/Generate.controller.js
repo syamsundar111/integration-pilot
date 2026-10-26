@@ -598,8 +598,14 @@ sap.ui.define(
           const result = await api.post('/importIflow', { ...(sessionId && { sessionId }), fileName: file.name, contentBase64, ...(packageId && { packageId }) })
           this.toast(`Imported ${result.spec.id}${result.placeholders ? ` — ${result.placeholders} placeholder(s) to replace` : ''}`)
           this._skipLoad = null
-          if (result.sessionId === sessionId) await this.loadSession(sessionId)
-          else this.getRouter().navTo('generate', { '?query': { session: result.sessionId } })
+          if (result.sessionId !== sessionId) {
+            // a new conversation: load it here and skip the route's load, which would run later
+            // (routing is asynchronous) and clear the prompt set below as typed text of another conversation
+            c.setProperty('/sessionId', result.sessionId)
+            this._skipLoad = result.sessionId
+            this.getRouter().navTo('generate', { '?query': { session: result.sessionId } })
+          }
+          await this.loadSession(result.sessionId)
           c.setProperty('/input', 'Propose the imported iFlow as a new iFlow.')
         } catch (err) {
           this.showError(err, `Could not import ${file.name}`)
