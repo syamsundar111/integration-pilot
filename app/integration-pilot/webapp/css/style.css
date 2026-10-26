@@ -557,6 +557,27 @@
   font-size: var(--sapFontSmallSize);
 }
 
+/* Activity → AI usage: figures in equal columns across the panel, each with its own sub-text */
+.ipUsageKpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 1rem 1.5rem;
+}
+.ipUsageKpis > * {
+  min-width: 0;
+}
+/* the two usage tables: half the width each, a clear gap between them; stacked below 1100px */
+.ipUsageTables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2rem;
+}
+@media (max-width: 1100px) {
+  .ipUsageTables {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Monitor: collapsible sections; the artifact list scrolls inside a limited height, so the message
    logs below stay in view with many artifacts (column headers stick to the top of the list) */
 .ipMonitorPanel > .sapMPanelContent {

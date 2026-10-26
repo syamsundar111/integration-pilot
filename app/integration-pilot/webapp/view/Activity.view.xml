@@ -27,7 +27,8 @@
           </Toolbar>
         </headerToolbar>
         <MessageStrip text="{= 'AI usage could not be loaded: ' + ${view>/usageError} }" type="Error" showIcon="true" visible="{= !!${view>/usageError} }" class="sapUiSmallMarginBottom" />
-        <HBox wrap="Wrap" class="ipGapM" renderType="Bare">
+        <!-- the figures share the full width (equal columns, wrapping on narrow screens) -->
+        <HBox renderType="Bare" class="ipUsageKpis">
           <VBox renderType="Bare"><Label text="Requests" /><Title text="{view>/usage/totals/requests}" level="H3" /><Text text="{= ${view>/usage/totals/failed} + ' failed' }" class="ipSubtle" /></VBox>
           <VBox renderType="Bare"><Label text="Model calls" /><Title text="{view>/usage/totals/modelCalls}" level="H3" /></VBox>
           <VBox renderType="Bare"><Label text="Input tokens" /><Title text="{path: 'view>/usage/totals/inputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
@@ -39,8 +40,9 @@
             <Text text="{parts: ['view>/usage/budget/maxPerRequest', 'view>/usage/budget/maxShare', 'view>/usage/budget/stoppedAtBudget'], formatter: '.budgetText'}" class="ipSubtle" />
           </VBox>
         </HBox>
-        <HBox wrap="Wrap" class="ipGapM sapUiSmallMarginTop" renderType="Bare">
-          <Table items="{view>/usage/byDay}" width="32rem" noDataText="No chat requests in this period" headerText="Per day">
+        <!-- two tables side by side, half the width each; stacked on narrow screens -->
+        <HBox renderType="Bare" class="ipUsageTables sapUiSmallMarginTop">
+          <Table items="{view>/usage/byDay}" noDataText="No chat requests in this period" headerText="Per day">
             <columns>
               <Column><Text text="Day" /></Column>
               <Column hAlign="End"><Text text="Requests" /></Column>
@@ -58,9 +60,9 @@
               </ColumnListItem>
             </items>
           </Table>
-          <Table items="{view>/usage/byModel}" width="28rem" noDataText="No model calls in this period" headerText="Per model">
+          <Table items="{view>/usage/byModel}" noDataText="No model calls in this period" headerText="Per model">
             <columns>
-              <Column><Text text="Model" /></Column>
+              <Column width="50%"><Text text="Model" /></Column>
               <Column hAlign="End"><Text text="Requests" /></Column>
               <Column hAlign="End"><Text text="Tokens (in / out)" /></Column>
             </columns>
