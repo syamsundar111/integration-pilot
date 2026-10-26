@@ -53,7 +53,7 @@
           <!-- recent proposals -->
           <f:Card class="ipDashCard">
               <f:header>
-                <card:Header xmlns:card="sap.f.cards" title="Recent proposals" iconSrc="sap-icon://lightbulb" press=".onNewIflow" />
+                <card:Header xmlns:card="sap.f.cards" title="Your recent proposals" iconSrc="sap-icon://lightbulb" press=".onNewIflow" />
               </f:header>
               <f:content>
                 <List items="{view>/proposals}" busy="{view>/proposalsBusy}" busyIndicatorDelay="0" showSeparators="Inner" width="100%" class="ipDashList">

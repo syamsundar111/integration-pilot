@@ -29,9 +29,10 @@ function JSONModel(data) {
 /** api stub: `failing` lists URL prefixes that fail (changeable during a test) */
 function apiStub(answers) {
   const failing = new Set()
+  const matches = (url, prefix) => url.startsWith(prefix) && !/\w/.test(url[prefix.length] || '') // '/me' is not '/messageLogs'
   const get = jest.fn(async (url) => {
-    for (const f of failing) if (url.startsWith(f)) throw Object.assign(new Error('CPI not reachable'), { hint: 'check the destination' })
-    const key = Object.keys(answers).find((k) => url.startsWith(k))
+    for (const f of failing) if (matches(url, f)) throw Object.assign(new Error('CPI not reachable'), { hint: 'check the destination' })
+    const key = Object.keys(answers).find((k) => matches(url, k))
     return key ? answers[key] : []
   })
   return { api: { get, q: () => '', seg: encodeURIComponent }, failing }
@@ -104,7 +105,7 @@ describe('iFlow Parameters tab', () => {
   test("a late failure for the previous iFlow does not show under the current one", async () => {
     const { api, failing } = apiStub({})
     const { ctl, view } = controller('Iflows', [api, flowDiagram])
-    failing.add('/Iflows/A/')
+    failing.add('/Iflows/A/configurations')
     view.setProperty('/iflowId', 'A')
     const late = ctl.loadConfigs()
     view.setProperty('/iflowId', 'B')
@@ -133,5 +134,28 @@ describe('Activity AI usage', () => {
     failing.clear()
     await ctl.loadUsage()
     expect(view.getProperty('/usageError')).toBeNull()
+  })
+})
+
+describe('Dashboard proposals card: only your own', () => {
+  test("lists the current user's proposals (others' conversations are private)", async () => {
+    const { api } = apiStub({ '/me': { id: "o'neil@example.com" }, '/Proposals': [] })
+    const urls = []
+    api.q = (o) => `?${new URLSearchParams(o)}`
+    const get = api.get
+    api.get = jest.fn((url) => (urls.push(url), get(url)))
+    const { ctl } = controller('Dashboard', [api])
+    await ctl.load(false)
+    const q = new URLSearchParams(urls.find((u) => u.startsWith('/Proposals')).split('?')[1])
+    expect(q.get('$filter')).toBe("createdBy eq 'o''neil@example.com'")
+  })
+
+  test('the user cannot be read: the card shows an error, not "no proposals yet"', async () => {
+    const { api, failing } = apiStub({ '/Proposals': [{ ID: 'p1' }] })
+    failing.add('/me')
+    const { ctl, view } = controller('Dashboard', [api])
+    await ctl.load(false)
+    expect(view.getProperty('/proposals')).toEqual([])
+    expect(view.getProperty('/proposalsError')).toMatch(/CPI not reachable/)
   })
 })

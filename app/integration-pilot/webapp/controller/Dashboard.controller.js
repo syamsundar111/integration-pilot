@@ -32,7 +32,13 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
       }
       return Promise.all([
         card('failed', api.get(`/messageLogs${api.q({ status: 'FAILED', sinceHours: 24, top: 20 })}`)), // the card scrolls its list
-        card('proposals', api.get(`/Proposals${api.q({ $orderby: 'createdAt desc', $top: 20, $select: 'ID,kind,status,iflowId,packageId,createdAt,session_ID' })}`))
+        // only the user's own: a proposal opens its conversation, and conversations are private
+        card(
+          'proposals',
+          api.get('/me').then(({ id }) =>
+            api.get(`/Proposals${api.q({ $filter: `createdBy eq '${String(id).replace(/'/g, "''")}'`, $orderby: 'createdAt desc', $top: 20, $select: 'ID,kind,status,iflowId,packageId,createdAt,session_ID' })}`)
+          )
+        )
       ])
     },
 
