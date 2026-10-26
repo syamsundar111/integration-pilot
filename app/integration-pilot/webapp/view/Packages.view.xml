@@ -18,7 +18,7 @@
         <Table id="table" items="{view>/filtered}" busy="{view>/busy}" busyIndicatorDelay="0" growing="true" growingThreshold="50" sticky="ColumnHeaders,HeaderToolbar" class="ipCard">
           <headerToolbar>
             <OverflowToolbar>
-              <SearchField width="18rem" placeholder="Search packages" liveChange=".onSearch" value="{view>/search}" ariaLabelledBy="title" />
+              <SearchField width="18rem" placeholder="Search packages" liveChange=".onSearch" value="{view>/search}" />
               <Text text="{= ${view>/filtered}.length + ' of ' + ${view>/packages}.length }" class="ipSubtle" />
             </OverflowToolbar>
           </headerToolbar>

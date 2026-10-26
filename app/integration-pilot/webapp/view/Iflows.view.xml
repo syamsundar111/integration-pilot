@@ -41,7 +41,9 @@
             <Table id="table" items="{view>/filtered}" busy="{view>/busy}" busyIndicatorDelay="0" growing="true" growingThreshold="50" sticky="ColumnHeaders,HeaderToolbar" mode="SingleSelectMaster" selectionChange=".onSelect" class="ipCard">
               <headerToolbar>
                 <OverflowToolbar>
-                  <Select id="packageSelect" selectedKey="{path: 'view>/packageId', mode: 'OneWay'}" items="{path: 'view>/packages', sorter: {path: 'name'}}" change=".onPackageChange" width="16rem" ariaLabelledBy="title" forceSelection="false">
+                  <!-- screen-reader name of the package dropdown (it shows only the selected package) -->
+                  <core:InvisibleText id="packageSelectLabel" text="Package" />
+                  <Select id="packageSelect" selectedKey="{path: 'view>/packageId', mode: 'OneWay'}" items="{path: 'view>/packages', sorter: {path: 'name'}}" change=".onPackageChange" width="16rem" ariaLabelledBy="packageSelectLabel" forceSelection="false">
                     <core:Item key="{view>id}" text="{view>name}" />
                   </Select>
                   <SearchField width="16rem" placeholder="Search iFlows" liveChange=".onSearch" value="{view>/search}" />
@@ -161,7 +163,7 @@
                               <Text text="{view>key}" class="ipMono" />
                               <Text text="{view>dataType}" class="ipSubtle" />
                             </VBox>
-                            <Input value="{view>value}" valueLiveUpdate="true" liveChange=".onParamChange" class="ipMono" ariaLabelledBy="title" />
+                            <Input value="{view>value}" valueLiveUpdate="true" liveChange=".onParamChange" class="ipMono" />
                           </cells>
                         </ColumnListItem>
                       </items>

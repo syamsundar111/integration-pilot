@@ -96,7 +96,8 @@
               <customData><core:CustomData key="kind" value="assistant" writeToDom="true" /></customData>
               <Avatar src="sap-icon://lightbulb" displaySize="XS" backgroundColor="Accent6" decorative="true" />
               <VBox renderType="Bare" class="ipBubble">
-                <List items="{chat>/turn/events}" showSeparators="None" backgroundDesign="Transparent" class="ipProgress" ariaLabelledBy="title">
+                <core:InvisibleText id="progressLabel" text="Assistant progress" />
+                <List items="{chat>/turn/events}" showSeparators="None" backgroundDesign="Transparent" class="ipProgress" ariaLabelledBy="progressLabel">
                   <CustomListItem>
                     <HBox alignItems="Center" class="ipGapS" renderType="Bare">
                       <BusyIndicator size="0.9rem" visible="{chat>current}" />
@@ -190,7 +191,6 @@
               growingMaxLines="6"
               width="100%"
               placeholder="{= ${chat>/turn} ? 'The assistant is working… you can type your next message' : 'Describe the integration… (Enter to send, Shift+Enter for a new line)' }"
-              ariaLabelledBy="title"
             >
               <layoutData><FlexItemData growFactor="1" /></layoutData>
             </TextArea>
