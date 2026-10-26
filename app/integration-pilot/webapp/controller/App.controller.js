@@ -43,7 +43,9 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'integration/pilot
 
     onNavSelect(e) {
       const key = e.getParameter('item').getKey()
-      if (key) this.getRouter().navTo(key)
+      // Generate from the menu continues the conversation open last (the page resolves ?resume=1)
+      if (key === 'generate') this.getRouter().navTo('generate', { '?query': { resume: '1' } })
+      else if (key) this.getRouter().navTo(key)
     },
 
     onSideToggle() {

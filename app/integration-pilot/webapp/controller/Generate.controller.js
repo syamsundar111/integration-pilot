@@ -203,9 +203,10 @@ sap.ui.define(
 
       onRoute(e) {
         const query = e.getParameter('arguments')['?query'] || {}
-        // the menu (#/generate) returns to the conversation open last; "New conversation" is ?new=1
-        if (!query.session && !query.new && this._lastSessionId) {
-          this.getRouter().navTo('generate', { '?query': { session: this._lastSessionId } }, true)
+        // the menu (?resume=1) returns to the conversation open last, replacing its own history entry,
+        // so browser Back is not caught by it; "New conversation" is ?new=1
+        if (query.resume) {
+          this.getRouter().navTo('generate', { '?query': this._lastSessionId ? { session: this._lastSessionId } : { new: '1' } }, true)
           return
         }
         const sessionId = query.session || ''
@@ -301,7 +302,16 @@ sap.ui.define(
           this.scrollChat()
         } catch (e) {
           if (view === this._view) {
-            this._lastSessionId = '' // e.g. deleted: the menu opens a new conversation next time
+            // e.g. deleted: show an empty conversation, not the one shown before (its proposals could
+            // still be approved here, and sending would go to the missing id); the menu opens a new one next time
+            this._lastSessionId = this._loadedSessionId = ''
+            c.setProperty('/sessionId', '')
+            c.setProperty('/messages', [])
+            c.setProperty('/proposals', [])
+            c.setProperty('/defaults', { ...NO_DEFAULTS })
+            c.setProperty('/files', [])
+            c.setProperty('/draft', null)
+            this.setActive(null)
             this.showError(e, 'Could not load the conversation')
           }
         } finally {

@@ -126,7 +126,7 @@ describe('Generate page: switching conversations while requests are in flight', 
     ctl._skipLoad = 'X'
     ctl.onRoute(route('X')) // the navTo right after the first send: skipped
     expect(ctl.loadSession).not.toHaveBeenCalled()
-    ctl.onRoute(route('')) // the side nav: back to the last conversation (a redirect, no load here)
+    ctl.onRoute({ getParameter: () => ({ '?query': { resume: '1' } }) }) // the side nav: back to the last conversation (a redirect, no load here)
     ctl.onRoute(route('X')) // browser Back to X: loaded, not skipped again
     expect(ctl.loadSession).toHaveBeenLastCalledWith('X')
     expect(chat.getProperty('/sessionId')).toBe('X')
@@ -201,7 +201,7 @@ describe('Generate page: coming back keeps the conversation, its unsent text and
   test('the menu (#/generate) returns to the conversation open last', async () => {
     const s = setup()
     await openA(s)
-    s.route({}) // left menu → Generate
+    s.route({ resume: '1' }) // left menu → Generate
     expect(s.navTo).toHaveBeenCalledWith('generate', { '?query': { session: 'A' } }, true)
   })
 
@@ -234,8 +234,8 @@ describe('Generate page: coming back keeps the conversation, its unsent text and
     expect(s.chat.getProperty('/messages')).toEqual([])
     expect(s.chat.getProperty('/files')).toEqual([])
     s.navTo.mockClear()
-    s.route({}) // left menu → Generate: the new (empty) conversation, no redirect to A
-    expect(s.navTo).not.toHaveBeenCalled()
+    s.route({ resume: '1' }) // left menu → Generate: the new (empty) conversation, not A
+    expect(s.navTo).toHaveBeenCalledWith('generate', { '?query': { new: '1' } }, true)
   })
 
   test('a last conversation that cannot be loaded (e.g. deleted) is not reopened by the menu', async () => {
@@ -245,6 +245,28 @@ describe('Generate page: coming back keeps the conversation, its unsent text and
       c.resolve(c.url === '/ChatSessions/Gone' ? Promise.reject(new Error('not found')) : [])
     }
     await flush()
+    s.navTo.mockClear()
+    s.route({ resume: '1' })
+    expect(s.navTo).toHaveBeenCalledWith('generate', { '?query': { new: '1' } }, true)
+  })
+
+  test('a conversation that cannot be loaded does not leave the previous one on screen (review)', async () => {
+    const s = setup()
+    await openA(s)
+    s.chat.setProperty('/proposals', [{ ID: 'pA' }])
+    s.route({ session: 'Gone' })
+    for (const c of s.api.calls.filter((x) => x.url.includes('Gone'))) c.resolve(c.url === '/ChatSessions/Gone' ? Promise.reject(new Error('not found')) : [])
+    await flush()
+    expect(s.ctl.showError).toHaveBeenCalled()
+    expect(s.chat.getProperty('/messages')).toEqual([])
+    expect(s.chat.getProperty('/proposals')).toEqual([])
+    expect(s.chat.getProperty('/sessionId')).toBe('') // sending starts a new conversation
+    expect(s.ctl.setActive).toHaveBeenLastCalledWith(null)
+  })
+
+  test('a plain #/generate (e.g. a history entry) shows it as it is: no redirect that would catch browser Back', async () => {
+    const s = setup()
+    await openA(s)
     s.navTo.mockClear()
     s.route({})
     expect(s.navTo).not.toHaveBeenCalled()
