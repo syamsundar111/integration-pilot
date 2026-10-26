@@ -26,6 +26,7 @@
             </SegmentedButton>
           </Toolbar>
         </headerToolbar>
+        <MessageStrip text="{= 'AI usage could not be loaded: ' + ${view>/usageError} }" type="Error" showIcon="true" visible="{= !!${view>/usageError} }" class="sapUiSmallMarginBottom" />
         <HBox wrap="Wrap" class="ipGapM" renderType="Bare">
           <VBox renderType="Bare"><Label text="Requests" /><Title text="{view>/usage/totals/requests}" level="H3" /><Text text="{= ${view>/usage/totals/failed} + ' failed' }" class="ipSubtle" /></VBox>
           <VBox renderType="Bare"><Label text="Model calls" /><Title text="{view>/usage/totals/modelCalls}" level="H3" /></VBox>

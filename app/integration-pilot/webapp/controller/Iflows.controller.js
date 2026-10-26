@@ -43,6 +43,7 @@ sap.ui.define(
             original: {},
             changes: 0,
             configsBusy: false,
+            configsError: null,
             runtime: null,
             runtimeBusy: false,
             runtimeError: null
@@ -263,6 +264,7 @@ sap.ui.define(
         const m = this.getModel('view')
         const id = m.getProperty('/iflowId')
         m.setProperty('/configsBusy', true)
+        m.setProperty('/configsError', null)
         try {
           const configs = await api.get(`/Iflows/${api.seg(id)}/configurations`)
           if (m.getProperty('/iflowId') !== id) return // another iFlow was opened meanwhile: its parameters must not be overwritten
@@ -271,6 +273,7 @@ sap.ui.define(
         } catch (e) {
           if (m.getProperty('/iflowId') !== id) return
           m.setProperty('/configs', [])
+          m.setProperty('/configsError', e.hint ? `${e.message} — ${e.hint}` : e.message) // not "no externalized parameters"
         } finally {
           if (m.getProperty('/iflowId') === id) {
             m.setProperty('/changes', 0)

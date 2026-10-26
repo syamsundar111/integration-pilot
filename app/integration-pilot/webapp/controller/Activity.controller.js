@@ -6,7 +6,7 @@ sap.ui.define(
     return BaseController.extend('integration.pilot.controller.Activity', {
       onInit() {
         this.setModel(
-          new JSONModel({ entries: [], filtered: [], actions: [], action: '', status: '', search: '', busy: true, usage: { totals: {}, byDay: [], byModel: [] }, usageDays: '30', usageBusy: false }),
+          new JSONModel({ entries: [], filtered: [], actions: [], action: '', status: '', search: '', busy: true, usage: { totals: {}, byDay: [], byModel: [] }, usageDays: '30', usageBusy: false, usageError: null }),
           'view'
         )
         this.getRouter()
@@ -20,8 +20,11 @@ sap.ui.define(
         m.setProperty('/usageBusy', true)
         try {
           m.setProperty('/usage', await api.get(`/usage(days=${Number(m.getProperty('/usageDays')) || 30})`))
+          m.setProperty('/usageError', null)
         } catch (e) {
-          // the audit log below still works without the usage summary
+          // shown in the usage panel; the audit log below still works without the usage summary
+          m.setProperty('/usage', { totals: {}, byDay: [], byModel: [] }) // not the numbers of the previous period
+          m.setProperty('/usageError', e.hint ? `${e.message} — ${e.hint}` : e.message)
         } finally {
           m.setProperty('/usageBusy', false)
         }

@@ -148,7 +148,7 @@
                   <VBox class="sapUiSmallMargin">
                     <Table items="{view>/configs}" busy="{view>/configsBusy}" busyIndicatorDelay="0">
                       <noData>
-                        <IllustratedMessage illustrationType="sapIllus-NoEntries" illustrationSize="Small" title="No externalized parameters" description="This iFlow has no configurable parameters." />
+                        <IllustratedMessage illustrationType="{= ${view>/configsError} ? 'sapIllus-UnableToLoad' : 'sapIllus-NoEntries' }" illustrationSize="Small" title="{= ${view>/configsError} ? 'Could not load the parameters' : 'No externalized parameters' }" description="{= ${view>/configsError} || 'This iFlow has no configurable parameters.' }" />
                       </noData>
                       <columns>
                         <Column width="35%"><Text text="Parameter" /></Column>

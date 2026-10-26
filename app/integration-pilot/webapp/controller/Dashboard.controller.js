@@ -3,7 +3,7 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
 
   return BaseController.extend('integration.pilot.controller.Dashboard', {
     onInit() {
-      this.setModel(new JSONModel({ stats: null, statsError: null, failed: [], failedBusy: true, proposals: [], proposalsBusy: true }), 'view')
+      this.setModel(new JSONModel({ stats: null, statsError: null, failed: [], failedBusy: true, failedError: null, proposals: [], proposalsBusy: true, proposalsError: null }), 'view')
       this.getRouter().getRoute('dashboard').attachPatternMatched(() => this.load(false))
     },
 
@@ -14,16 +14,26 @@ sap.ui.define(['integration/pilot/controller/BaseController', 'sap/ui/model/json
         (s) => m.setProperty('/stats', s),
         (e) => m.setProperty('/statsError', { message: e.hint ? `${e.message} — ${e.hint}` : e.message })
       )
-      m.setProperty('/failedBusy', true)
-      api
-        .get(`/messageLogs${api.q({ status: 'FAILED', sinceHours: 24, top: 20 })}`) // the card scrolls its list
-        .then((d) => m.setProperty('/failed', d), () => m.setProperty('/failed', []))
-        .finally(() => m.setProperty('/failedBusy', false))
-      m.setProperty('/proposalsBusy', true)
-      api
-        .get(`/Proposals${api.q({ $orderby: 'createdAt desc', $top: 20, $select: 'ID,kind,status,iflowId,packageId,createdAt,session_ID' })}`)
-        .then((d) => m.setProperty('/proposals', d), () => m.setProperty('/proposals', []))
-        .finally(() => m.setProperty('/proposalsBusy', false))
+      // a failed load shows its error in the card, not "nothing failed" / "no proposals yet"
+      const card = (name, request) => {
+        m.setProperty(`/${name}Busy`, true)
+        return request
+          .then(
+            (d) => {
+              m.setProperty(`/${name}`, d)
+              m.setProperty(`/${name}Error`, null)
+            },
+            (e) => {
+              m.setProperty(`/${name}`, [])
+              m.setProperty(`/${name}Error`, e.hint ? `${e.message} — ${e.hint}` : e.message)
+            }
+          )
+          .finally(() => m.setProperty(`/${name}Busy`, false))
+      }
+      return Promise.all([
+        card('failed', api.get(`/messageLogs${api.q({ status: 'FAILED', sinceHours: 24, top: 20 })}`)), // the card scrolls its list
+        card('proposals', api.get(`/Proposals${api.q({ $orderby: 'createdAt desc', $top: 20, $select: 'ID,kind,status,iflowId,packageId,createdAt,session_ID' })}`))
+      ])
     },
 
     onRefresh() {

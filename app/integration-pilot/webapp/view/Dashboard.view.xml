@@ -43,7 +43,7 @@
             <f:content>
               <List items="{view>/failed}" busy="{view>/failedBusy}" busyIndicatorDelay="0" showSeparators="Inner" noData="Nothing failed in the last 24 hours." width="100%" class="ipDashList">
                 <noData>
-                  <IllustratedMessage illustrationType="sapIllus-NoActivities" illustrationSize="ExtraSmall" title="No failed messages" description="Nothing failed in the last 24 hours." enableVerticalResponsiveness="true" />
+                  <IllustratedMessage illustrationType="{= ${view>/failedError} ? 'sapIllus-UnableToLoad' : 'sapIllus-NoActivities' }" illustrationSize="ExtraSmall" title="{= ${view>/failedError} ? 'Could not load failed messages' : 'No failed messages' }" description="{= ${view>/failedError} || 'Nothing failed in the last 24 hours.' }" enableVerticalResponsiveness="true" />
                 </noData>
                 <StandardListItem title="{view>integrationFlowName}" description="{view>messageGuid}" info="{path: 'view>logEnd', formatter: '.formatter.relativeTime'}" infoState="Error" icon="sap-icon://message-error" />
               </List>
@@ -58,7 +58,7 @@
               <f:content>
                 <List items="{view>/proposals}" busy="{view>/proposalsBusy}" busyIndicatorDelay="0" showSeparators="Inner" width="100%" class="ipDashList">
                   <noData>
-                    <IllustratedMessage illustrationType="sapIllus-NoData" illustrationSize="ExtraSmall" title="No proposals yet" description="Describe an integration in Generate and the AI proposes an iFlow for you to approve." enableVerticalResponsiveness="true" />
+                    <IllustratedMessage illustrationType="{= ${view>/proposalsError} ? 'sapIllus-UnableToLoad' : 'sapIllus-NoData' }" illustrationSize="ExtraSmall" title="{= ${view>/proposalsError} ? 'Could not load proposals' : 'No proposals yet' }" description="{= ${view>/proposalsError} || 'Describe an integration in Generate and the AI proposes an iFlow for you to approve.' }" enableVerticalResponsiveness="true" />
                   </noData>
                   <StandardListItem
                     title="{= ${view>kind} === 'IFLOW' ? ${view>iflowId} : ${view>packageId} }"
