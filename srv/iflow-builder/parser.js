@@ -123,9 +123,12 @@ function stepOf(node, adaptersBySource) {
     case 'ProcessCallElement':
       return { ...base, type: 'processCall', processId: p.processId || p.subProcessId || null, activityType: p.activityType }
     case 'JsonToXmlConverter':
-      return { ...base, type: 'jsonToXml' }
-    case 'XmlToJsonConverter':
-      return { ...base, type: 'xmlToJson' }
+    case 'XmlToJsonConverter': {
+      const step = { ...base, type: p.activityType === 'JsonToXmlConverter' ? 'jsonToXml' : 'xmlToJson' }
+      // all converter settings, for update checks (not enumerable, like adapter settings)
+      Object.defineProperty(step, 'settings', { value: p, enumerable: false })
+      return step
+    }
     case 'ExternalCall': {
       const adapter = adaptersBySource[base.id]
       if (adapter?.type === 'HTTP')

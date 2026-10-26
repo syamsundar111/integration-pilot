@@ -55,3 +55,28 @@ describe('update blockers', () => {
     expect(r.blockers).toContain('2 exception subprocesses (the spec holds one; an update would delete the others)')
   })
 })
+
+describe('update blockers: JSON <-> XML converter settings (review: an update reset them silently)', () => {
+  const convSpec = baseSpec({ id: 'Converter_Flow', steps: [{ type: 'jsonToXml', name: 'To XML' }, { type: 'xmlToJson', name: 'To JSON' }] })
+  async function readConv(patch = (x) => x) {
+    const zip = await JSZip.loadAsync(Buffer.from((await build(convSpec)).zipBase64, 'base64'))
+    const file = Object.keys(zip.files).find((f) => IFLW.test(f))
+    zip.file(file, patch(await zip.file(file).async('string')))
+    return specFromParsed(await parse(await zip.generateAsync({ type: 'nodebuffer' })), { packageId: convSpec.packageId })
+  }
+
+  test("the builder's own converters have no blockers", async () => {
+    const r = await readConv()
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps.map((s) => s.type)).toEqual(['jsonToXml', 'xmlToJson'])
+  })
+
+  test('another root element or suppressed root is a blocker, not reset to the template value', async () => {
+    const r = await readConv((x) => setting(setting(x, 'additionalRootElementName', 'Orders'), 'xmlJsonSuppressRootElement', 'true'))
+    expect(r.spec).toBeNull()
+    expect(r.blockers).toEqual([
+      "step 1 'To XML': additionalRootElementName is 'Orders'; an update would reset it to 'root'",
+      "step 2 'To JSON': xmlJsonSuppressRootElement is 'true'; an update would reset it to 'false'"
+    ])
+  })
+})

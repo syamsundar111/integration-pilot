@@ -25,6 +25,17 @@ const TEMPLATE_DEFAULTS = (() => {
   const values = (xml) => Object.fromEntries([...xml.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
   return { Receiver: values(read('messageflow-http-receiver.xml')), Sender: values(read('messageflow-https-sender.xml')) }
 })()
+/** JSON<->XML converter settings the spec cannot hold: the builder writes its template values */
+const CONVERTER_DEFAULTS = (() => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, 'templates', 'iflw', f), 'utf8')
+  const values = (xml) =>
+    Object.fromEntries(
+      [...xml.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)]
+        .filter((m) => !['componentVersion', 'activityType', 'cmdVariantUri'].includes(m[1]))
+        .map((m) => [m[1], m[2] ?? ''])
+    )
+  return { jsonToXml: values(read('step-json-to-xml.xml')), xmlToJson: values(read('step-xml-to-json.xml')) }
+})()
 const LABELS = { proxyType: 'proxy type', locationID: 'Cloud Connector location ID', httpRequestTimeout: 'request timeout', senderAuthType: 'sender authentication', xsrfProtection: 'CSRF protection' }
 
 /** Blockers for adapter settings an update would reset */
@@ -68,8 +79,16 @@ function toStep(s, scripts, where) {
       return { ...base, fileName: s.fileName, code: file.content }
     }
     case 'jsonToXml':
-    case 'xmlToJson':
+    case 'xmlToJson': {
+      // e.g. a root element 'Orders' would become 'root': the payload format would change
+      const defaults = CONVERTER_DEFAULTS[s.type]
+      for (const [key, would] of Object.entries(defaults)) {
+        if (!s.settings || !(key in s.settings)) continue // older converter versions lack some keys
+        const have = String(s.settings[key] ?? '')
+        if (have !== would) throw `${where} '${s.name}': ${key} is '${have}'; an update would reset it to '${would || '(empty)'}'`
+      }
       return base
+    }
     case 'requestReplyHttp':
       if (s.authType && s.authType !== 'None') throw `${where} '${s.name}': receiver ${s.system} uses authentication '${s.authType}', which an update would reset to None`
       return { ...base, ...(s.system && { system: s.system }), url: s.url, method: s.method, authType: 'None' }
