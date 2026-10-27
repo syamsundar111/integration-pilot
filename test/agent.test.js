@@ -14,6 +14,7 @@ jest.mock('../srv/lib/cpi-client', () => {
   return {
     MESSAGE_STATUSES: ['FAILED'],
     listPackages: jest.fn(async () => [{ id: 'PilotReference', name: 'Pilot Reference', shortText: 'x' }]),
+    listIflows: jest.fn(async () => []),
     getPackage: jest.fn(async (id) => {
       if (id === 'PilotReference') return { id }
       throw notFound()
@@ -721,7 +722,8 @@ describe('update an existing iFlow (exception subprocess)', () => {
     llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: editable })).mockResolvedValueOnce(answer('x'))
     await chat({ message: 'create it again' })
     const result = JSON.parse(llm.chat.mock.calls[1][0].messages.at(-1).content)
-    expect(result.errors[0]).toMatch(/already exists .* getIflowSpec and then proposeIflowUpdate/)
+    expect(result.errors[0]).toMatch(/^IFLOW_EXISTS id: .* already exists/)
+    expect(result.instruction).toMatch(/update the existing iFlow \(then call getIflowSpec and proposeIflowUpdate\)/)
   })
 
   test('updates are refused for missing iFlows, another package, or no change', async () => {
@@ -1667,5 +1669,59 @@ describe('stuck turns (one instance; review: a RUNNING turn blocked its conversa
     } finally {
       delete process.env.AGENT_MAX_TURN_MS
     }
+  })
+})
+
+describe('an iFlow that exists already: ask the user, do not rename silently (review: it proposed "…2" and said nothing)', () => {
+  const lastTool = () => JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+  afterEach(() => {
+    cpi.listIflows.mockImplementation(async () => [])
+    cpi.getIflow.mockImplementation(async () => {
+      throw Object.assign(new Error('not found'), { status: 404 })
+    })
+  })
+
+  test('the same id: refused with the instruction to ask, not to choose another id', async () => {
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (id === 'Orders_In') return { id, name: 'Orders In', packageId: 'PilotReference' }
+      throw Object.assign(new Error('not found'), { status: 404 })
+    })
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Orders_In', name: 'Orders In' } })).mockResolvedValueOnce(answer('asked'))
+    const turn = await chat({ message: 'create Orders In' })
+    expect(turn.proposals).toEqual([])
+    expect(lastTool()).toMatchObject({
+      valid: false,
+      errors: ["IFLOW_EXISTS id: an iFlow 'Orders_In' (\"Orders In\") already exists in package 'PilotReference'"],
+      instruction: expect.stringMatching(/^Do not choose another id or name on your own\. Tell the user .* and ask: update the existing iFlow .* or create a new iFlow, and with which name\?/)
+    })
+  })
+
+  test('the same name in the target package (another id): refused too', async () => {
+    cpi.listIflows.mockImplementation(async () => [{ id: 'NorthwindCustomersRead', name: 'Northwind Customers Read', packageId: 'PilotReference' }])
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'NorthwindCustomersRead2', name: 'northwind customers read' } })).mockResolvedValueOnce(answer('asked'))
+    const turn = await chat({ message: 'create it' })
+    expect(turn.proposals).toEqual([])
+    expect(lastTool().errors).toEqual(['IFLOW_EXISTS name: package \'PilotReference\' already has an iFlow named "Northwind Customers Read" (id \'NorthwindCustomersRead\')'])
+  })
+
+  test('proposed under another id anyway: the answer gets a fixed note', async () => {
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (id === 'Stock_Sync') return { id, name: 'Stock Sync', packageId: 'PilotReference' }
+      throw Object.assign(new Error('not found'), { status: 404 })
+    })
+    llm.chat
+      .mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Stock_Sync', name: 'Stock Sync' } }))
+      .mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Stock_Sync_New', name: 'Stock Sync New' } }))
+      .mockResolvedValueOnce(answer('Proposal ready.'))
+    const turn = await chat({ message: 'create Stock Sync' })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Stock_Sync_New' })])
+    expect(turn.text).toContain('**Note:** an iFlow "Stock Sync" already exists (id Stock_Sync in PilotReference). This proposal creates a separate iFlow with the id Stock_Sync_New in PilotReference. Reject it if you meant to update the existing one.')
+  })
+
+  test('a new iFlow without duplicates: no refusal, no note', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Brand_New_Flow', name: 'Brand New Flow' } })).mockResolvedValueOnce(answer('Proposal ready.'))
+    const turn = await chat({ message: 'create it' })
+    expect(turn.proposals).toHaveLength(1)
+    expect(turn.text).toBe('Proposal ready.')
   })
 })

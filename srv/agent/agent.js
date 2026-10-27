@@ -309,6 +309,23 @@ async function changeSummary(user, ids) {
   return blocks.length ? `\n\n---\n${blocks.join('\n\n')}` : ''
 }
 
+/**
+ * After an "already exists" refusal in this turn, a proposal that was stored anyway (under another id)
+ * gets a fixed note in the answer, so the user always sees that it creates a separate iFlow.
+ */
+async function duplicateNote(user, ctx) {
+  if (!ctx.duplicates?.length || !ctx.proposals.length) return ''
+  const { Proposal } = E()
+  const rows = await db(user, (tx) => tx.run(SELECT.from(Proposal).columns('iflowId', 'packageId').where({ ID: { in: ctx.proposals }, kind: 'IFLOW', operation: 'CREATE' })))
+  const notes = rows.flatMap((p) => {
+    const d = ctx.duplicates.find((x) => x.id !== p.iflowId)
+    return d
+      ? [`**Note:** an iFlow "${d.name}" already exists (id ${d.id} in ${d.packageId}). This proposal creates a separate iFlow with the id ${p.iflowId} in ${p.packageId}. Reject it if you meant to update the existing one.`]
+      : []
+  })
+  return notes.length ? `\n\n---\n${notes.join('\n\n')}` : ''
+}
+
 // --- progress events ------------------------------------------------------------------
 
 const event = (type, label, detail) => ({ at: new Date().toISOString(), type, label, ...(detail && { detail }) })
@@ -467,6 +484,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
   const turn = [{ role: 'user', content: message }]
   const finish = async (text, messages = turn) => {
     text += await changeSummary(user, ctx.proposals) // the actual changes, never the model's account of them
+    text += await duplicateNote(user, ctx) // proposed under another id after "already exists": always said
     const u = usageNow()
     await saveMessages(user, sessionId, [...messages, { role: 'assistant', content: text, usage: u }])
     const proposals = await loadProposals(user, ctx.proposals)

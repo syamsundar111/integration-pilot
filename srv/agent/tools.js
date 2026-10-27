@@ -126,6 +126,26 @@ function compactInvalid(issues, instruction) {
   return { valid: false, errors, ...(instruction && { instruction }) }
 }
 
+/**
+ * The refusal for an iFlow that exists already, and a note for the answer if the model proposes
+ * another id anyway (ctx.duplicates, used by the agent when it finishes the turn)
+ */
+function duplicateIflow(ctx, spec, existing, by) {
+  const found = { name: existing.name || existing.id, id: existing.id, packageId: existing.packageId || spec.packageId }
+  ;(ctx.duplicates ??= []).push({ ...found, proposedId: spec.id, proposedName: spec.name })
+  return {
+    valid: false,
+    errors: [
+      by === 'id'
+        ? `IFLOW_EXISTS id: an iFlow '${found.id}' ("${found.name}") already exists in package '${found.packageId}'`
+        : `IFLOW_EXISTS name: package '${found.packageId}' already has an iFlow named "${found.name}" (id '${found.id}')`
+    ],
+    instruction:
+      `Do not choose another id or name on your own. Tell the user that "${found.name}" (id ${found.id}) already exists in package ${found.packageId}, ` +
+      'and ask: update the existing iFlow (then call getIflowSpec and proposeIflowUpdate), or create a new iFlow, and with which name? Propose nothing until they answer.'
+  }
+}
+
 /** A spec sent as a JSON string that does not parse: say where, instead of "must be a JSON object" */
 function unparsableSpec(spec) {
   if (typeof spec !== 'string') return null
@@ -625,16 +645,16 @@ const handlers = {
     const { valid, issues, warnings: specNotes } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix only what these errors name and propose again.')
 
-    // Fail early on things the user could not approve successfully
+    // Fail early on things the user could not approve successfully. An iFlow that exists already (same
+    // id anywhere, or the same name in the target package) is the user's decision: update it or create
+    // another one with another name; the model must ask, not rename on its own
     const existing = await iflowExists(spec.id)
-    if (existing)
-      return {
-        valid: false,
-        errors: [
-          `id: an iFlow '${spec.id}' already exists in package '${existing.packageId}' — to change it, call getIflowSpec and then proposeIflowUpdate; for a new iFlow choose a different id`
-        ]
-      }
+    if (existing) return duplicateIflow(ctx, spec, existing, 'id')
     const pkgExists = await packageExists(spec.packageId)
+    if (pkgExists) {
+      const sameName = (await cpi.listIflows(spec.packageId)).find((f) => String(f.name || '').trim().toLowerCase() === String(spec.name || '').trim().toLowerCase())
+      if (sameName) return duplicateIflow(ctx, spec, sameName, 'name')
+    }
     if (!pkgExists && !pkg.name) {
       // the default package given as a Name ("test_1"): create it with that Name
       const defaults = await defaultsOf(ctx)
