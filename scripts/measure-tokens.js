@@ -95,17 +95,42 @@ async function scriptChecks(sessionId) {
   return out
 }
 
+/** Answers cut off at the output limit in the session's turns, and those whose finished tool calls were kept */
+async function cutOffs(sessionId) {
+  const turns = await call('GET', `/ChatTurns?$filter=${encodeURIComponent(`session_ID eq ${sessionId}`)}`)
+  const labels = turns.flatMap((t) => (t.events || []).map((e) => e.label || ''))
+  return { cutOffs: labels.filter((l) => l.startsWith('Answer cut off')).length, cutOffsKept: labels.filter((l) => /^Answer cut off .* kept \d+ finished/.test(l)).length }
+}
+
 /** Model calls logged since `offset`: [{ prompt, completion }] plus failure lines */
 function usageSince(offset) {
   const text = fs.readFileSync(LOG, 'utf8').slice(offset)
   const calls = [...text.matchAll(/tokens prompt=(\d+) completion=(\d+)/g)].map((m) => ({ prompt: Number(m[1]), completion: Number(m[2]) }))
   const failures = (text.match(/chat failed: \S+/g) || []).length
   const retries = (text.match(/, retry \d+ in /g) || []).length
-  return { calls, failures, retries }
+  // model calls that ran into a timeout (no data, or the cap), and messages that went to the fallback model
+  const timeouts = (text.match(/chat failed: LLM_TIMEOUT|: timeout, retry \d+ in /g) || []).length
+  const fallbacks = (text.match(/retrying once with fallback model/g) || []).length
+  return { calls, failures, retries, timeouts, fallbacks }
+}
+
+/**
+ * Whether an answer asks the user something: a sentence ending in "?" (URLs and code ignored, so
+ * "...Products?$format=json" does not count), or an explicit request for input without "?"
+ * ("Please tell me how to continue", "Let me know which package").
+ */
+function isQuestion(text = '') {
+  const plain = String(text || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/https?:\/\/\S+/g, ' ')
+  return /\?(\s|\*|\)|$)/.test(plain) || /\b(please (provide|tell|confirm|specify|share)|let me know (which|what|whether|how)|tell me (which|what|whether|how))\b/i.test(plain)
 }
 
 async function main() {
   const offset = fs.statSync(LOG).size
+  // the measured server's commit (it may run from another checkout than this script)
+  const commit = opt('commit') || (await call('GET', '/health').catch(() => ({}))).commit || null
   const startedAt = Date.now()
   const messages = [REQUEST, ANSWERS]
   let sessionId = null
@@ -118,23 +143,29 @@ async function main() {
     console.error(`\n[${LABEL}] turn ${turns}: ${message.split('\n')[0].slice(0, 80)}…`)
     const t = await runTurn(sessionId, message)
     sessionId = t.sessionId
-    texts.push({ status: t.status, chars: (t.text || '').length })
+    const proposed = (t.proposals || []).some((p) => p.kind === 'IFLOW')
+    // a question: an answer that ends the turn without a proposal and asks something
+    texts.push({ status: t.status, chars: (t.text || '').length, question: !proposed && isQuestion(t.text) })
     console.error(`   => ${t.status}: ${(t.text || t.error?.message || '').split('\n')[0].slice(0, 160)}`)
-    if ((t.proposals || []).some((p) => p.kind === 'IFLOW')) {
+    if (proposed) {
       outcome = 'iFlow proposal'
       break
     }
   }
-  const { calls, failures, retries } = usageSince(offset)
+  const { calls, failures, retries, timeouts, fallbacks } = usageSince(offset)
   const sum = (k) => calls.reduce((n, c) => n + c[k], 0)
   const result = {
     label: LABEL,
     at: new Date(startedAt).toISOString(),
     outcome,
     turns,
+    questionsAsked: texts.filter((x) => x.question).length,
     modelCalls: calls.length,
     failedCalls: failures,
     retries,
+    timeouts,
+    fallbacks,
+    commit,
     promptTokens: sum('prompt'),
     completionTokens: sum('completion'),
     totalTokens: sum('prompt') + sum('completion'),
@@ -142,6 +173,7 @@ async function main() {
     minutes: Math.round((Date.now() - startedAt) / 6000) / 10,
     sessionId,
     groovyChecks: sessionId ? await scriptChecks(sessionId).catch((e) => ({ error: e.message })) : null,
+    ...(sessionId ? await cutOffs(sessionId).catch(() => ({})) : {}),
     groovyUnavailable: (fs.readFileSync(LOG, 'utf8').slice(offset).match(/Groovy syntax check unavailable: [^\n]*/g) || []).slice(0, 5),
     replies: texts
   }

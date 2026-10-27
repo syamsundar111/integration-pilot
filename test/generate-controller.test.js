@@ -289,3 +289,17 @@ describe('Generate page: import', () => {
     }
   })
 })
+
+describe('Generate page: conversation list shows when a conversation is deleted for inactivity', () => {
+  test('days left from the last activity; kept ones say so; no hint when the cleanup is off', () => {
+    const { ctl } = controller()
+    ctl.formatter = { relativeTime: () => '2 days ago' }
+    const daysAgo = (d) => new Date(Date.now() - d * 86_400_000).toISOString()
+    ctl._retentionDays = 14
+    expect(ctl.sessionInfo({ modifiedAt: daysAgo(2), keep: false })).toBe('2 days ago · deleted in 12 days')
+    expect(ctl.sessionInfo({ modifiedAt: daysAgo(13.5), keep: false })).toBe('2 days ago · deleted within a day')
+    expect(ctl.sessionInfo({ modifiedAt: daysAgo(30), keep: true })).toBe('2 days ago · kept')
+    ctl._retentionDays = 0
+    expect(ctl.sessionInfo({ modifiedAt: daysAgo(2), keep: false })).toBe('2 days ago')
+  })
+})

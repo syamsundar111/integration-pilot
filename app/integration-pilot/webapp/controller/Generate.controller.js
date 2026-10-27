@@ -215,10 +215,36 @@ sap.ui.define(
 
       async loadSessions() {
         try {
-          const sessions = await api.get(`/ChatSessions${api.q({ $orderby: 'modifiedAt desc', $top: 30, $select: 'ID,title,modifiedAt' })}`)
-          this.chat().setProperty('/sessions', sessions)
+          if (this._retentionDays === undefined)
+            this._retentionDays = (await api.get('/conversationSettings()').catch(() => ({ retentionDays: 0 }))).retentionDays || 0
+          const sessions = await api.get(`/ChatSessions${api.q({ $orderby: 'modifiedAt desc', $top: 30, $select: 'ID,title,modifiedAt,keep' })}`)
+          this.chat().setProperty(
+            '/sessions',
+            sessions.map((s) => ({ ...s, info: this.sessionInfo(s) }))
+          )
         } catch (e) {
           // history is optional
+        }
+      },
+
+      /** "2 days ago · deleted in 12 days" / "… · kept": conversations without activity are deleted after the retention days */
+      sessionInfo({ modifiedAt, keep }) {
+        const when = this.formatter.relativeTime(modifiedAt)
+        if (keep) return `${when} · kept`
+        if (!this._retentionDays) return when
+        const left = Math.ceil((new Date(modifiedAt).getTime() + this._retentionDays * 86_400_000 - Date.now()) / 86_400_000)
+        return `${when} · ${left <= 1 ? 'deleted within a day' : `deleted in ${left} days`}`
+      },
+
+      /** Keep (never deleted for inactivity) or release a conversation */
+      async onKeepSession(e) {
+        const { ID, keep } = e.getSource().getBindingContext('chat').getObject()
+        try {
+          await api.post(`/ChatSessions/${api.seg(ID)}/setKeep`, { keep: !keep })
+          this.toast(keep ? 'Conversation released: deleted after inactivity' : 'Conversation kept: it is not deleted after inactivity')
+          this.loadSessions()
+        } catch (err) {
+          this.showError(err, 'Could not change the conversation')
         }
       },
 

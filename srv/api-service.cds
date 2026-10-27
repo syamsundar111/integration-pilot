@@ -285,14 +285,36 @@ service ApiService {
   /**
    * GET /api/ChatSessions?$orderby=modifiedAt desc, GET /api/ChatSessions/{id}/messages?$orderby=seq,
    * POST /api/ChatSessions/{id}/remove (deletes the conversation; executed proposals are kept),
-   * POST /api/ChatSessions/{id}/rename { title } (a renamed conversation keeps its name)
+   * POST /api/ChatSessions/{id}/rename { title } (a renamed conversation keeps its name),
+   * POST /api/ChatSessions/{id}/setKeep { keep } (a kept conversation is never deleted for inactivity)
    */
   @readonly
-  @restrict: [{ grant: 'READ', to: 'Admin', where: 'createdBy = $user' }, { grant: ['remove', 'rename'], to: 'Admin' }]
+  @restrict: [{ grant: 'READ', to: 'Admin', where: 'createdBy = $user' }, { grant: ['remove', 'rename', 'setKeep'], to: 'Admin' }]
   entity ChatSessions as projection on db.ChatSession actions {
     action remove();
     action rename(title : String) returns ChatSessions;
+    action setKeep(keep : Boolean) returns ChatSessions; // not "keep": that is the element's name
   };
+
+  type ConversationSettings {
+    retentionDays : Integer; // conversations without activity for this many days are deleted (0 = never)
+  }
+
+  /** GET /api/conversationSettings() — the inactivity cleanup, for the conversation list */
+  function conversationSettings() returns ConversationSettings;
+
+  type CleanupResult {
+    days    : Integer;
+    deleted : Integer;
+    skipped : Integer;
+  }
+
+  /**
+   * POST /api/cleanupConversations — deletes conversations of all users without activity for
+   * CONVERSATION_RETENTION_DAYS days, except kept ones. Runs daily in the app; a scheduler
+   * (e.g. SAP BTP Job Scheduler) can call it instead (CONVERSATION_CLEANUP_TIMER=false).
+   */
+  action cleanupConversations() returns CleanupResult;
 
   @readonly
   @restrict: [{ grant: 'READ', to: 'Admin', where: 'session.createdBy = $user' }]

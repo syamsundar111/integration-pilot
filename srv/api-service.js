@@ -222,6 +222,11 @@ module.exports = class ApiService extends cds.ApplicationService {
       return audited(req, { action: 'DELETE_CHAT_SESSION', targetType: 'ChatSession', targetId: id }, () => agent.deleteSession(id, req.user))
     })
     this.on('rename', 'ChatSessions', (req) => agent.renameSession(keyOf(req), req.data.title, req.user))
+    this.on('setKeep', 'ChatSessions', (req) => agent.keepSession(keyOf(req), req.data.keep, req.user))
+    this.on('conversationSettings', () => ({ retentionDays: agent.retentionDays() }))
+    this.on('cleanupConversations', (req) =>
+      audited(req, { action: 'CLEANUP_CONVERSATIONS', targetType: 'ChatSession', targetId: 'all', details: { retentionDays: agent.retentionDays() } }, () => agent.deleteInactiveSessions())
+    )
 
     // Turns are returned with events/proposals/error parsed
     const parseJson = (v) => (typeof v === 'string' ? JSON.parse(v) : v)

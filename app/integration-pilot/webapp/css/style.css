@@ -589,3 +589,9 @@
   overflow-y: auto;
 }
 
+/* conversation list: the title and its info line shorten with "...", the Keep button stays */
+.ipSessionText {
+  min-width: 0;
+  flex: 1 1 auto;
+  margin-right: 0.5rem;
+}

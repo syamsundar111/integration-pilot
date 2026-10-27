@@ -1725,3 +1725,73 @@ describe('an iFlow that exists already: ask the user, do not rename silently (re
     expect(turn.text).toBe('Proposal ready.')
   })
 })
+
+describe('conversations without activity are deleted after 14 days; kept ones stay', () => {
+  const agent = require('../srv/agent/agent')
+  const asB = { headers: { 'x-test-user': 'user-b' } }
+  const daysAgo = (d) => new Date(Date.now() - d * 86_400_000).toISOString()
+  const session = async (title, { lastActivity, keep = false, createdBy = 'local-dev' }) => {
+    const ID = cds.utils.uuid()
+    await INSERT.into('iflowpilot.ChatSession').entries({ ID, title, keep, createdBy, createdAt: lastActivity, modifiedAt: lastActivity })
+    await INSERT.into('iflowpilot.ChatMessage').entries({ session_ID: ID, seq: 1, role: 'user', content: title, createdAt: lastActivity, modifiedAt: lastActivity })
+    return ID
+  }
+  const exists = async (ID) => !!(await SELECT.one.from('iflowpilot.ChatSession', ID))
+
+  test('old ones are deleted with their messages; kept, recent and recently used ones stay; executed proposals stay unlinked', async () => {
+    const old = await session('old', { lastActivity: daysAgo(20) })
+    const oldOtherUser = await session('old of user b', { lastActivity: daysAgo(30), createdBy: 'user-b' })
+    const kept = await session('kept', { lastActivity: daysAgo(40), keep: true })
+    const recent = await session('recent', { lastActivity: daysAgo(3) })
+    const usedRecently = await session('old but a request yesterday', { lastActivity: daysAgo(20) })
+    await INSERT.into('iflowpilot.ChatTurn').entries({ session_ID: usedRecently, status: 'DONE', message: 'x', createdAt: daysAgo(1) })
+    const done = cds.utils.uuid()
+    const pending = cds.utils.uuid()
+    await INSERT.into('iflowpilot.Proposal').entries([
+      { ID: done, session_ID: old, kind: 'IFLOW', status: 'DONE', spec: '{}', modifiedAt: daysAgo(20) },
+      { ID: pending, session_ID: old, kind: 'IFLOW', status: 'PENDING', spec: '{}', modifiedAt: daysAgo(20) }
+    ])
+
+    const r = await agent.deleteInactiveSessions({ days: 14 })
+    expect(r).toMatchObject({ days: 14, deleted: 2 })
+    expect(await exists(old)).toBe(false)
+    expect(await exists(oldOtherUser)).toBe(false) // all users
+    expect(await SELECT.from('iflowpilot.ChatMessage').where({ session_ID: old })).toEqual([])
+    for (const id of [kept, recent, usedRecently]) expect(await exists(id)).toBe(true)
+    expect(await SELECT.one.from('iflowpilot.Proposal', done)).toMatchObject({ session_ID: null, status: 'DONE' })
+    expect(await SELECT.one.from('iflowpilot.Proposal', pending)).toBeFalsy()
+  })
+
+  test('a conversation with a running request is not deleted', async () => {
+    const busy = await session('busy', { lastActivity: daysAgo(20) })
+    await INSERT.into('iflowpilot.ChatTurn').entries({ session_ID: busy, status: 'RUNNING', message: 'x', createdAt: daysAgo(20) })
+    const r = await agent.deleteInactiveSessions({ days: 14 })
+    expect(await exists(busy)).toBe(true)
+    expect(r.skipped).toBeGreaterThanOrEqual(1)
+  })
+
+  test('0 days switches the cleanup off', async () => {
+    const old = await session('old, cleanup off', { lastActivity: daysAgo(400) })
+    expect(await agent.deleteInactiveSessions({ days: 0 })).toEqual({ days: 0, deleted: 0, skipped: 0 })
+    expect(await exists(old)).toBe(true)
+  })
+
+  test('keep: the owner can keep and release a conversation; another user cannot', async () => {
+    llm.chat.mockResolvedValueOnce(answer('hello'))
+    const a = await chat({ message: 'keep me' })
+    const { data } = await POST(`/api/ChatSessions/${a.sessionId}/setKeep`, { keep: true })
+    expect(data).toMatchObject({ ID: a.sessionId, keep: true })
+    await expect(POST(`/api/ChatSessions/${a.sessionId}/setKeep`, { keep: false }, asB)).rejects.toMatchObject({ response: { status: 404 } })
+    expect((await POST(`/api/ChatSessions/${a.sessionId}/setKeep`, { keep: false })).data.keep).toBe(false)
+  })
+
+  test('the API gives the retention days and runs the cleanup on request (for a scheduler), audited', async () => {
+    expect((await GET('/api/conversationSettings()')).data).toEqual({ retentionDays: 14 })
+    await session('old for the endpoint', { lastActivity: daysAgo(15) })
+    const { data } = await POST('/api/cleanupConversations', {})
+    expect(data).toMatchObject({ days: 14, deleted: expect.any(Number) })
+    expect(data.deleted).toBeGreaterThanOrEqual(1)
+    const { data: log } = await GET("/api/AuditLog?$filter=action eq 'CLEANUP_CONVERSATIONS'")
+    expect(log.length).toBeGreaterThanOrEqual(1)
+  })
+})
