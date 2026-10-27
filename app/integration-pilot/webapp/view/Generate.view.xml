@@ -44,15 +44,27 @@
     <f:dependents>
       <Popover id="sessionPopover" placement="Bottom" contentWidth="24rem" showHeader="false" horizontalScrolling="false">
         <List items="{chat>/sessions}" mode="Delete" delete=".onDeleteSession" noDataText="No conversations yet">
-          <StandardListItem
-            title="{= ${chat>title} || 'Untitled' }"
-            description="{path: 'chat>modifiedAt', formatter: '.formatter.relativeTime'}"
+          <!-- conversations without activity are deleted after the retention days; "Keep" excludes one -->
+          <CustomListItem
             type="DetailAndActive"
             press=".onSessionPick"
             detailPress=".onRenameSession"
             detailTooltip="Rename"
             highlight="{= ${chat>ID} === ${chat>/sessionId} ? 'Information' : 'None' }"
-          />
+          >
+            <HBox alignItems="Center" justifyContent="SpaceBetween" class="sapUiSmallMarginBegin sapUiTinyMarginTopBottom" renderType="Bare">
+              <VBox renderType="Bare" class="ipSessionText">
+                <Text text="{= ${chat>title} || 'Untitled' }" wrapping="false" class="sapMTextBold" />
+                <Text text="{chat>info}" wrapping="false" class="ipSubtle" />
+              </VBox>
+              <Button
+                icon="{= ${chat>keep} ? 'sap-icon://pushpin-on' : 'sap-icon://pushpin-off' }"
+                type="{= ${chat>keep} ? 'Emphasized' : 'Transparent' }"
+                tooltip="{= ${chat>keep} ? 'Kept: release it (deleted after inactivity again)' : 'Keep this conversation (never deleted after inactivity)' }"
+                press=".onKeepSession"
+              />
+            </HBox>
+          </CustomListItem>
         </List>
       </Popover>
     </f:dependents>
