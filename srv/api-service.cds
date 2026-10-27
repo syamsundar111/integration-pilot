@@ -310,16 +310,15 @@ service ApiService {
 
   /**
    * GET /api/Proposals/{id} (poll during execution: status + result.steps),
-   * POST /api/Proposals/{id}/approve { deploy, acceptUnchecked? }, POST /api/Proposals/{id}/reject { reason },
-   * POST /api/Proposals/{id}/retry { deploy?, acceptUnchecked? } (FAILED only; deploy defaults to the previous choice).
-   * Approve and retry check the Groovy scripts again: syntax errors -> 409 GROOVY_SYNTAX; an unreachable
-   * check -> 409 GROOVY_NOT_CHECKED unless acceptUnchecked is true.
+   * POST /api/Proposals/{id}/approve { deploy }, POST /api/Proposals/{id}/reject { reason },
+   * POST /api/Proposals/{id}/retry { deploy? } (FAILED only; deploy defaults to the previous choice).
+   * Groovy scripts are suggestions: they are not compiled or tested here (the developer tests them in CPI).
    */
   @readonly
   entity Proposals    as projection on db.Proposal { *, session.ID as session_ID } excluding { backupZip, session } actions {
-    action approve(deploy : Boolean, acceptUnchecked : Boolean) returns Proposals;
+    action approve(deploy : Boolean) returns Proposals;
     action reject(reason : String)   returns Proposals;
-    action retry(deploy : Boolean, acceptUnchecked : Boolean)   returns Proposals;
+    action retry(deploy : Boolean)   returns Proposals;
     /** PENDING iFlow proposals: use an existing package, or name a new one (created on approval) */
     action setPackage(packageId : String, packageName : String) returns Proposals;
   };

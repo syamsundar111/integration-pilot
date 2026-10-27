@@ -11,7 +11,6 @@ const cpi = require('../lib/cpi-client')
 const { validate, normalizeTypes, hasScriptSecret, schema, GROOVY_IMPORT, GROOVY_ENTRY } = require('../iflow-builder/validator')
 const { build } = require('../iflow-builder/builder')
 const attachmentStore = require('../lib/attachments')
-const groovyCheck = require('../lib/groovy-check')
 const { sampleResponse } = require('../lib/sample-response')
 const { parse } = require('../iflow-builder/parser')
 const { specFromParsed, describeChanges } = require('../iflow-builder/to-spec')
@@ -52,7 +51,7 @@ const definitions = [
   }),
   fn(
     'writeScript',
-    'Write or replace one Groovy script (plain code, checked at once). Steps use it by fileName, without code.',
+    'Write or replace one Groovy script (plain code). Steps use it by fileName, without code.',
     { fileName: { type: 'string', description: 'No extension, e.g. mapUsers' }, code: { type: 'string' } },
     ['fileName', 'code']
   ),
@@ -125,27 +124,6 @@ function compactInvalid(issues, instruction) {
   const errors = issues.slice(0, MAX_ERRORS).map((i) => `${i.code} ${i.message}`)
   if (issues.length > MAX_ERRORS) errors.push(`… ${issues.length - MAX_ERRORS} more; fix these first`)
   return { valid: false, errors, ...(instruction && { instruction }) }
-}
-
-/**
- * Groovy syntax check of every script the spec builds (written in the spec or attached):
- * { issues } on syntax errors, { warning } when the checker is unavailable and not required, and
- * the status per file (stored with the proposal, shown in the proposal panel)
- */
-async function groovySyntax(spec, attachments) {
-  const own = new Set([...spec.steps, ...(spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript' && s.code != null).map((s) => `${s.fileName}.groovy`))
-  const { checked, failed, reason, files } = await groovyCheck.checkSpecScripts(spec, attachments)
-  if (!checked)
-    return groovyCheck.required()
-      ? { files, issues: [{ code: 'GROOVY_NOT_CHECKED', message: `scripts: the Groovy syntax check is unavailable (${reason}); try again later` }] }
-      : { files, issues: [], warning: `Groovy syntax not checked: ${reason}` }
-  return {
-    files,
-    issues: failed.map((e) => ({
-      code: 'GROOVY_SYNTAX',
-      message: `${e.fileName}:${e.line}:${e.column}: ${e.message}${own.has(e.fileName) ? '' : ' (attached file: tell the user to fix it and attach it again)'}`
-    }))
-  }
 }
 
 /** A spec sent as a JSON string that does not parse: say where, instead of "must be a JSON object" */
@@ -315,7 +293,7 @@ async function saveDraft(ctx, spec, { source, valid = false }) {
 }
 
 /** Stores a PENDING proposal in its own transaction, so it survives a failing chat turn */
-async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, packageName = null, operation = 'CREATE', attachments = {}, scriptChecks = null, changes = null }) {
+async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null, packageName = null, operation = 'CREATE', attachments = {}, changes = null }) {
   const ID = cds.utils.uuid()
   // the attached files the spec uses, as they are now: approval and retry build from this snapshot
   const used = Object.fromEntries(attachmentStore.referencedBy(spec).map((f) => [f, attachments[f]]))
@@ -332,7 +310,6 @@ async function storeProposal(ctx, { kind, spec, iflowId = null, packageId = null
         packageId,
         packageName,
         attachments: Object.keys(used).length ? JSON.stringify(used) : null,
-        scriptChecks: scriptChecks && Object.keys(scriptChecks).length ? JSON.stringify(scriptChecks) : null,
         changes: changes ? JSON.stringify(changes) : null
       })
     )
@@ -459,8 +436,7 @@ const handlers = {
         'Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs; define each in "parameters".',
         'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).',
         'Write every Groovy script with writeScript (plain code), then reference it in the spec by fileName without code; never put Groovy code into a spec.',
-        'Send the complete spec in one proposeIflow call (it validates). Only when an answer was cut off for length: build the draft with editDraftSpec (set, then addSteps with at most 8 steps per call) and propose { useDraftSpec: true }; fix single steps with replaceStep.',
-        'Proposing checks the syntax of every Groovy script (GROOVY_SYNTAX file:line:column: message); fix your scripts with writeScript, ask the user to fix attached ones.'
+        'Send the complete spec in one proposeIflow call (it validates). Only when an answer was cut off for length: build the draft with editDraftSpec (set, then addSteps with at most 8 steps per call) and propose { useDraftSpec: true }; fix single steps with replaceStep.'
       ]
     }
   },
@@ -487,14 +463,9 @@ const handlers = {
       await saveDraft(ctx, spec, { source })
       return compactInvalid(e.errors ? e.errors.map((m) => ({ code: 'BUILD', message: m })) : [{ code: 'BUILD', message: `spec: cannot be built — ${e.message}` }])
     }
-    const groovy = await groovySyntax(spec, attachments)
-    if (groovy.issues.length) {
-      await saveDraft(ctx, spec, { source })
-      return compactInvalid(groovy.issues, 'Fix the scripts and call validateSpec again.')
-    }
     ctx.validatedSpec = spec
     await saveDraft(ctx, spec, { source, valid: true })
-    return { valid: true, ...(groovy.warning && { warnings: [groovy.warning] }), ...autoFixes(typed.fixes), next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
+    return { valid: true, ...autoFixes(typed.fixes), next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
   },
 
   async writeScript({ fileName, code }, ctx) {
@@ -514,19 +485,12 @@ const handlers = {
     const existing = await attachmentStore.list(ctx.user, ctx.sessionId)
     if (existing.some((f) => f.fileName === file && f.origin === 'upload'))
       return compactInvalid([{ code: 'ATTACHED_BY_USER', message: `${file}: the user attached this file — use it as it is, or write your script under another fileName` }])
-    const { checked, errors: syntax, reason } = await groovyCheck.checkScripts([{ fileName: file, code }])
-    if (syntax.length) return compactInvalid(syntax.map((e) => ({ code: 'GROOVY_SYNTAX', message: `${e.fileName}:${e.line}:${e.column}: ${e.message}` })), 'Fix the script and call writeScript again.')
-    if (!checked && groovyCheck.required()) return compactInvalid([{ code: 'GROOVY_NOT_CHECKED', message: `${file}: the Groovy syntax check is unavailable (${reason}); try again later` }])
     await attachmentStore.save(ctx.user, ctx.sessionId, [{ fileName: file, content: code }], 'ai')
     ctx.attachments = undefined // reload: new content
     ;(ctx.written ??= []).push(file)
-    const lintWarnings = groovyCheck.lint(code).map((w) => `${file}:${w.line}: ${w.message}`)
-    const warnings = [...(!checked ? [`Groovy syntax not checked: ${reason}`] : []), ...lintWarnings]
     return {
       stored: file,
       lines: code.split('\n').length,
-      ...(warnings.length && { warnings }),
-      ...(lintWarnings.length && { lintNote: 'Rewrite your own script to stream the body; for a script the user gave, tell them and ask first.' }),
       next: `Use it with { "type": "groovyScript", "fileName": "${fileName}" } and no "code".`
     }
   },
@@ -678,15 +642,12 @@ const handlers = {
     }
 
     const { summary } = await build(spec, { attachments }) // proves the spec builds into a zip
-    const groovy = await groovySyntax(spec, attachments)
-    if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts with writeScript and propose again.')
-    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, packageName: pkg.name, attachments, scriptChecks: groovy.files })
+    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, packageName: pkg.name, attachments })
     return {
       valid: true,
       proposalId,
       iflowId: spec.id,
       status: 'PENDING',
-      ...(groovy.warning && { warnings: [groovy.warning] }),
       ...(pkg.note && { packageIdNote: `${pkg.note} Tell the user exactly this, in one line; do not ask about it.` }),
       ...autoFixes(typed.fixes),
       ...(specNotes?.length && { specNotes }),
@@ -780,15 +741,12 @@ const handlers = {
     for (const [f, status] of Object.entries(scripts)) if (status !== 'unchanged') changes.push(`script ${f} ${status === 'new' ? 'added' : 'changed'}`)
     if (!changes.length) return { valid: false, errors: ['NO_CHANGE spec: nothing changed compared to the current iFlow'] }
     const { summary } = await build(spec, { attachments })
-    const groovy = await groovySyntax(spec, attachments)
-    if (groovy.issues.length) return compactInvalid(groovy.issues, 'Fix the scripts with writeScript and propose again.')
-    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments, scriptChecks: groovy.files, changes: { list: changes, scripts } })
+    const proposalId = await storeProposal(ctx, { kind: 'IFLOW', operation: 'UPDATE', spec, iflowId: spec.id, packageId: spec.packageId, attachments, changes: { list: changes, scripts } })
     return {
       valid: true,
       proposalId,
       iflowId: spec.id,
       status: 'PENDING',
-      ...(groovy.warning && { warnings: [groovy.warning] }),
       operation: 'UPDATE',
       changes,
       scripts,

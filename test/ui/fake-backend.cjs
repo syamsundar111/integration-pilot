@@ -1,13 +1,12 @@
 /**
  * Preload for the UI tests (node -r ./test/ui/fake-backend.cjs …): replaces the AI model
- * (srv/lib/llm.js), the CPI tenant (srv/lib/cpi-client.js) and the Groovy check with
+ * (srv/lib/llm.js) and the CPI tenant (srv/lib/cpi-client.js) with
  * deterministic in-process fakes before CAP loads them, so the real app (CAP service, agent,
  * builder, UI5 app) runs end to end without network access.
  *
  * The fake model reacts to the last user message:
  * - contains "UITEST_PROPOSE": validateSpec (sample spec) -> proposeIflow -> answer
  * - contains "UITEST_NEWPKG": the same, in a package that does not exist (package selection)
- * - contains "UITEST_UNCHECKED": the same, with the Groovy check unreachable until the next message
  * - anything else: a short answer
  * Every answer reports usage (1000 input / 100 output tokens per model call).
  */
@@ -32,8 +31,7 @@ const llm = {
     const lastUser = messages.map((m) => m.role).lastIndexOf('user')
     const text = String(messages[lastUser]?.content || '')
     const toolResults = messages.slice(lastUser + 1).filter((m) => m.role === 'tool').length
-    groovyDown = text.includes('UITEST_UNCHECKED')
-    if (text.includes('UITEST_PROPOSE') || text.includes('UITEST_NEWPKG') || text.includes('UITEST_UNCHECKED')) {
+    if (text.includes('UITEST_PROPOSE') || text.includes('UITEST_NEWPKG')) {
       const spec = { ...sample, id: `UI_Test_${Date.now().toString(36)}`, name: 'UI Test Flow', ...(text.includes('UITEST_NEWPKG') && { packageId: 'Ui.New.Package' }) }
       if (toolResults === 0) return toolCall('validateSpec', { spec })
       if (toolResults === 1) return toolCall('proposeIflow', { useValidatedSpec: true })
@@ -116,17 +114,6 @@ for (const name of ['updatePackage', 'deletePackage', 'downloadPackageZip', 'del
     throw Object.assign(new Error(`${name} is not part of the UI test fake`), { status: 501 })
   }
 
-// the real per-file logic (checkSpecScripts) on top of a fake sidecar call
-let groovyDown = false
-const realGroovyCheck = require(path.join(SRV, 'lib', 'groovy-check.js'))
-const groovyCheck = {
-  async checkScripts() {
-    return groovyDown ? { checked: false, errors: [], reason: 'fetch failed (ECONNREFUSED) at http://localhost:4010' } : { checked: true, errors: [] }
-  },
-  required: () => false,
-  checkSpecScripts: (spec, attachments) => realGroovyCheck.checkSpecScripts(spec, attachments, { check: groovyCheck.checkScripts })
-}
-
 const fake = (file, exports) => {
   const filename = require.resolve(path.join(SRV, 'lib', file))
   const mod = new (require('module'))(filename)
@@ -137,5 +124,4 @@ const fake = (file, exports) => {
 }
 fake('llm.js', llm)
 fake('cpi-client.js', cpi)
-fake('groovy-check.js', groovyCheck)
-console.log('[ui-test] AI model, CPI tenant and Groovy check are faked')
+console.log('[ui-test] AI model and CPI tenant are faked')

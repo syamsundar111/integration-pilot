@@ -9,13 +9,6 @@ process.env.DEPLOY_POLL_TIMEOUT_MS = '300'
 process.env.AGENT_ASK_PACKAGE = 'false' // the package rule has its own tests ('package not given')
 
 jest.mock('../srv/lib/llm', () => ({ chat: jest.fn(), health: jest.fn() }))
-jest.mock('../srv/lib/groovy-check', () => {
-  const actual = jest.requireActual('../srv/lib/groovy-check')
-  const mock = { checkScripts: jest.fn(async () => ({ checked: true, errors: [] })), required: jest.fn(() => false), lint: actual.lint }
-  // the real per-file logic on top of the mocked sidecar call
-  mock.checkSpecScripts = (spec, attachments) => actual.checkSpecScripts(spec, attachments, { check: (s) => mock.checkScripts(s) })
-  return mock
-})
 jest.mock('../srv/lib/cpi-client', () => {
   const notFound = () => Object.assign(new Error('not found'), { status: 404, code: 'CPI_NOT_FOUND' })
   return {
@@ -45,7 +38,6 @@ jest.mock('../srv/lib/cpi-client', () => {
 const cds = require('@sap/cds')
 const llm = require('../srv/lib/llm')
 const cpi = require('../srv/lib/cpi-client')
-const groovyCheck = require('../srv/lib/groovy-check')
 const sample = require('../srv/iflow-builder/samples/Pilot_Test_1.json')
 
 const { GET, POST } = cds.test(__dirname + '/..', '--in-memory')
@@ -420,7 +412,7 @@ describe('proposal execution', () => {
     expect(data.status).toBe('APPROVED')
     const done = await waitFor(proposalId)
     expect(done).toMatchObject({ status: 'DONE', error: null, result: { deploy: true, runtimeStatus: 'STARTED' } })
-    expect(done.result.steps.map((s) => `${s.key}:${s.status}`)).toEqual(['check:done', 'package:done', 'build:done', 'create:done', 'configure:done', 'deploy:done', 'runtime:done'])
+    expect(done.result.steps.map((s) => `${s.key}:${s.status}`)).toEqual(['package:done', 'build:done', 'create:done', 'configure:done', 'deploy:done', 'runtime:done'])
     expect(cpi.createPackage).toHaveBeenCalledWith({ id: 'NewPkg', name: 'New Package', shortText: 'New Package' })
     expect(cpi.createIflow).toHaveBeenCalledWith(expect.objectContaining({ id: 'Exec_Test_1', packageId: 'NewPkg', zipBase64: expect.any(String) }))
     expect(cpi.updateConfiguration).toHaveBeenCalledWith('Exec_Test_1', 'ReceiverURL', 'https://httpbin.org/post')
@@ -961,56 +953,6 @@ describe('a spec sent as a broken JSON string', () => {
   })
 })
 
-describe('Groovy syntax check', () => {
-  const broken = { fileName: 'addLengthHeader', name: 'Add Length Header' }
-  afterEach(() => {
-    groovyCheck.checkScripts.mockImplementation(async () => ({ checked: true, errors: [] }))
-    groovyCheck.required.mockImplementation(() => false)
-  })
-
-  test('syntax errors come back as compact GROOVY_SYNTAX lines; attached files say so', async () => {
-    groovyCheck.checkScripts.mockImplementation(async (scripts) => ({
-      checked: true,
-      errors: scripts.map((s) => ({ fileName: s.fileName, line: 4, column: 7, message: "Unexpected input: 'return'" }))
-    }))
-    const spec = { ...sample, id: 'Agent_Groovy_1', steps: [sample.steps[0], { type: 'groovyScript', name: 'Map Users', fileName: 'mapUsers' }, sample.steps[1]] }
-    llm.chat.mockResolvedValueOnce(toolCall('validateSpec', { spec })).mockResolvedValueOnce(answer('ok'))
-    await chat({ message: 'Build it', attachments: [{ fileName: 'mapUsers.groovy', content: require('./helpers').GROOVY }] })
-    const sent = groovyCheck.checkScripts.mock.calls.at(-1)[0]
-    expect(sent.map((s) => s.fileName)).toEqual(['mapUsers.groovy', `${broken.fileName}.groovy`]) // attached and written scripts
-    expect(sent[0].code).toBe(require('./helpers').GROOVY)
-    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
-    expect(result).toEqual({
-      valid: false,
-      errors: [
-        "GROOVY_SYNTAX mapUsers.groovy:4:7: Unexpected input: 'return' (attached file: tell the user to fix it and attach it again)",
-        "GROOVY_SYNTAX addLengthHeader.groovy:4:7: Unexpected input: 'return'"
-      ],
-      instruction: 'Fix the scripts and call validateSpec again.'
-    })
-  })
-
-  test('an unavailable checker is a warning, or an error when required', async () => {
-    groovyCheck.checkScripts.mockImplementation(async () => ({ checked: false, errors: [], reason: 'GROOVY_CHECK_URL is not set' }))
-    llm.chat.mockResolvedValueOnce(toolCall('validateSpec', { spec: { ...sample, id: 'Agent_Groovy_2' } })).mockResolvedValueOnce(answer('ok'))
-    await chat({ message: 'Build it' })
-    expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)).toMatchObject({ valid: true, warnings: ['Groovy syntax not checked: GROOVY_CHECK_URL is not set'] })
-
-    groovyCheck.required.mockImplementation(() => true)
-    llm.chat.mockResolvedValueOnce(toolCall('validateSpec', { spec: { ...sample, id: 'Agent_Groovy_3' } })).mockResolvedValueOnce(answer('ok'))
-    await chat({ message: 'Build it' })
-    expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)).toMatchObject({ valid: false, errors: [expect.stringMatching(/^GROOVY_NOT_CHECKED /)] })
-  })
-
-  test('proposeIflow with a spec checks the scripts too', async () => {
-    groovyCheck.checkScripts.mockImplementation(async (scripts) => ({ checked: true, errors: [{ fileName: scripts[0].fileName, line: 1, column: 1, message: 'bad' }] }))
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Agent_Groovy_4' } })).mockResolvedValueOnce(answer('ok'))
-    const turn = await chat({ message: 'Build it' })
-    expect(turn.proposals).toEqual([])
-    expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).errors).toEqual(['GROOVY_SYNTAX addLengthHeader.groovy:1:1: bad'])
-  })
-})
-
 describe('token usage', () => {
   const withUsage = (res, inputTokens, outputTokens, model = 'test/model') => ({ ...res, model, usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, durationMs: 10 } })
 
@@ -1087,8 +1029,8 @@ describe('backup before updates and restore', () => {
     await POST(`/api/Proposals/${proposalId}/approve`, { deploy: false })
     const done = await waitFor(proposalId)
     expect(done.status).toBe('DONE')
-    expect(done.result.steps.map((s) => s.key)).toEqual(['check', 'package', 'backup', 'build', 'create', 'configure'])
-    expect(done.result.steps[2]).toMatchObject({ status: 'done', detail: expect.stringMatching(/^Backup of version 1.0.4 stored \(\d+ KB\); saved as CPI version 1.0.5$/) })
+    expect(done.result.steps.map((s) => s.key)).toEqual(['package', 'backup', 'build', 'create', 'configure'])
+    expect(done.result.steps[1]).toMatchObject({ status: 'done', detail: expect.stringMatching(/^Backup of version 1.0.4 stored \(\d+ KB\); saved as CPI version 1.0.5$/) })
     expect(cpi.saveIflowAsVersion).toHaveBeenCalledWith(current.id, '1.0.5')
     // the version is saved before the content is replaced
     expect(cpi.saveIflowAsVersion.mock.invocationCallOrder[0]).toBeLessThan(cpi.updateIflowContent.mock.invocationCallOrder[0])
@@ -1163,13 +1105,10 @@ describe('streaming progress', () => {
 
 describe('writeScript', () => {
   const { GROOVY } = require('./helpers')
-  afterEach(() => groovyCheck.checkScripts.mockImplementation(async () => ({ checked: true, errors: [] })))
 
-  test('scripts are written as plain code, checked, stored, and referenced by the spec without code', async () => {
-    groovyCheck.checkScripts.mockImplementationOnce(async () => ({ checked: true, errors: [{ fileName: 'mapUsers.groovy', line: 3, column: 9, message: "Unexpected input: '('" }] }))
+  test('scripts are written as plain code (not compiled here), stored, and referenced by the spec without code', async () => {
     const spec = { ...sample, id: 'Agent_Script_1', steps: [sample.steps[0], { type: 'groovyScript', name: 'Map Users', fileName: 'mapUsers' }] }
     llm.chat
-      .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mapUsers', code: GROOVY.replace('return message', 'return message }') }))
       .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mapUsers', code: 'println 1' }))
       .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mapUsers', code: GROOVY }))
       .mockResolvedValueOnce(toolCall('validateSpec', { spec }))
@@ -1177,10 +1116,9 @@ describe('writeScript', () => {
       .mockResolvedValueOnce(answer('Ready.'))
     const turn = await chat({ message: 'Build it' })
     const results = llm.chat.mock.calls.at(-1)[0].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))
-    expect(results[0]).toEqual({ valid: false, errors: ["GROOVY_SYNTAX mapUsers.groovy:3:9: Unexpected input: '('"], instruction: 'Fix the script and call writeScript again.' })
-    expect(results[1].errors.map((e) => e.split(' ')[0])).toEqual(['GROOVY_IMPORT', 'GROOVY_ENTRY'])
-    expect(results[2]).toEqual({ stored: 'mapUsers.groovy', lines: GROOVY.split('\n').length, next: 'Use it with { "type": "groovyScript", "fileName": "mapUsers" } and no "code".' })
-    expect(results[3]).toMatchObject({ valid: true })
+    expect(results[0].errors.map((e) => e.split(' ')[0])).toEqual(['GROOVY_IMPORT', 'GROOVY_ENTRY'])
+    expect(results[1]).toEqual({ stored: 'mapUsers.groovy', lines: GROOVY.split('\n').length, next: 'Use it with { "type": "groovyScript", "fileName": "mapUsers" } and no "code".' })
+    expect(results[2]).toMatchObject({ valid: true })
     expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Agent_Script_1' })])
 
     const { data: proposal } = await GET(`/api/Proposals/${turn.proposals[0].ID}`)
@@ -1190,8 +1128,8 @@ describe('writeScript', () => {
 
     // within the turn only the newest version of the script went back to the model
     const sent = llm.chat.mock.calls.at(-1)[0].messages.filter((m) => m.tool_calls?.[0].function.name === 'writeScript').map((m) => JSON.parse(m.tool_calls[0].function.arguments).code)
-    expect(sent.slice(0, 2)).toEqual([expect.stringMatching(/^\(older version omitted/), expect.stringMatching(/^\(older version omitted/)])
-    expect(sent[2]).toBe(GROOVY)
+    expect(sent[0]).toMatch(/^\(older version omitted/)
+    expect(sent[1]).toBe(GROOVY)
     // the next turn's context names the file as written by the model
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ sessionId: turn.sessionId, message: 'next' })
@@ -1346,49 +1284,17 @@ describe('token budget per message', () => {
   })
 })
 
-describe('Groovy check at proposal and approval', () => {
-  const down = async () => ({ checked: false, errors: [], reason: 'fetch failed (ECONNREFUSED) at http://localhost:4010' })
-  afterEach(() => groovyCheck.checkScripts.mockImplementation(async () => ({ checked: true, errors: [] })))
-  const propose = async (id) => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id } })).mockResolvedValueOnce(answer('ok'))
+describe('Groovy scripts are suggestions, not checked (the Groovy check was removed)', () => {
+  test('a proposal with a script has no check step and no check status; approval needs no confirmation', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Agent_Script_Plain' } })).mockResolvedValueOnce(answer('ok'))
     const turn = await chat({ message: 'Build it' })
-    return turn.proposals[0].ID
-  }
-
-  test('a script not checked at proposal time is marked; approval needs acceptUnchecked while the check is down', async () => {
-    groovyCheck.checkScripts.mockImplementation(down)
-    const id = await propose('Agent_Unchecked_1')
+    const id = turn.proposals[0].ID
     const { data: pending } = await GET(`/api/Proposals/${id}`)
-    expect(pending.scriptChecks).toEqual({ 'addLengthHeader.groovy': { status: 'unchecked', reason: 'fetch failed (ECONNREFUSED) at http://localhost:4010', at: expect.any(String) } })
-
-    await expect(POST(`/api/Proposals/${id}/approve`, { deploy: false })).rejects.toMatchObject({ response: { status: 409, data: { error: { code: 'GROOVY_NOT_CHECKED' } } } })
-    expect((await GET(`/api/Proposals/${id}`)).data.status).toBe('PENDING')
-
-    await POST(`/api/Proposals/${id}/approve`, { deploy: false, acceptUnchecked: true })
-    const done = await waitFor(id)
-    expect(done.status).toBe('DONE')
-    expect(done.result.steps[0]).toMatchObject({ key: 'check', status: 'warning', detail: expect.stringMatching(/^Not checked \(fetch failed/) })
-    const { data: log } = await GET(`/api/AuditLog?$filter=targetId eq '${id}' and action eq 'APPROVE_PROPOSAL'`)
-    expect(JSON.parse(log[0].details)).toMatchObject({ acceptedUncheckedGroovy: true })
-  })
-
-  test('a syntax error found at approval blocks it; the proposal stays pending with the error', async () => {
-    const id = await propose('Agent_Recheck_1')
-    expect((await GET(`/api/Proposals/${id}`)).data.scriptChecks['addLengthHeader.groovy'].status).toBe('ok')
-    groovyCheck.checkScripts.mockImplementation(async (scripts) => ({ checked: true, errors: [{ fileName: scripts[0].fileName, line: 4, column: 2, message: "Unexpected input: '}'" }] }))
-    await expect(POST(`/api/Proposals/${id}/approve`, { deploy: false, acceptUnchecked: true })).rejects.toMatchObject({
-      response: { status: 409, data: { error: { code: 'GROOVY_SYNTAX', message: "Approval blocked: 1 Groovy syntax error(s): addLengthHeader.groovy:4:2: Unexpected input: '}'" } } }
-    })
-    const { data } = await GET(`/api/Proposals/${id}`)
-    expect(data.status).toBe('PENDING')
-    expect(data.scriptChecks['addLengthHeader.groovy']).toMatchObject({ status: 'failed', errors: ["4:2: Unexpected input: '}'"] })
-  })
-
-  test('checked scripts: the approval step says so', async () => {
-    const id = await propose('Agent_Recheck_2')
+    expect(pending).not.toHaveProperty('scriptChecks')
     await POST(`/api/Proposals/${id}/approve`, { deploy: false })
     const done = await waitFor(id)
-    expect(done.result.steps[0]).toMatchObject({ key: 'check', status: 'done', detail: '1 script(s) checked, no syntax errors' })
+    expect(done.status).toBe('DONE')
+    expect(done.result.steps.map((st) => st.key)).toEqual(['package', 'build', 'create', 'configure'])
   })
 })
 
@@ -1559,16 +1465,6 @@ describe('receiver URL with a query (Test 3)', () => {
     await POST(`/api/Proposals/${turn.proposals[0].ID}/approve`, { deploy: false })
     expect(await waitFor(turn.proposals[0].ID)).toMatchObject({ status: 'DONE' })
     expect(cpi.updateConfiguration).toHaveBeenCalledWith('Query_URL_1', 'ReceiverURL', 'https://services.odata.org/V2/Northwind/Northwind.svc/Products')
-  })
-})
-
-describe('streaming lint in writeScript (Test 3)', () => {
-  test('a script that parses the body as a String is stored, with a warning', async () => {
-    const code = 'import com.sap.gateway.ip.core.customdev.util.Message\nimport groovy.json.JsonSlurper\n\ndef Message processData(Message message) {\n    def json = new JsonSlurper().parseText(message.getBody(String))\n    return message\n}\n'
-    llm.chat.mockResolvedValueOnce(toolCall('writeScript', { fileName: 'parseBody', code })).mockResolvedValueOnce(answer('ok'))
-    await chat({ message: 'write it' })
-    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
-    expect(result).toMatchObject({ stored: 'parseBody.groovy', warnings: [expect.stringMatching(/^parseBody\.groovy:5: parses the whole message body as a String/)] })
   })
 })
 

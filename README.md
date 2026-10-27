@@ -50,7 +50,6 @@ npm install
 npm run ui:install       # UI5 Tooling and linter (only needed for build/lint)
 npm run db:deploy        # creates db.sqlite (git-ignored) for the local profiles; npm run watch / watch:hybrid
                          # also run it on start, adding new columns and keeping the data
-npm run groovy-check:build  # Groovy syntax check sidecar (needs JDK 17+ and Maven)
 ```
 
 `.env` holds `LLM_MODEL` and `LLM_FALLBACK_MODEL`, plus optional `LLM_MAX_TOKENS` (default 8192;
@@ -82,21 +81,11 @@ Tab*, or use the Command Palette → *Ports: Preview* → 4005.
 
 Locally every request runs as `local-dev` with the `Admin` role (`srv/lib/dev-auth.js`).
 
-**Groovy syntax check.** `validateSpec` sends every Groovy script (written or attached) to the
-sidecar in `groovy-check/` (Groovy 4: a parse, then semantic analysis against stub classes of the
-CPI script API, so an import of a class that does not exist on CPI, such as
-`com.sap.gateway.ip.core.customdev.util.MessageLogFactory`, is reported; nothing is executed, `@Grab` is
-off) and returns errors as `GROOVY_SYNTAX file:line:column: message`. Run it next
-to the app with `npm run groovy-check` (port 4010) and set `GROOVY_CHECK_URL=http://localhost:4010`
-in `.env` (a `GROOVY_CHECK_URL` exported in the shell or by the editor wins over `.env`; failed checks
-log the URL used, the network cause and the sidecar's `/health` at that moment). Without it, scripts
-are proposed with a "not checked" warning shown in the proposal panel; approving checks them again —
-a syntax error blocks approval, and an unreachable check must be confirmed explicitly (audit log).
-`GROOVY_CHECK_TIMEOUT_MS` (default 15000) is the timeout per check. Do not rebuild the jar while a
-sidecar runs from it: the JVM loads classes from the file lazily (restart it after
-`npm run groovy-check:build`). `GROOVY_CHECK_REQUIRED=true`
-blocks proposals instead (set in the MTA files, where the sidecar is the module
-`integration-pilot-groovy-check` with a generated shared token).
+**Groovy scripts are suggestions.** The assistant writes Groovy scripts (and uses attached ones) as
+files of the conversation; they are not compiled or tested by the app. Review them in the proposal
+panel and test the iFlow in CPI after creation. The spec validation still requires the CPI entry point
+(`import com.sap.gateway.ip.core.customdev.util.Message` and `def Message processData(Message message)`)
+and refuses hard-coded secrets.
 
 ## Checks
 

@@ -133,7 +133,7 @@ describe('Generate page: switching conversations while requests are in flight', 
   })
 })
 
-describe('Generate page: approve runs once at a time, and not with failed Groovy checks', () => {
+describe('Generate page: approve runs once at a time', () => {
   function setup(proposal) {
     const { ctl, chat, api } = controller()
     chat.setProperty('/packages', [{ id: 'P', name: 'P' }])
@@ -150,7 +150,7 @@ describe('Generate page: approve runs once at a time, and not with failed Groovy
     }
     return { ctl, chat, api, flush }
   }
-  const pending = { ID: 'p1', status: 'PENDING', iflowId: 'A', packageId: 'P', scriptChecks: { 'a.groovy': { status: 'ok' } } }
+  const pending = { ID: 'p1', status: 'PENDING', iflowId: 'A', packageId: 'P' }
 
   test('a second Approve while the first runs sends nothing; the buttons are enabled again afterwards', async () => {
     const s = setup(pending)
@@ -163,21 +163,6 @@ describe('Generate page: approve runs once at a time, and not with failed Groovy
     s.api.calls.find((c) => c.url.endsWith('/approve')).resolve({ ID: 'p1', status: 'APPROVED' })
     await first
     expect(s.chat.getProperty('/writing')).toBe(false)
-  })
-
-  test('a failed Groovy check blocks approval; an unchecked script does not', () => {
-    const s = setup(pending)
-    expect(s.ctl.approvalBlocked({ scriptChecks: { 'a.groovy': { status: 'failed' }, 'b.groovy': { status: 'ok' } } })).toBe(true)
-    expect(s.ctl.approvalBlocked({ scriptChecks: { 'a.groovy': { status: 'unchecked' } } })).toBe(false)
-    expect(s.ctl.approvalBlocked({ scriptChecks: { 'a.groovy': { status: 'ok' } } })).toBe(false)
-    expect(s.ctl.approvalBlocked({})).toBe(false)
-  })
-
-  test('Approve with a failed script does not ask or send', async () => {
-    const s = setup({ ...pending, scriptChecks: { 'a.groovy': { status: 'failed' } } })
-    await s.ctl.onApprove()
-    expect(s.ctl.confirm).not.toHaveBeenCalled()
-    expect(s.api.post).not.toHaveBeenCalled()
   })
 })
 

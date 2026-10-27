@@ -137,10 +137,10 @@ describe('system prompt: review items 1, 2, 4 and 5', () => {
     expect(flat).toMatch(/Apply trivial fixes yourself and say so in one line, without asking: duplicate step names .*package ID characters/)
   })
 
-  test('2: user code is used verbatim; check errors are reported with file:line:column and the quoted line', () => {
+  test('2: user code is used verbatim; a mistake in it is pointed out, not fixed without asking', () => {
     expect(flat).toMatch(/\*\*User code is the user's code\.\*\* Code the user gives in the message or attaches is used verbatim/)
-    expect(flat).toMatch(/do not fix it on your own: report each error as file:line:column, quote that line, and ask whether you may fix it/)
-    expect(flat).toMatch(/"Fix your own scripts" applies only to scripts you wrote/)
+    expect(flat).toMatch(/do not fix it on your own: point to the line and ask whether you may fix it/)
+    expect(flat).toMatch(/Scripts are suggestions: they are not compiled or tested here, the developer tests them in CPI/)
   })
 
   test('4: a placeholder default must be set before deploying; approve without deploy', () => {

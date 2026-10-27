@@ -26,13 +26,10 @@ describe('deployment', () => {
   })
 })
 
-describe('Groovy check sidecar memory (review: 256M is below the Java buildpack reservations)', () => {
+describe('no Groovy check sidecar (removed: scripts are suggestions, tested by the developer in CPI)', () => {
   const fs = require('fs')
-  test.each(['mta.yaml', 'mta-sqlite.yaml'])('%s gives it 512M and sizes stacks, code cache and metaspace', (file) => {
+  test.each(['mta.yaml', 'mta-sqlite.yaml'])('%s deploys no groovy-check module and passes no GROOVY_CHECK settings', (file) => {
     const mta = fs.readFileSync(path.join(ROOT, file), 'utf8')
-    const sidecar = mta.split(/\n {2}- name: /).find((m) => m.startsWith('integration-pilot-groovy-check'))
-    expect(sidecar).toMatch(/\n {6}memory: 512M\n/)
-    expect(sidecar).toMatch(/memory_calculator: \{ stack_threads: 40 \}/)
-    expect(sidecar).toMatch(/JAVA_OPTS: '-XX:ReservedCodeCacheSize=64M -XX:MaxMetaspaceSize=96M -XX:MaxDirectMemorySize=10M'/)
+    expect(mta).not.toMatch(/groovy-check|GROOVY_CHECK/)
   })
 })
