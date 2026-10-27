@@ -4,7 +4,8 @@
  * (median, min, max per scenario) to the top of docs/measurements.md.
  *
  *   node scripts/measure-all.js --api http://localhost:4005/api --log server.log [--runs 3]
- *        [--scenarios a,b,c,d] [--out results.jsonl] [--title "Before items 1-3"] [--no-docs]
+ *        [--scenarios a,b,c,d,e] [--out results.jsonl] [--title "Before items 1-3"] [--no-docs]
+ *        [--commit <sha>]   (the measured server's commit; default: its /api/health "commit")
  *   node scripts/measure-all.js --summarize results.jsonl --title "..."   (only write the summary)
  *
  * Scenarios (set v2, neutral, from 2026-10-22; rounds before that used client-specific scenarios
@@ -13,12 +14,13 @@
  *   b  Users Summary, scripts attached (improved request + session defaults)
  *   c  generic 30-step order flow
  *   d  rebuild of an existing iFlow with placeholders, 25 steps (docs/prompt-guide.md)
+ *   e  one sentence: hourly users from jsonplaceholder posted to httpbin (no package, no details)
  * Start the server with the model you want to measure and GROOVY_CHECK_URL pointing at a running
  * Groovy check (real environment variables win over .env).
  */
 const fs = require('fs')
 const path = require('path')
-const { execFileSync, spawnSync } = require('child_process')
+const { execFileSync } = require('child_process')
 
 const ROOT = path.join(__dirname, '..')
 const args = process.argv.slice(2)
@@ -37,13 +39,15 @@ const SCENARIOS = {
     args: ['--defaults', '--request', 'scripts/measure/users-summary-improved-request.md', '--attach', `${F}/summarizeUsers.groovy,${F}/buildErrorMessage.groovy`]
   },
   c: { name: '30-step generic order flow', args: ['--request', 'scripts/measure/large-order-request.md'] },
-  d: { name: 'Placeholder rebuild, 25 steps', args: ['--request', 'scripts/measure/placeholder-rebuild-request.md'] }
+  d: { name: 'Placeholder rebuild, 25 steps', args: ['--request', 'scripts/measure/placeholder-rebuild-request.md'] },
+  e: { name: 'One sentence, no details', args: ['--request', 'scripts/measure/one-sentence-request.md'] }
 }
 
 const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b)
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2
 }
+const sum = (rows, key) => (rows.some((x) => x[key] != null) ? rows.reduce((n, x) => n + (x[key] || 0), 0) : '–')
 const k = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(Math.round(n)))
 const stat = (rows, get, fmt = (x) => String(x)) => {
   const xs = rows.map(get).filter((x) => Number.isFinite(x))
@@ -52,21 +56,22 @@ const stat = (rows, get, fmt = (x) => String(x)) => {
 
 /** Markdown section for one measurement round */
 function summary(rows, title) {
-  const commit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT }).stdout.toString().trim()
+  // the commit of the server being measured, not of this checkout (the server may run from a worktree)
+  const commit = rows.find((r) => r.commit)?.commit || 'unknown'
   const model = process.env.LLM_MODEL || readEnvFile('LLM_MODEL') || 'unknown'
   const lines = [
     `## ${new Date().toISOString().slice(0, 10)} · ${title || 'Measurement'}`,
     '',
     `Commit \`${commit}\` · model \`${model}\` · scenario set ${SCENARIO_SET} · ${rows.length} runs. Median (min–max) per scenario.`,
     '',
-    '| Scenario | Runs | Proposal | Messages | Model calls | Input tokens | Output tokens | Time (min) | Largest prompt | Groovy checks ok / not checked |',
-    '|---|---|---|---|---|---|---|---|---|---|'
+    '| Scenario | Runs | Proposal | Messages | Questions | Model calls | Input tokens | Output tokens | Time (min) | Largest prompt | Groovy checks ok / not checked | Timeouts / fallbacks |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|'
   ]
   for (const [key, sc] of Object.entries(SCENARIOS)) {
     const r = rows.filter((x) => x.scenario === key)
     if (!r.length) continue
     lines.push(
-      `| (${key}) ${sc.name} | ${r.length} | ${r.filter((x) => x.outcome === 'iFlow proposal').length}/${r.length} | ${stat(r, (x) => x.turns)} | ${stat(r, (x) => x.modelCalls)} | ${stat(r, (x) => x.promptTokens, k)} | ${stat(r, (x) => x.completionTokens, k)} | ${stat(r, (x) => x.minutes, (m) => m.toFixed(1))} | ${stat(r, (x) => x.maxPromptTokens, k)} | ${stat(r, (x) => x.groovyChecks?.ok)} / ${stat(r, (x) => x.groovyChecks?.notChecked)} |`
+      `| (${key}) ${sc.name} | ${r.length} | ${r.filter((x) => x.outcome === 'iFlow proposal').length}/${r.length} | ${stat(r, (x) => x.turns)} | ${stat(r, (x) => x.questionsAsked)} | ${stat(r, (x) => x.modelCalls)} | ${stat(r, (x) => x.promptTokens, k)} | ${stat(r, (x) => x.completionTokens, k)} | ${stat(r, (x) => x.minutes, (m) => m.toFixed(1))} | ${stat(r, (x) => x.maxPromptTokens, k)} | ${stat(r, (x) => x.groovyChecks?.ok)} / ${stat(r, (x) => x.groovyChecks?.notChecked)} | ${sum(r, 'timeouts')} / ${sum(r, 'fallbacks')} |`
     )
   }
   return lines.join('\n') + '\n'
@@ -99,8 +104,8 @@ function main() {
   }
   const runs = Number(opt('runs', 3))
   const out = opt('out', path.join(ROOT, 'measure-results.jsonl'))
-  const keys = opt('scenarios', 'a,b,c,d').split(',')
-  const common = ['--api', opt('api', 'http://localhost:4005/api'), '--log', opt('log'), '--max-turns', opt('max-turns', '5')]
+  const keys = opt('scenarios', 'a,b,c,d,e').split(',')
+  const common = ['--api', opt('api', 'http://localhost:4005/api'), '--log', opt('log'), '--max-turns', opt('max-turns', '5'), ...(opt('commit') ? ['--commit', opt('commit')] : [])]
   const rows = []
   for (let run = 1; run <= runs; run++)
     for (const key of keys) {
