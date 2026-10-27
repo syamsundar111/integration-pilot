@@ -649,21 +649,80 @@ async function cancelTurn(turnId, user) {
  * Refused while a turn is running or a proposal is executing.
  */
 async function deleteSession(sessionId, user) {
-  const { ChatSession, ChatMessage, ChatTurn, Proposal, Attachment } = E()
   await db(user, (tx) => ownSession(tx, user, sessionId))
   await expireStaleTurns(user, sessionId)
   await db(user, async (tx) => {
     await ownSession(tx, user, sessionId)
-    if (await tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' })))
-      throw fail(409, 'TURN_IN_PROGRESS', 'The assistant is still working in this conversation. Wait for it or cancel it, then delete.')
-    if (await tx.run(SELECT.one.from(Proposal).columns('ID').where({ session_ID: sessionId, status: 'APPROVED' })))
-      throw fail(409, 'PROPOSAL_EXECUTING', 'A proposal of this conversation is being executed. Delete the conversation when it has finished.')
-    await tx.run(DELETE.from(Proposal).where({ session_ID: sessionId, status: 'PENDING' }))
-    await tx.run(UPDATE(Proposal).set({ session_ID: null }).where({ session_ID: sessionId }))
-    await tx.run(DELETE.from(ChatTurn).where({ session_ID: sessionId }))
-    await tx.run(DELETE.from(ChatMessage).where({ session_ID: sessionId }))
-    await tx.run(DELETE.from(Attachment).where({ session_ID: sessionId }))
-    await tx.run(DELETE.from(ChatSession, sessionId))
+    await removeSession(tx, sessionId)
+  })
+}
+
+/**
+ * Deletes a conversation in the caller's transaction: its messages, turns, attachments and pending
+ * proposals; executed proposals are kept without the link (Dashboard, backups and the audit log use them).
+ * Refused while the assistant works in it or one of its proposals is executing.
+ */
+async function removeSession(tx, sessionId) {
+  const { ChatSession, ChatMessage, ChatTurn, Proposal, Attachment } = E()
+  if (await tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' })))
+    throw fail(409, 'TURN_IN_PROGRESS', 'The assistant is still working in this conversation. Wait for it or cancel it, then delete.')
+  if (await tx.run(SELECT.one.from(Proposal).columns('ID').where({ session_ID: sessionId, status: 'APPROVED' })))
+    throw fail(409, 'PROPOSAL_EXECUTING', 'A proposal of this conversation is being executed. Delete the conversation when it has finished.')
+  await tx.run(DELETE.from(Proposal).where({ session_ID: sessionId, status: 'PENDING' }))
+  await tx.run(UPDATE(Proposal).set({ session_ID: null }).where({ session_ID: sessionId }))
+  await tx.run(DELETE.from(ChatTurn).where({ session_ID: sessionId }))
+  await tx.run(DELETE.from(ChatMessage).where({ session_ID: sessionId }))
+  await tx.run(DELETE.from(Attachment).where({ session_ID: sessionId }))
+  await tx.run(DELETE.from(ChatSession, sessionId))
+}
+
+/** Days of inactivity after which a conversation is deleted (0 = never); env CONVERSATION_RETENTION_DAYS */
+const retentionDays = () => {
+  const days = Number(process.env.CONVERSATION_RETENTION_DAYS ?? 14)
+  return Number.isFinite(days) && days >= 0 ? days : 14
+}
+
+/**
+ * Deletes conversations of all users without activity for `days` days, except kept ones (keep = true).
+ * Activity is the latest of: a message saved or the conversation changed (modifiedAt), a request
+ * started (ChatTurn), a proposal changed (approved, executed, rejected). Runs daily in the app, or
+ * from a job (POST /api/cleanupConversations, e.g. SAP BTP Job Scheduler).
+ * @returns {Promise<{ days: number, deleted: number, skipped: number }>}
+ */
+async function deleteInactiveSessions({ days = retentionDays(), now = Date.now() } = {}) {
+  if (!days) return { days, deleted: 0, skipped: 0 }
+  const { ChatSession, ChatTurn, Proposal } = E()
+  const cutoff = new Date(now - days * 86_400_000).toISOString()
+  const candidates = await db(undefined, (tx) =>
+    tx.run(SELECT.from(ChatSession).columns('ID').where({ modifiedAt: { '<': cutoff } }).and({ keep: false, or: { keep: null } }))
+  )
+  let deleted = 0
+  let skipped = 0
+  for (const { ID } of candidates) {
+    try {
+      await db(undefined, async (tx) => {
+        const recent =
+          (await tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: ID, createdAt: { '>=': cutoff } }))) ||
+          (await tx.run(SELECT.one.from(Proposal).columns('ID').where({ session_ID: ID, modifiedAt: { '>=': cutoff } })))
+        if (recent) return skipped++ // active after all: a recent request or proposal
+        await removeSession(tx, ID)
+        deleted++
+      })
+    } catch (e) {
+      skipped++ // e.g. a running turn or an executing proposal: next run
+      LOG.info(`Conversation ${ID} not deleted now: ${e.message}`)
+    }
+  }
+  return { days, deleted, skipped }
+}
+
+/** Keeps a conversation (never deleted by the inactivity cleanup) or releases it */
+async function keepSession(sessionId, keep, user) {
+  const { ChatSession } = E()
+  return db(user, async (tx) => {
+    await ownSession(tx, user, sessionId)
+    await tx.run(UPDATE(ChatSession, sessionId).set({ keep: !!keep }))
+    return tx.run(SELECT.one.from(ChatSession, sessionId).columns('ID', 'title', 'keep', 'modifiedAt'))
   })
 }
 
@@ -696,4 +755,4 @@ async function renameSession(sessionId, title, user) {
   })
 }
 
-module.exports = { startTurn, cancelTurn, deleteSession, renameSession, importIntoSession, recoverInterruptedTurns, toProposalInfo, toolLabel, INTERRUPTED }
+module.exports = { startTurn, cancelTurn, deleteSession, renameSession, keepSession, deleteInactiveSessions, retentionDays, importIntoSession, recoverInterruptedTurns, toProposalInfo, toolLabel, INTERRUPTED }

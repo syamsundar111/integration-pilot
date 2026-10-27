@@ -81,6 +81,13 @@ Tab*, or use the Command Palette → *Ports: Preview* → 4005.
 
 Locally every request runs as `local-dev` with the `Admin` role (`srv/lib/dev-auth.js`).
 
+**Conversation cleanup.** Conversations without activity for `CONVERSATION_RETENTION_DAYS` days
+(default 14; `0` = never) are deleted, with their messages, attachments and pending proposals; executed
+proposals and the audit log stay. Activity is the latest message, request or proposal change. A
+conversation the user keeps (pin in the conversation list) is never deleted. The app runs the cleanup at
+startup and once a day; to run it from a scheduler instead (e.g. SAP BTP Job Scheduler), set
+`CONVERSATION_CLEANUP_TIMER=false` and call `POST /api/cleanupConversations`.
+
 **Groovy scripts are suggestions.** The assistant writes Groovy scripts (and uses attached ones) as
 files of the conversation; they are not compiled or tested by the app. Review them in the proposal
 panel and test the iFlow in CPI after creation. The spec validation still requires the CPI entry point

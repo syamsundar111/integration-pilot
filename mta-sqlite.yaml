@@ -46,6 +46,7 @@ modules:
       LLM_MAX_TOKENS: 16000
       AGENT_MAX_MODEL_CALLS: 20 # model calls per chat message
       AGENT_MAX_TOKENS_PER_MESSAGE: 300000 # token budget per chat message
+      CONVERSATION_RETENTION_DAYS: 14 # conversations without activity are deleted after this many days (kept ones stay; 0 = never)
     provides:
       - name: srv-api
         properties:

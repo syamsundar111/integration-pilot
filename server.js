@@ -30,7 +30,33 @@ cds.once('served', () => {
   require('./srv/agent/agent')
     .recoverInterruptedTurns()
     .catch((e) => cds.log('agent').error('Recovery of interrupted chat turns failed', e))
+  startConversationCleanup()
 })
+
+/**
+ * Deletes conversations without activity for CONVERSATION_RETENTION_DAYS days (default 14; kept ones
+ * stay): at startup and once a day. CONVERSATION_CLEANUP_TIMER=false switches the timer off when a
+ * scheduler calls POST /api/cleanupConversations instead (e.g. SAP BTP Job Scheduler).
+ */
+function startConversationCleanup() {
+  if (process.env.CONVERSATION_CLEANUP_TIMER === 'false' || process.env.NODE_ENV === 'test') return
+  const LOG = cds.log('cleanup')
+  const { audit } = require('./srv/lib/audit')
+  const agent = require('./srv/agent/agent')
+  const run = async () => {
+    try {
+      const r = await agent.deleteInactiveSessions()
+      if (!r.days) return
+      LOG.info(`Conversations without activity for ${r.days} days: ${r.deleted} deleted, ${r.skipped} skipped`)
+      if (r.deleted || r.skipped)
+        await audit({ user: { id: 'system' } }, { action: 'CLEANUP_CONVERSATIONS', targetType: 'ChatSession', targetId: 'all', status: 'SUCCESS', details: r })
+    } catch (e) {
+      LOG.error('Conversation cleanup failed', e)
+    }
+  }
+  run()
+  setInterval(run, 24 * 3600_000).unref()
+}
 
 // By default CAP serves the whole ./app folder statically, which would expose
 // node_modules and the approuter. Serve only the UI5 app at "/" (it uses hash routing,
