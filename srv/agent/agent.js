@@ -326,6 +326,61 @@ async function duplicateNote(user, ctx) {
   return notes.length ? `\n\n---\n${notes.join('\n\n')}` : ''
 }
 
+// --- an existing iFlow, before the model starts --------------------------------------------
+
+/** Create request with a quoted name: Create an iFlow "Order Intake" (as in the request template) */
+const CREATE_NAMED = /\bcreate\b[^\n"“]{0,40}\bi-?flow\b[^\n"“]{0,30}["“]([^"”\n]{2,100})["”]/i
+/** A "Package: Demo.Integrations, name …" line: the package id (or a name, turned into an id) */
+const PACKAGE_LINE = /^\s*package\s*:\s*([^,\n]+)/im
+
+/**
+ * If the message asks to create an iFlow by name and that iFlow exists already (an id the name
+ * gives, anywhere on the tenant, or the same name in the target package), the answer that asks the
+ * user what to do; null otherwise or when CPI cannot be asked (the model then runs as usual, and
+ * proposeIflow still refuses a duplicate). Saves the whole model run: the scripts and the spec would
+ * be written before the duplicate shows.
+ */
+async function existingIflowAnswer(user, sessionId, message) {
+  const name = String(message || '').match(CREATE_NAMED)?.[1]?.trim()
+  if (!name) return null
+  const fromLine = String(message).match(PACKAGE_LINE)?.[1]?.trim()
+  let packageId = fromLine ? toPackageId(fromLine.replace(/^["“]|["”]$/g, '')).id : null
+  if (!packageId) {
+    const s = await db(user, (tx) => tx.run(SELECT.one.from(E().ChatSession, sessionId).columns('defaults')))
+    packageId = s?.defaults ? JSON.parse(s.defaults).packageId : null
+  }
+  const ids = [...new Set([name.replace(/\s+/g, '_'), name.replace(/\s+/g, '')].map((id) => id.replace(/[^A-Za-z0-9_.-]/g, '')).filter(Boolean))]
+  try {
+    let found = null
+    for (const id of ids) {
+      found = await cpi.getIflow(id).catch((e) => {
+        if (e.status === 404) return null
+        throw e
+      })
+      if (found) break
+    }
+    if (!found && packageId) {
+      const list = await cpi.listIflows(packageId).catch((e) => {
+        if (e.status === 404) return [] // the package does not exist yet: nothing in it
+        throw e
+      })
+      found = list.find((f) => String(f.name || '').trim().toLowerCase() === name.toLowerCase()) || null
+    }
+    if (!found) return null
+    const where = found.packageId || packageId
+    return [
+      `An iFlow **"${found.name || found.id}"** (id \`${found.id}\`) already exists in package \`${where}\`. Nothing has been proposed yet.`,
+      '',
+      'What should I do?',
+      `- **Update the existing iFlow**: say "update it" and what to change.`,
+      `- **Create a new iFlow**: tell me the name to use (e.g. "${name} 2").`
+    ].join('\n')
+  } catch (e) {
+    LOG.info(`Check for an existing iFlow '${name}' skipped: ${e.message}`)
+    return null
+  }
+}
+
 // --- progress events ------------------------------------------------------------------
 
 const event = (type, label, detail) => ({ at: new Date().toISOString(), type, label, ...(detail && { detail }) })
@@ -492,6 +547,12 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
     await update({ status: 'DONE', text, proposals: JSON.stringify(proposals), ...u })
   }
   try {
+    // a create request for an iFlow that exists already: answered by the app, before any model call
+    const exists = await existingIflowAnswer(user, sessionId, message)
+    if (exists) {
+      await emit('info', 'The iFlow exists already — asking first')
+      return await finish(exists)
+    }
     const past = await loadHistory(user, sessionId)
     const system = await systemMessage(user, sessionId, message)
     let text = null

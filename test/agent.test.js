@@ -1795,3 +1795,58 @@ describe('conversations without activity are deleted after 14 days; kept ones st
     expect(log.length).toBeGreaterThanOrEqual(1)
   })
 })
+
+describe('a create request for an existing iFlow is answered before any model call (review: 27k tokens before the duplicate showed)', () => {
+  const notFound = () => Object.assign(new Error('not found'), { status: 404 })
+  afterEach(() => {
+    cpi.listIflows.mockImplementation(async () => [])
+    cpi.getIflow.mockImplementation(async () => {
+      throw notFound()
+    })
+  })
+
+  test('an id the name gives exists: asked at once, no model call, nothing proposed', async () => {
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (id === 'Order_Intake') return { id, name: 'Order Intake', packageId: 'Demo.Integrations' }
+      throw notFound()
+    })
+    llm.chat.mockClear()
+    const turn = await chat({ message: 'Create an iFlow "Order Intake".\nTrigger: HTTPS sender with path /orders/intake\nPackage: Demo.Integrations, name "Demo Integrations"' })
+    expect(llm.chat).not.toHaveBeenCalled()
+    expect(turn.proposals).toEqual([])
+    expect(turn.text).toMatch(/^An iFlow \*\*"Order Intake"\*\* \(id `Order_Intake`\) already exists in package `Demo\.Integrations`\. Nothing has been proposed yet\./)
+    expect(turn.text).toMatch(/Update the existing iFlow.*\n.*Create a new iFlow/)
+  })
+
+  test('the same name in the package of the message (another id): asked at once', async () => {
+    cpi.listIflows.mockImplementation(async (pkg) => (pkg === 'Demo.Integrations' ? [{ id: 'OrderIntakeV1', name: 'Order Intake', packageId: pkg }] : []))
+    llm.chat.mockClear()
+    const turn = await chat({ message: 'Create an iFlow "order intake"\nPackage: Demo.Integrations' })
+    expect(llm.chat).not.toHaveBeenCalled()
+    expect(turn.text).toContain('(id `OrderIntakeV1`) already exists in package `Demo.Integrations`')
+  })
+
+  test('the package from the session defaults when the message names none', async () => {
+    cpi.listIflows.mockImplementation(async (pkg) => (pkg === 'PilotReference' ? [{ id: 'Stock1', name: 'Stock Sync', packageId: pkg }] : []))
+    llm.chat.mockClear()
+    const turn = await chat({ message: 'Create an iFlow "Stock Sync" that runs once', defaults: { packageId: 'PilotReference' } })
+    expect(llm.chat).not.toHaveBeenCalled()
+    expect(turn.text).toContain('(id `Stock1`) already exists in package `PilotReference`')
+  })
+
+  test('a new name, no name at all, or CPI not reachable: the model runs as usual', async () => {
+    for (const message of ['Create an iFlow "Totally New Flow"\nPackage: PilotReference', 'build something that sends orders to the ERP']) {
+      llm.chat.mockClear()
+      llm.chat.mockResolvedValueOnce(answer('ok'))
+      await chat({ message })
+      expect(llm.chat).toHaveBeenCalledTimes(1)
+    }
+    cpi.getIflow.mockImplementation(async () => {
+      throw Object.assign(new Error('CPI down'), { status: 503 })
+    })
+    llm.chat.mockClear()
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow "Order Intake"' })
+    expect(llm.chat).toHaveBeenCalledTimes(1)
+  })
+})
