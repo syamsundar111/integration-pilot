@@ -444,7 +444,7 @@ describe('splitters, gathers, process calls and local processes (phase 2)', () =
   })
 })
 
-describe('relative XPaths: a note (CPI evaluates an XPath from the document root)', () => {
+describe('relative XPaths: a note (CPI evaluates them from the document root: only a path that starts with the root element works)', () => {
   test('rows, Write Variables, splitter and gather XPaths that do not start with / or // get a note; functions do not', () => {
     const spec = baseSpec({
       steps: [
@@ -456,11 +456,11 @@ describe('relative XPaths: a note (CPI evaluates an XPath from the document root
     })
     const r = validate(spec)
     expect(r.valid).toBe(true)
-    expect(r.warnings).toEqual([
-      "steps[0].expression: the XPath 'order' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//order'",
-      "steps[1].headers[0].value: the XPath 'id' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//id'",
-      "steps[2].variables[0].value: the XPath './id' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//id'",
-      "steps[3].target: the XPath 'orders' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//orders'"
-    ])
+    const note = (where, v) =>
+      `${where}: the XPath '${v}' is relative; CPI evaluates it from the document root, so it only works if it starts with the root element (e.g. 'order/${v.replace(/^\.\//, '')}'). Safer: start it with / or //, e.g. '/order/${v.replace(/^\.\//, '')}'`
+    expect(r.warnings).toEqual([note('steps[0].expression', 'order'), note('steps[1].headers[0].value', 'id'), note('steps[2].variables[0].value', './id'), note('steps[3].target', 'orders')])
+    expect(r.warnings[1]).toBe(
+      "steps[1].headers[0].value: the XPath 'id' is relative; CPI evaluates it from the document root, so it only works if it starts with the root element (e.g. 'order/id'). Safer: start it with / or //, e.g. '/order/id'"
+    )
   })
 })

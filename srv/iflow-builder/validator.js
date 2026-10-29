@@ -99,12 +99,14 @@ function effectiveNames(spec) {
 }
 
 /**
- * An XPath CPI evaluates from the document root that does not start there ('id' instead of '/order/id' or '//id'):
- * it finds nothing at runtime. Functions like count(//order) are fine.
+ * A relative XPath: CPI evaluates it from the document root, so 'order/id' works when the root element is <order>,
+ * but 'id' finds nothing. A note, since the root element is not known here. Functions like count(//order) are fine.
  */
 const relativeXPath = (v) => typeof v === 'string' && v.trim() !== '' && !/^\s*(\/|\(|[A-Za-z][\w.-]*(:[\w-]+)?\s*\()/.test(v)
-const xpathNote = (where, v) =>
-  `${where}: the XPath '${v}' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//${v.trim().replace(/^\.\/?/, '')}'`
+const xpathNote = (where, v) => {
+  const path = v.trim().replace(/^\.\/?/, '')
+  return `${where}: the XPath '${v}' is relative; CPI evaluates it from the document root, so it only works if it starts with the root element (e.g. 'order/${path}'). Safer: start it with / or //, e.g. '/order/${path}'`
+}
 
 /**
  * What is wrong with a condition, or null: NonXML reads ${...} and has spaces around the operator
