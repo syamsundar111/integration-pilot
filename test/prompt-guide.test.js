@@ -33,6 +33,45 @@ const example = (name) => GUIDE.split(`<!-- example:${name} -->`)[1].split('```t
 const strip = (s) => JSON.parse(JSON.stringify(s, (k, v) => (k === 'description' ? undefined : v)))
 const sortParams = (s) => ({ ...s, parameters: Object.fromEntries(Object.entries(s.parameters).sort()) })
 
+describe('the pre-send check passes every example request (a warning on our own examples is a bug)', () => {
+  const names = [...GUIDE.matchAll(/<!-- example:([\w-]+) -->/g)].map((m) => m[1])
+
+  test.each(names)('prompt guide example %s', (name) => {
+    expect(lint(example(name))).toEqual([])
+  })
+
+  test('the step c tenant-check request: a parameter right after the HTTP method is the whole URL', () => {
+    const request = [
+      'Create an iFlow "Builder V2 HTTP Check 2" in package iglow. Trigger: timer, run once.',
+      '1. Request Reply "RR_Basic_Internet" to receiver RCV_Basic_Internet: GET {{BasicInternetAddress}},',
+      '   default https://basic.example.com/api/items, authentication Basic, credential DUMMY_BASIC_CRED.',
+      '2. Request Reply "RR_Basic_OnPrem" to receiver RCV_Basic_OnPrem: POST http://s4dummy:8000/sap/bc/dummy,',
+      '   proxy On-Premise, location ID DUMMY_LOC, authentication Basic, credential DUMMY_ONPREM_CRED, timeout 30000 ms.',
+      'End: none.'
+    ].join('\n')
+    expect(lint(request)).toEqual([])
+    expect(lint('Create an iFlow: POST to {{OrderReceiver}}\nthen a call to address {{Second}}')).toEqual([])
+  })
+
+  test('on a URL line too: a parameter after credential, location, user or password, or inside a URL, is flagged', () => {
+    const flagged = (t) => lint(t).flatMap((w) => (w.key === 'params' ? [w.message.split(':')[0]] : []))
+    expect(flagged('Create an iFlow: POST https://x.example.com/api, credential {{ErpCredential}}')).toEqual(['{{ErpCredential}}'])
+    expect(flagged('Create an iFlow: POST https://x.example.com/api, proxy On-Premise, location ID {{ErpLocation}}')).toEqual(['{{ErpLocation}}'])
+    expect(flagged('Create an iFlow: GET https://x.example.com/api with user {{User}} and password: {{Pwd}}')).toEqual(['{{User}}, {{Pwd}}'])
+    expect(flagged('Create an iFlow: GET https://{{Host}}/api')).toEqual(['{{Host}}'])
+    expect(flagged('Create an iFlow: GET https://x.example.com/{{Path}}')).toEqual(['{{Path}}'])
+    expect(flagged('Create an iFlow: GET {{Base}}/orders, url of the shop')).toEqual(['{{Base}}'])
+    // a whole URL stays fine
+    expect(flagged('Create an iFlow: GET {{ShopURL}}, default https://x.example.com/api')).toEqual([])
+  })
+
+  test('a parameter elsewhere is still flagged, e.g. as the credential name', () => {
+    expect(lint('Create an iFlow: GET {{Orders}}, authentication Basic, credential {{ErpCredential}}').map((w) => w.message)).toEqual([
+      '{{ErpCredential}}: parameters work only as the whole URL of an HTTP receiver. Use literal values elsewhere.'
+    ])
+  })
+})
+
 describe('prompt guide: small flow (Users Summary)', () => {
   test('both requests pass the pre-send check (package, trigger and authentication get defaults)', () => {
     expect(lint(read('scripts/measure/users-summary-request.md'))).toEqual([])

@@ -51,6 +51,13 @@ sap.ui.define([], () => {
     /\bhttps?:\/\/[^/\s:@]+:[^/\s@]+@/i
   ]
 
+  // Where a {{Param}} is a receiver URL: a line about a URL, or a position right after an HTTP method or "address"
+  const URL_LINE = /\burls?\b|https?:\/\//i
+  const URL_POSITION = /(\b(GET|POST|PUT|PATCH|DELETE)(\s+to)?|\b(address|url|endpoint)\s*[:=]?)\s*$/i
+  // Never a receiver URL, even on a URL line: right after a credential field, or part of a URL
+  const NOT_URL_FIELD = /\b(credential(\s+name)?|location(\s+id)?|user(\s*name)?|password)\s*[:=]?\s*$/i
+  const IN_URL = (before, after) => /(:\/\/|\/)$/.test(before) || after.startsWith('/')
+
   // Quoted text is data or a description, not a step: "REPLACE WITH Router ..." may span lines (up to 600 characters)
   const stripQuoted = (text) => text.replace(/`[^`]{0,600}`/g, ' ').replace(/"[^"]{0,600}"/g, ' ').replace(/'[^'\n]*'/g, ' ')
 
@@ -133,10 +140,21 @@ sap.ui.define([], () => {
     const steps = estimateSteps(message)
     if (steps > MAX_STEPS) warn('steps', `About ${steps} steps — v1 allows at most ${MAX_STEPS} in the main flow. Merge Content Modifiers or move logic into one Groovy script.`)
 
+    // {{…}} is a receiver URL on a line about a URL, or right after an HTTP method ("GET {{X}}",
+    // "POST to {{X}}") or "address/url/endpoint"; never right after a credential field
+    // ("credential {{X}}") or as part of a URL ("https://{{Host}}/api"): only a whole URL can be a parameter
     const outside = stripQuoted(message)
       .split('\n')
-      .filter((l) => /\{\{[^}]*\}\}/.test(l) && !/\burls?\b|https?:\/\//i.test(l))
-      .flatMap((l) => l.match(/\{\{[^}]*\}\}/g))
+      .flatMap((l) =>
+        [...l.matchAll(/\{\{[^}]*\}\}/g)]
+          .filter((m) => {
+            const before = l.slice(0, m.index)
+            const after = l.slice(m.index + m[0].length)
+            if (NOT_URL_FIELD.test(before) || IN_URL(before, after)) return true
+            return !URL_LINE.test(l) && !URL_POSITION.test(before)
+          })
+          .map((m) => m[0])
+      )
     if (outside.length) warn('params', WARNINGS.params([...new Set(outside)]), [...new Set(outside)])
 
     return warnings
