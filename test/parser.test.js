@@ -182,6 +182,29 @@ describe('routed flows (phase 1b): what the spec can hold, and what not', () => 
     expect(r.routed.steps[1].routes.at(-1).name).toBe('Done') // the default route last
   })
 
+  test('one route runs on to the end, the others end: an update keeps it as continuing (main line and local process)', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const router = (name, otherEnd) => ({
+      type: 'router',
+      name,
+      expressionType: 'NonXML',
+      routes: [
+        { name: `${name}_Stop`, condition: "${property.x} = 's'", end: otherEnd },
+        { name: `${name}_Go`, default: true }
+      ]
+    })
+    const shapes = baseSpec({
+      steps: [cm('Prepare'), router('Main', { event: 'escalation', name: 'EE_Stop', category: 'RoutingConditionNotMet' }), cm('After'), { type: 'processCall', name: 'PC', process: 'L' }],
+      localProcesses: [{ name: 'L', steps: [cm('L1'), router('Local', { event: 'message', name: 'End_Stop' }), cm('L_After')] }]
+    })
+    const parsed = await parse((await build(shapes)).zipBase64)
+    expect(parsed.routed.steps.map((s) => s.name)).toEqual(['Prepare', 'Main', 'After', 'PC'])
+    const r = specFromParsed(parsed, { packageId: shapes.packageId })
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps).toEqual(shapes.steps)
+    expect(r.spec.localProcesses).toEqual(shapes.localProcesses)
+  })
+
   test('a route that goes back to an earlier step is not held: Import keeps the main path and says why', async () => {
     const zip = await JSZip.loadAsync(Buffer.from((await build(spec)).zipBase64, 'base64'))
     const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))

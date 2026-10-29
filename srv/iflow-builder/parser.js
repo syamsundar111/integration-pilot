@@ -333,7 +333,7 @@ function mainPath({ startNode, nodes, flows }) {
  * Terminate End): { unsupported: reason }.
  * @returns {{ steps: object[], endNode: Element|null } | { unsupported: string }}
  */
-function routedFlow({ startNode, nodes, flows }, stepAt) {
+function routedFlow({ startNode, nodes, flows }, stepAt, { local = false } = {}) {
   const out = (id) => (flows[id] || []).filter((f) => nodes[f.target])
   const label = (n) => n.getAttribute('name') || n.getAttribute('id')
   const fail = (unsupported) => ({ unsupported })
@@ -400,7 +400,18 @@ function routedFlow({ startNode, nodes, flows }, stepAt) {
     const uses = {}
     for (const r of routes) for (const x of new Set(r.path)) uses[x] = (uses[x] || 0) + 1
     for (const r of routes) r.join = r.path.find((x) => uses[x] > 1) ?? (r.stop || null)
-    const continuing = routes.filter((r) => r.join)
+    let continuing = routes.filter((r) => r.join)
+    // no route continues, but one runs on to the line's end: on the main line the only route that ends with a Message
+    // End, in a local process (where every End is plain) the default route. That route is the one that continues (the
+    // builder writes both shapes alike; this is the spec's usual one, and an update keeps it)
+    if (!continuing.length) {
+      const toMessageEnd = routes.filter((r) => r.endNode && endKind(r.endNode) === 'message')
+      const runsOn = local ? toMessageEnd.find((r) => r.f.id === n.getAttribute('default')) : toMessageEnd.length === 1 ? toMessageEnd[0] : null
+      if (runsOn) {
+        runsOn.join = runsOn.endNode.getAttribute('id')
+        continuing = [runsOn]
+      }
+    }
     const join = continuing[0]?.join || null
     if (continuing.some((r) => r.join !== join)) return fail(`the routes of ${label(n)} do not join again at one step`)
     for (const r of routes) {
@@ -664,7 +675,7 @@ async function parse(input) {
         const ends = w.order.filter((n) => n.localName === 'endEvent')
         const linear = w.linear && ends.length <= 1
         // a local process with routers, as the spec holds it (like the main line), or { unsupported }
-        const routed = linear ? null : routedFlow(w, stepAt)
+        const routed = linear ? null : routedFlow(w, stepAt, { local: true })
         const routable = routed && !routed.unsupported
         // end kinds of every end event: 'message' for a plain End; an Error or Escalation End otherwise
         const endKinds = [...new Set(ends.map(endKind))]
