@@ -10,7 +10,8 @@
  *        [--defaults] [--label before] [--max-turns 5] [--out results.jsonl]
  *        [--request scripts/measure/users-summary-improved-request.md] [--attach a.groovy,b.groovy]
  *
- * --defaults sends the session defaults (package, timer, auth note) with every turn.
+ * --defaults: only a label now; the chat API takes no session defaults since the panel was removed (dd992ad), the
+ *   app applies package, trigger and authentication defaults itself.
  * --request replaces the original request; --attach sends files with the first message.
  * Read-only on the tenant: proposals stay PENDING; nothing is approved.
  */
@@ -44,12 +45,6 @@ const ATTACH = (opt('attach', '') || '').split(',').filter(Boolean).map((f) => (
 // answers to clarifying questions: the Users Summary answers for the default request, else the generic follow-up
 const ANSWERS = opt('request') ? FOLLOW_UP : fs.readFileSync(path.join(DIR, 'users-summary-answers.md'), 'utf8')
 
-const DEFAULTS = {
-  packageId: 'IntegrationPilot.Demo',
-  timer: 'once',
-  authNote: 'Both receivers (RCVR_Users, RCVR_Todos) need no authentication; keep authType None.'
-}
-
 async function call(method, url, body) {
   const res = await fetch(API + url, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
   const data = await res.json().catch(() => ({}))
@@ -58,7 +53,7 @@ async function call(method, url, body) {
 }
 
 async function runTurn(sessionId, message) {
-  const body = { message, ...(sessionId && { sessionId }), ...(flag('defaults') && { defaults: DEFAULTS }), ...(!sessionId && ATTACH.length && { attachments: ATTACH }) }
+  const body = { message, ...(sessionId && { sessionId }), ...(!sessionId && ATTACH.length && { attachments: ATTACH }) }
   const started = await call('POST', '/chat', body)
   let seen = 0
   for (;;) {
