@@ -1,0 +1,26 @@
+Create iFlow Ref_Persistence.
+
+Main integration process:
+1. Start Timer 1 - Timer start event, Run Once.
+2. CM_Prepare - Content Modifier. Property entryId = constant DUMMY-001.
+   Body = <Entry><id>DUMMY-001</id></Entry>
+3. DS_Write - Data Store Write: Data Store Name DUMMY_DS,
+   Visibility Integration Flow, Entry ID ${property.entryId},
+   Retention Threshold for Alerting 2 days, Expiration Period 90 days,
+   Encrypt Stored Message checked, Overwrite Existing Message checked.
+4. DS_Get - Data Store Get: Data Store Name DUMMY_DS,
+   Entry ID ${property.entryId}, Delete On Completion unchecked,
+   Throw Exception on Missing Entry unchecked.
+5. DS_Select - Data Store Select: Data Store Name DUMMY_DS,
+   Number of Polled Messages 10, Delete On Completion unchecked.
+6. DS_Delete - Data Store Delete: Data Store Name DUMMY_DS,
+   Entry ID ${property.entryId}.
+7. IPC_Once - Idempotent Process Call to local integration process LIP_Once:
+   Message ID ${property.entryId}, Skip Process Call for Duplicates checked.
+8. SND_Queue - Send step to receiver RCV_Queue, JMS adapter:
+   Queue Name DUMMY_QUEUE_OUT, Retention Threshold for Alerting 2 days,
+   Expiration Period 90 days, Encrypt Stored Message checked.
+9. End - Message End.
+
+Local integration process LIP_Once:
+Start -> CM_Processed (Content Modifier, property processed = constant true) -> End.

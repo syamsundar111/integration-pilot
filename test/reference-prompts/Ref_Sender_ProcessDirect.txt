@@ -1,0 +1,8 @@
+Create iFlow Ref_Sender_ProcessDirect.
+
+Sender: ProcessDirect adapter, Address /dummy/pd/orders.
+
+Main integration process:
+1. Start - Message start event, connected to the ProcessDirect sender.
+2. CM_Mark - Content Modifier, property iFlowName = constant Ref_Sender_ProcessDirect.
+3. End - Message End.

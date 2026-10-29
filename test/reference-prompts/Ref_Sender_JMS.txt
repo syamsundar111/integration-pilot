@@ -1,0 +1,9 @@
+Create iFlow Ref_Sender_JMS.
+
+Sender: JMS adapter, Queue Name DUMMY_QUEUE_IN, Retry Interval 1 minute,
+Exponential Backoff checked, Maximum Retry Interval 60 minutes.
+
+Main integration process:
+1. Start - Message start event, connected to the JMS sender.
+2. CM_Mark - Content Modifier, property iFlowName = constant Ref_Sender_JMS.
+3. End - Message End.

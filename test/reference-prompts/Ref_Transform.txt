@@ -1,0 +1,18 @@
+Create iFlow Ref_Transform.
+
+Main integration process:
+1. Start Timer 1 - Timer start event, Run Once.
+2. CM_SetBody - Content Modifier. Body =
+   <items><item><id>1</id><name>A</name></item><item><id>2</id><name>B</name></item></items>
+3. XV_Validate - XML Validator: XML Schema DummyItems.xsd (a matching dummy XSD),
+   Prevent Exception on Failure unchecked.
+4. FLT_Item - Filter: XPath /items/item[id='1'], Value Type Node.
+5. CNV_XmlToCsv - XML to CSV Converter: Path to Source Element /item,
+   Field Separator comma, Include Field Name as Headers checked.
+6. CNV_CsvToXml - CSV to XML Converter: XML Schema DummyItem.xsd (a matching
+   dummy XSD), Field Separator comma, Exclude First Line Header checked.
+7. ENC_Base64 - Encoder: Base64 Encode.
+8. DEC_Base64 - Decoder: Base64 Decode.
+9. ENC_Zip - Encoder: ZIP Compression.
+10. DEC_Zip - Decoder: ZIP Decompression.
+11. End - Message End.

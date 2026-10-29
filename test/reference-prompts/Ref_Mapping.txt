@@ -1,0 +1,14 @@
+Create iFlow Ref_Mapping.
+
+The Message Mapping artifact MM_DummyOrderToNotif already exists in the same package.
+It maps source root Order (id, text) to target root Notification (externalId, shortText):
+id -> externalId, text -> shortText. Refer to it; don't create a new mapping.
+
+Main integration process:
+1. Start Timer 1 - Timer start event, Run Once.
+2. CM_SetBody - Content Modifier. Body = <Order><id>1</id><text>Test</text></Order>
+3. MM_UseArtifact - Message Mapping step that references the artifact
+   MM_DummyOrderToNotif (not a mapping stored inside the iFlow).
+4. XSLT_Dummy - XSLT Mapping step using resource DummyTransform.xsl,
+   an identity transform.
+5. End - Message End.

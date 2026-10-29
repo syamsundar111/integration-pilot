@@ -1,0 +1,23 @@
+Create iFlow Ref_Multicast_Enrich.
+
+Main integration process:
+1. Start Timer 1 - Timer start event, Run Once.
+2. CM_SetBody - Content Modifier. Body = <Order><id>1</id></Order>
+3. MC_Parallel - Parallel Multicast with two branches:
+   Branch 1 -> CM_BranchA (property branch = constant A)
+   Branch 2 -> CM_BranchB (property branch = constant B)
+   Both branches -> JN_Parallel (Join) -> GA_Parallel (Gather: Incoming Format
+   XML (Different Format), Aggregation Algorithm Combine).
+4. MC_Sequential - Sequential Multicast with two branches:
+   Branch 1 -> CM_SeqA, Branch 2 -> CM_SeqB,
+   both -> JN_Sequential (Join) -> GA_Sequential (Gather: XML (Different Format),
+   Combine).
+5. CE_Lookup - Content Enricher, Aggregation Algorithm Combine, connected to
+   receiver RCV_Lookup with the OData V2 adapter:
+   Address https://odata.example.com/sap/opu/odata/sap/ZDUMMY_SRV,
+   Authentication Basic, Credential Name DUMMY_ODATA_CRED,
+   Operation Query (GET), Resource Path Products.
+6. PE_File - Poll Enrich, connected to sender RCV_PollFile with the SFTP adapter:
+   Address sftp.example.com:22, Directory /dummy/lookup, File Name lookup.xml,
+   Authentication Public Key, User Name DUMMY_USER, Private Key Alias DUMMY_KEY.
+7. End - Message End.

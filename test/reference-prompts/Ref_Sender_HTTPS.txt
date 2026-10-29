@@ -1,0 +1,15 @@
+Create iFlow Ref_Sender_HTTPS.
+
+Sender: HTTPS adapter, Address /dummy/orders, Authorization User Role,
+User Role ESBMessaging.send, CSRF Protected unchecked.
+
+Main integration process:
+1. Start - Message start event, connected to the HTTPS sender.
+2. CM_Mark - Content Modifier, property iFlowName = constant Ref_Sender_HTTPS.
+3. End - Message End.
+
+Exception subprocess ESP_Errors:
+Error Start -> CM_ErrorResponse (Content Modifier:
+  header CamelHttpResponseCode = constant 500,
+  header Content-Type = constant application/json,
+  body {"error": "${exception.message}"}) -> End Message.

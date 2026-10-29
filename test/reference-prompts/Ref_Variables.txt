@@ -1,0 +1,22 @@
+Create iFlow Ref_Variables.
+
+Main integration process:
+1. Start Timer 1 - Timer start event, Run Once.
+2. CM_SetBody - Content Modifier. Header DummyHeader = constant H1.
+   Property inputProp = constant P1.
+   Body = <root><value>42</value></root>
+3. CM_ReadSources - Content Modifier with these exchange properties:
+   p_global    Source type Global Variable, value DUMMY_GLOBAL_VAR
+   p_local     Source type Local Variable, value DUMMY_LOCAL_VAR
+   p_header    Source type Header, value DummyHeader
+   p_property  Source type Property, value inputProp
+   p_xpath     Source type XPath, value /root/value, data type java.lang.String
+   p_constant  Source type Constant, value ABC
+   p_expr      Source type Expression, value ${date:now:yyyy-MM-dd HH:mm:ss}
+   p_param     Source type Constant, value = externalized parameter {{DummyParam}}
+               with value dummy-value; Default Value column = default-value
+4. WV_Variables - Write Variables step with two rows:
+   DUMMY_GLOBAL_VAR  Type Property, value p_constant, Global Scope checked
+   DUMMY_LOCAL_VAR   Type XPath, value /root/value, data type java.lang.String,
+                     Global Scope unchecked
+5. End - Message End.

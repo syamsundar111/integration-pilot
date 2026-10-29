@@ -1,0 +1,24 @@
+Create iFlow Ref_Router_Ends.
+
+Main integration process:
+1. Start Timer 1 - Timer start event, recurring every 15 minutes, all day,
+   time zone UTC.
+2. CM_SetInput - Content Modifier. Property routeKey = constant A.
+   Body = <root><type>X</type></root>
+3. RT_NonXml - Router; all routes use expression type Non-XML:
+   - Route R_Continue: condition ${property.routeKey} = 'A' -> RT_Xml
+   - Route R_Escalate: condition ${property.routeKey} = 'B'
+     -> Escalation End EE_Route
+   - Route R_Default: default route -> Error End ERR_Route
+4. RT_Xml - Router; all routes use expression type XML:
+   - Route R_TypeX: condition /root/type = 'X' -> CM_RouteX
+   - Route R_Other: default route -> CM_RouteOther
+5. CM_RouteX - Content Modifier, property route = constant X.
+6. CM_RouteOther - Content Modifier, property route = constant OTHER.
+7. CM_Join - Content Modifier, property joined = constant true.
+   Both CM_RouteX and CM_RouteOther connect to CM_Join (the two routes join again).
+8. End - Message End after CM_Join.
+
+Exception subprocess ESP_Errors:
+Error Start -> CM_ErrorInfo (Content Modifier, property errorText =
+expression ${exception.message}) -> Escalation End EE_Exception.

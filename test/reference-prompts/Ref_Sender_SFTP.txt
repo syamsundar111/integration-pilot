@@ -1,0 +1,11 @@
+Create iFlow Ref_Sender_SFTP.
+
+Sender: SFTP adapter, Address sftp.example.com:22, Proxy Type Internet,
+Directory /dummy/in, File Name *.xml, Authentication Public Key,
+User Name DUMMY_USER, Private Key Alias DUMMY_KEY, Post-Processing Delete File,
+polling every 15 minutes, time zone UTC.
+
+Main integration process:
+1. Start - Message start event, connected to the SFTP sender.
+2. CM_Mark - Content Modifier, property iFlowName = constant Ref_Sender_SFTP.
+3. End - Message End.

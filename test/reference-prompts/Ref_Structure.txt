@@ -1,0 +1,22 @@
+Create iFlow Ref_Structure.
+
+Main integration process:
+1. Start Timer 1 - Timer start event, Run Once.
+2. CM_SetBody - Content Modifier.
+   Body = <orders><order><id>1</id></order><order><id>2</id></order></orders>
+3. ITSPL_Orders - Iterating Splitter: expression type XPath, //order, grouping 1,
+   streaming on, stop on exception off.
+4. PC_HandleOrder - Process Call to local integration process LIP_HandleOrder.
+5. GA_Orders - Gather: incoming format XML (Same Format),
+   aggregation algorithm Combine at XPath, source //order, destination /orders.
+6. LPC_FetchPages - Looping Process Call to local integration process LIP_FetchPage,
+   condition expression ${property.hasMore} = 'true', max. iterations 5.
+7. GSPL_Orders - General Splitter: expression type XPath, /orders/order, grouping 1,
+   streaming on, stop on exception on, parallel processing off.
+8. End - Message End.
+
+Local integration process LIP_HandleOrder:
+Start -> CM_MarkOrder (Content Modifier, header orderId = XPath /order/id) -> End.
+
+Local integration process LIP_FetchPage:
+Start -> CM_SetHasMore (Content Modifier, property hasMore = constant false) -> End.

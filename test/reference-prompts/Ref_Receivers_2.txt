@@ -1,0 +1,24 @@
+Create iFlow Ref_Receivers_2.
+
+Main integration process:
+1. Start Timer 1 - Timer start event, Run Once.
+2. CM_Prepare - Content Modifier. Body = <Order><id>1</id></Order>
+3. RR_OData - Request Reply to receiver RCV_OData, OData V2 adapter:
+   Address https://odata.example.com/sap/opu/odata/sap/ZDUMMY_SRV,
+   Proxy Type Internet, Authentication Basic, Credential Name DUMMY_ODATA_CRED,
+   Operation Query (GET), Resource Path Products, Query Options $top=10.
+4. RR_Rfc - Request Reply to receiver RCV_Rfc, RFC adapter:
+   Destination DUMMY_RFC_DEST.
+5. SND_Idoc - Send step to receiver RCV_Idoc, IDoc adapter:
+   Address http://s4dummy:8000/sap/bc/srt/idoc?sap-client=100,
+   Proxy Type On-Premise, Location ID DUMMY_LOC,
+   Authentication Basic, Credential Name DUMMY_IDOC_CRED.
+6. SND_Sftp - Send step to receiver RCV_Sftp, SFTP adapter:
+   Address sftp.example.com:22, Proxy Type Internet, Directory /dummy/out,
+   File Name order_${date:now:yyyyMMddHHmmss}.xml,
+   Authentication Public Key, User Name DUMMY_USER, Private Key Alias DUMMY_KEY.
+7. RR_Jdbc - Request Reply to receiver RCV_Jdbc, JDBC adapter:
+   JDBC Data Source Alias DUMMY_DS_ALIAS.
+8. RR_ProcessDirect - Request Reply to receiver RCV_PD, ProcessDirect adapter:
+   Address /dummy/pd/orders.
+9. End - Message End.

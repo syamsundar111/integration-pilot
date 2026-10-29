@@ -1,0 +1,33 @@
+Create iFlow Ref_Receivers.
+
+Main integration process, in this order:
+1. Start Timer 1 - Timer start event, Run Once.
+2. CM_Prepare - Content Modifier. Header Content-Type = constant application/json.
+   Body = {"test": true}
+3. RR_Basic - Request Reply to receiver RCV_Basic, HTTP adapter:
+   Address = externalized parameter {{BasicAddress}},
+     default https://basic.example.com/api/items
+   Method GET, Proxy Type Internet, Authentication Basic,
+   Credential Name = externalized parameter {{BasicCredential}},
+     default DUMMY_BASIC_CRED
+   Timeout 60000 ms.
+4. RR_OAuth - Request Reply to receiver RCV_OAuth, HTTP adapter:
+   Address = externalized parameter {{RR_OAuth_Address}},
+     default https://oauth.example.com/api/items
+   Method POST, Proxy Type Internet,
+   Authentication OAuth2 Client Credentials, Credential Name DUMMY_OAUTH_CRED.
+5. RR_OnPrem - Request Reply to receiver RCV_OnPrem, HTTP adapter:
+   Address http://s4dummy:8000/sap/bc/dummy, Method POST,
+   Proxy Type On-Premise, Location ID DUMMY_LOC,
+   Authentication Basic, Credential Name DUMMY_ONPREM_CRED.
+6. RR_Soap - Request Reply to receiver RCV_Soap, SOAP 1.x adapter:
+   Address http://s4dummy:8000/sap/bc/srt/dummy,
+   Proxy Type On-Premise, Location ID DUMMY_LOC,
+   Authentication Basic, Credential Name DUMMY_SOAP_CRED.
+   No WSDL and no operation name.
+7. SND_Alert - Send step to receiver RCV_Mail, Mail adapter:
+   Address smtp.example.com:587, Protection STARTTLS Mandatory,
+   Authentication Plain User/Password, Credential Name DUMMY_MAIL_CRED,
+   From noreply@example.com, To alerts@example.com, Subject Dummy alert,
+   Mail Body ${in.body}, Body MIME type text/plain.
+8. End - Message End.

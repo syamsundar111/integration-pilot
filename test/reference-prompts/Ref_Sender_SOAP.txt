@@ -1,0 +1,10 @@
+Create iFlow Ref_Sender_SOAP.
+
+Sender: SOAP 1.x adapter, Address /dummy/soap, Service Definition Manual,
+Message Exchange Pattern Request-Reply, Authorization User Role,
+User Role ESBMessaging.send.
+
+Main integration process:
+1. Start - Message start event, connected to the SOAP sender.
+2. CM_Mark - Content Modifier, property iFlowName = constant Ref_Sender_SOAP.
+3. End - Message End.
