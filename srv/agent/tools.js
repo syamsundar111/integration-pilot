@@ -147,6 +147,25 @@ function duplicateIflow(ctx, spec, existing, by) {
   }
 }
 
+/**
+ * A list sent as a JSON string that does not parse: the parse error and the text around it, instead of
+ * "send a list" (the model resent the same broken string 8 times when it was not told what is wrong)
+ */
+function brokenJson(field, value) {
+  if (typeof value !== 'string' || !/^\s*[[{]/.test(value)) return null
+  try {
+    JSON.parse(value)
+    return null
+  } catch (e) {
+    const at = Number(/position (\d+)/.exec(e.message)?.[1])
+    const near = Number.isFinite(at) ? ` near …${value.slice(Math.max(0, at - 60), at + 20)}…` : ''
+    return compactInvalid(
+      [{ code: 'NOT_JSON', message: `${field}: sent as a string that is not valid JSON (${e.message})${near}` }],
+      `Send ${field} as a JSON array, not as a string, and check the brackets. Put lookup tables and other JSON values into a Groovy script, not into a property value.`
+    )
+  }
+}
+
 /** A spec sent as a JSON string that does not parse: say where, instead of "must be a JSON object" */
 function unparsableSpec(spec) {
   if (typeof spec !== 'string') return null
@@ -513,6 +532,8 @@ const handlers = {
   },
 
   async editDraftSpec({ ops }, ctx) {
+    const broken = brokenJson('ops', ops)
+    if (broken) return broken
     ops = parseJsonString(ops)
     if (!Array.isArray(ops) || !ops.length) return compactInvalid([{ code: 'NO_OPS', message: 'ops: send a list of edit operations' }])
     const current = await draftOf(ctx)

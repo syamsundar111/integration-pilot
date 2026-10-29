@@ -1167,6 +1167,64 @@ describe('editDraftSpec: building a large spec in parts', () => {
     const { data: session } = await GET(`/api/ChatSessions/${turn.sessionId}`)
     expect(session.draftSpec).toBeNull()
   })
+
+  // review: the model sent ops as a JSON string with one "}" too many (lookup tables as JSON inside a
+  // property value), was told only "send a list of edit operations" and resent it 8 times (~150k tokens)
+  const brokenOps =
+    '[{"op": "replaceStep", "index": 0, "step": {"type": "contentModifier", "name": "CM_InitRun", "properties": [{"name": "CategoryPlannerTable", "type": "constant", ' +
+    '"value": "{\\"Pump Station\\":\\"30\\",\\"SCADA Field Equip\\":\\"190\\"}"}}]}]'
+
+  test('ops sent as a JSON string that does not parse: the parse error and where, not "send a list"', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('editDraftSpec', { ops: brokenOps })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'x' })
+    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result.errors).toEqual([expect.stringMatching(/^NOT_JSON ops: sent as a string that is not valid JSON \(.+\) near ….*190.*…$/)])
+    expect(result.instruction).toMatch(/^Send ops as a JSON array, not as a string, and check the brackets\. Put lookup tables .* into a Groovy script/)
+  })
+
+  test('ops sent as a JSON string that parses: accepted as before', async () => {
+    const ops = JSON.stringify([{ op: 'set', fields: { id: 'Agent_Big_3', name: 'Agent Big 3', packageId: 'PilotReference', trigger: { type: 'timer', mode: 'once' }, end: { type: 'none' } } }])
+    llm.chat.mockResolvedValueOnce(toolCall('editDraftSpec', { ops })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'x' })
+    expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)).toMatchObject({ saved: true, id: 'Agent_Big_3' })
+  })
+})
+
+describe('the same refused call again and again: not run again, the message stops after 3 (review: 8 identical calls, ~150k tokens)', () => {
+  const broken = toolCall('editDraftSpec', { ops: '[{"op": "set"}}]' })
+  const set = toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Repeat', name: 'Agent Repeat', packageId: 'PilotReference', trigger: { type: 'timer', mode: 'once' }, end: { type: 'none' } } }] })
+
+  test('the 2nd identical call is answered without running it; the 3rd stops with what is done and "continue"', async () => {
+    const execute = jest.spyOn(require('../srv/agent/tools'), 'execute')
+    llm.chat.mockResolvedValueOnce(set).mockResolvedValueOnce(broken).mockResolvedValueOnce(broken).mockResolvedValueOnce(broken).mockResolvedValueOnce(answer('never asked'))
+    const turn = await chat({ message: 'x' })
+    const calls = llm.chat.mock.calls.length
+    llm.chat.mockReset() // the unused answer must not leak into later tests
+
+    expect(execute).toHaveBeenCalledTimes(2) // set + the first broken one
+    execute.mockRestore()
+    expect(calls).toBe(4)
+    expect(turn.status).toBe('DONE')
+    expect(turn.text).toMatch(/^I stopped because the same step kept failing: editDraftSpec was refused 3 times with "NOT_JSON ops: /)
+    expect(turn.text).toContain('draft spec Agent_Repeat with 0 steps')
+    expect(turn.text).toContain('send "continue" to resume')
+    expect(turn.events.map((e) => e.label)).toContain('The same call failed repeatedly — stopping')
+  })
+
+  test('a success in between starts the count again (the draft may have changed)', async () => {
+    llm.chat
+      .mockResolvedValueOnce(broken)
+      .mockResolvedValueOnce(broken)
+      .mockResolvedValueOnce(set)
+      .mockResolvedValueOnce(broken)
+      .mockResolvedValueOnce(broken)
+      .mockResolvedValueOnce(answer('gave up myself'))
+    const turn = await chat({ message: 'x' })
+    const results = llm.chat.mock.calls.at(-1)[0].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))
+    expect(results.map((r) => r.errors?.[0]?.split(' ')[0] || 'saved')).toEqual(['NOT_JSON', 'REPEATED_CALL:', 'saved', 'NOT_JSON', 'REPEATED_CALL:'])
+    expect(results[1].instruction).toBe('Do not send it again unchanged. Fix what the error says, or tell the user what blocks you.')
+    expect(turn.text).toBe('gave up myself')
+  })
 })
 
 describe('one call instead of parts', () => {

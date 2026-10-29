@@ -28,6 +28,7 @@ const maxTurnMs = () => Number(process.env.AGENT_MAX_TURN_MS || 3_600_000)
 const STALE_GRACE_MS = 60_000
 const MIN_PROGRESS_TOKENS = 50 // the "~N tokens so far" line appears from this size on
 const MAX_CUT_OFFS = 2 // answers cut off for length per message before the agent gives up
+const MAX_REPEATED_CALLS = 3 // the same refused tool call sent this often (no success in between): the message stops
 const tokenBudget = () => Number(process.env.AGENT_MAX_TOKENS_PER_MESSAGE || 300_000) // input + output tokens per user message
 const CUT_OFF_NOTE =
   'Your previous response was cut off because it reached the output limit; nothing of it was used. Build the spec in parts instead: ' +
@@ -460,13 +461,15 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
   const budget = tokenBudget()
   let stoppedAtBudget = false
   let lastErrors = null // errors of the last failed validation or proposal
+  const refused = new Map() // "<tool> <arguments>" of refused calls in this turn → { times, error }
+  let stuck = null // set when one refused call was sent MAX_REPEATED_CALLS times: the turn stops
   const usageNow = () => {
     const { models, ...counts } = usage
     return { ...counts, durationMs: Date.now() - started, model: [...models].join(', ') || null, tokenBudget: budget, stoppedAtBudget }
   }
 
-  /** What is done and what is left when the token budget stops the message (no model call needed) */
-  const budgetStopText = async () => {
+  /** What is done and what is left when the message is stopped early (no model call needed) */
+  const stopText = async (why) => {
     const { ChatSession } = E()
     const s = await db(user, (tx) => tx.run(SELECT.one.from(ChatSession, sessionId).columns('draftSpec')))
     const draft = s?.draftSpec ? JSON.parse(s.draftSpec).spec : null
@@ -482,7 +485,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
         ? `fix ${lastErrors.length} error(s), e.g. ${lastErrors[0]}, and propose the iFlow`
         : 'complete the spec and propose the iFlow'
     return [
-      `I stopped because this message reached its token budget (${Math.round(usage.totalTokens / 1000)}k of ${Math.round(budget / 1000)}k tokens).`,
+      `I stopped because ${why}.`,
       `Done so far: ${done.length ? done.join('; ') : 'nothing that is kept'}.`,
       `Left: ${left}.`,
       proposed.length ? '' : 'The draft and the scripts are kept: send "continue" to resume where I stopped.'
@@ -518,7 +521,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
       if (usage.totalTokens >= budget) {
         stoppedAtBudget = true
         await emit('info', `Token budget of ${Math.round(budget / 1000)}k reached — stopping`)
-        text = await budgetStopText()
+        text = await stopText(`this message reached its token budget (${Math.round(usage.totalTokens / 1000)}k of ${Math.round(budget / 1000)}k tokens)`)
         break
       }
       if (i > 0) await emit('thinking', 'Thinking…')
@@ -557,6 +560,11 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
 
       if (msg.tool_calls?.length) {
         await runToolCalls(msg.tool_calls, msg.content)
+        if (stuck) {
+          await emit('info', 'The same call failed repeatedly — stopping')
+          text = await stopText(`the same step kept failing: ${stuck.name} was refused ${stuck.times} times with "${stuck.error}"`)
+          break
+        }
         continue
       }
 
@@ -577,7 +585,24 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
       const name = tc.function.name
       const args = parseArgs(tc.function.arguments)
       await emit('tool', toolLabel(name, args))
-      const content = await tools.execute(name, tc.function.arguments, ctx)
+      // a call identical to one refused before in this turn is not run again: the result would be the same
+      const key = `${name} ${tc.function.arguments.trim()}`
+      const before = refused.get(key)
+      let content
+      if (before) {
+        before.times++
+        content = JSON.stringify({
+          valid: false,
+          errors: [`REPEATED_CALL: this ${name} call is identical to one refused before in this message, with: ${before.error}`],
+          instruction: 'Do not send it again unchanged. Fix what the error says, or tell the user what blocks you.'
+        })
+        if (before.times >= MAX_REPEATED_CALLS) stuck = { name, times: before.times, error: before.error }
+      } else {
+        content = await tools.execute(name, tc.function.arguments, ctx)
+        const r = parseArgs(content)
+        if (r.valid === false || r.error) refused.set(key, { times: 1, error: String(r.errors?.[0] || r.error?.message || 'refused').slice(0, 200) })
+        else refused.clear() // something worked: the draft may have changed, so an earlier refused call may now pass
+      }
       turn.push({ role: 'tool', tool_call_id: tc.id, content })
       if (name === 'validateSpec') {
         const r = parseArgs(content)
