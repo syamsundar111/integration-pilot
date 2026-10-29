@@ -80,3 +80,31 @@ in-memory SQLite via `mta-sqlite.yaml` (demo only).
 - `test/system-prompt.test.js` and `test/prompt-guide.test.js` tie `srv/agent/system-prompt.md` and `docs/prompt-guide.md` to the
   builder. When you change a prompt rule, check that what it tells the model still validates and builds.
 - Measurements: `scripts/measure-all.js` (usage in its header) writes to `docs/measurements.md`.
+
+## Builder v2 (branch builder-v2)
+
+Extends the builder beyond the linear spec v1; phases, status and open items: [docs/builder-v2-plan.md](docs/builder-v2-plan.md).
+
+- Reference library: `srv/iflow-builder/reference/Ref_*.zip` plus `MM_DummyOrderToNotif.zip`, one prompt
+  each in `test/reference-prompts/<name>.txt`. Dummy data only (example.com, s4dummy, DUMMY_*).
+- References are built with the iGlow extension in package `iglow`, then corrected and saved in the CPI
+  editor. Never trust AI-written dropdown values: they count only once re-selected in the editor (iGlow
+  wrote invalid source types, Write Variables types and proxy types).
+- Allowed dropdown values come only from the references, per adapter and field (e.g. On-Premise =
+  `sapcc`; Internet = `default` in HTTP/OData/SOAP but `none` in SFTP/Mail). A value seen in only one
+  reference is a warning, not an error.
+- Ignore iGlow extras in references: empty exception subprocesses (Error Start -> Error End) and
+  "Set log headers" steps.
+- Each scheduler is the template for its own component (Timer start event != SFTP adapter scheduler).
+- Parser: the main process is the process without `processType=directCall` that no Process Call calls
+  (older exports lack the property). More than one gives a warning, never a silent choice; the one with
+  a timer or message start is shown.
+
+## Working agreements
+
+- One task per commit. Run `npm test` on each commit on its own (git worktree) before reporting.
+- Stop and report after each step. No commit without the user's OK. Never push.
+- Builder or template changes are committed only after the user has created a test iFlow on the tenant
+  and opened it in the CPI editor without errors.
+- Update this file in the same commit when a change makes a section outdated, e.g. when a phase extends
+  what the spec v1 description under Architecture says.

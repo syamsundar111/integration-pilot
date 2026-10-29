@@ -1,3 +1,7 @@
+> **Superseded** by [builder-v2-plan.md](builder-v2-plan.md), the one list of what is built and which
+> references it needs. The exports below were never made: the `Ref_*` references replaced them. Kept for
+> history only; do not follow it.
+
 # Reference exports for receiver authentication, scheduled timers and ProcessDirect
 
 Integration Pilot builds iFlow XML only from verified CPI exports. These roadmap items need exports
