@@ -3,123 +3,112 @@
     <f:title>
       <f:DynamicPageTitle>
         <f:heading><Title text="Activity" level="H2" /></f:heading>
-        <f:expandedContent><Text text="Every write — from the UI and from approved proposals — successful or not." /></f:expandedContent>
+        <f:expandedContent><Text text="AI usage and every write — from the UI and from approved proposals — successful or not." /></f:expandedContent>
         <f:actions>
+          <!-- one period for the whole page: figures, charts and the log -->
+          <SegmentedButton selectedKey="{view>/days}" selectionChange=".onPeriod">
+            <items>
+              <SegmentedButtonItem key="7" text="7 days" />
+              <SegmentedButtonItem key="30" text="30 days" />
+              <SegmentedButtonItem key="90" text="90 days" />
+            </items>
+          </SegmentedButton>
           <Button text="Refresh" icon="sap-icon://refresh" press=".onRefresh" />
         </f:actions>
       </f:DynamicPageTitle>
     </f:title>
     <f:content>
       <VBox renderType="Bare" class="ipGapM">
-      <!-- AI usage of chat requests (GET /api/usage) -->
-      <Panel headerText="AI usage" expandable="true" expanded="true" class="ipCard" busy="{view>/usageBusy}" busyIndicatorDelay="0">
-        <headerToolbar>
-          <Toolbar style="Clear">
-            <Title text="AI usage" level="H5" />
-            <ToolbarSpacer />
-            <SegmentedButton selectedKey="{view>/usageDays}" selectionChange=".loadUsage">
-              <items>
-                <SegmentedButtonItem key="7" text="7 days" />
-                <SegmentedButtonItem key="30" text="30 days" />
-                <SegmentedButtonItem key="90" text="90 days" />
-              </items>
-            </SegmentedButton>
-          </Toolbar>
-        </headerToolbar>
-        <MessageStrip text="{= 'AI usage could not be loaded: ' + ${view>/usageError} }" type="Error" showIcon="true" visible="{= !!${view>/usageError} }" class="sapUiSmallMarginBottom" />
-        <!-- the figures share the full width (equal columns, wrapping on narrow screens) -->
-        <HBox renderType="Bare" class="ipUsageKpis">
-          <VBox renderType="Bare"><Label text="Requests" /><Title text="{view>/usage/totals/requests}" level="H3" /><Text text="{= ${view>/usage/totals/failed} + ' failed' }" class="ipSubtle" /></VBox>
-          <VBox renderType="Bare"><Label text="Model calls" /><Title text="{view>/usage/totals/modelCalls}" level="H3" /></VBox>
-          <VBox renderType="Bare"><Label text="Input tokens" /><Title text="{path: 'view>/usage/totals/inputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
-          <VBox renderType="Bare"><Label text="Output tokens" /><Title text="{path: 'view>/usage/totals/outputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
-          <VBox renderType="Bare"><Label text="Tokens per request" /><Title text="{path: 'view>/usage/totals/avgTokensPerRequest', formatter: '.formatter.tokens'}" level="H3" /></VBox>
-          <VBox renderType="Bare">
-            <Label text="Budget per message" />
-            <Title text="{path: 'view>/usage/budget/limit', formatter: '.formatter.tokens'}" level="H3" />
-            <Text text="{parts: ['view>/usage/budget/maxPerRequest', 'view>/usage/budget/maxShare', 'view>/usage/budget/stoppedAtBudget'], formatter: '.budgetText'}" class="ipSubtle" />
-          </VBox>
-        </HBox>
-        <!-- two tables side by side, half the width each; stacked on narrow screens -->
-        <HBox renderType="Bare" class="ipUsageTables sapUiSmallMarginTop">
-          <Table items="{view>/usage/byDay}" noDataText="No chat requests in this period" headerText="Per day">
-            <columns>
-              <Column><Text text="Day" /></Column>
-              <Column hAlign="End"><Text text="Requests" /></Column>
-              <Column hAlign="End"><Text text="Model calls" /></Column>
-              <Column hAlign="End"><Text text="Tokens (in / out)" /></Column>
-            </columns>
-            <items>
-              <ColumnListItem>
-                <cells>
-                  <Text text="{view>day}" />
-                  <Text text="{view>requests}" />
-                  <Text text="{view>modelCalls}" />
-                  <Text text="{parts: ['view>inputTokens', 'view>outputTokens'], formatter: '.inOut'}" />
-                </cells>
-              </ColumnListItem>
-            </items>
-          </Table>
-          <Table items="{view>/usage/byModel}" noDataText="No model calls in this period" headerText="Per model">
-            <columns>
-              <Column width="50%"><Text text="Model" /></Column>
-              <Column hAlign="End"><Text text="Requests" /></Column>
-              <Column hAlign="End"><Text text="Tokens (in / out)" /></Column>
-            </columns>
-            <items>
-              <ColumnListItem>
-                <cells>
-                  <Text text="{view>model}" class="ipMono" />
-                  <Text text="{view>requests}" />
-                  <Text text="{parts: ['view>inputTokens', 'view>outputTokens'], formatter: '.inOut'}" />
-                </cells>
-              </ColumnListItem>
-            </items>
-          </Table>
-        </HBox>
-      </Panel>
+        <!-- AI usage of chat requests (GET /api/usage): figures, tokens per day and per model -->
+        <Panel expandable="true" expanded="true" class="ipCard" busy="{view>/usageBusy}" busyIndicatorDelay="0">
+          <headerToolbar>
+            <Toolbar style="Clear"><Title text="AI usage" level="H5" /></Toolbar>
+          </headerToolbar>
+          <MessageStrip text="{= 'AI usage could not be loaded: ' + ${view>/usageError} }" type="Error" showIcon="true" visible="{= !!${view>/usageError} }" class="sapUiSmallMarginBottom" />
+          <HBox renderType="Bare" class="ipUsageKpis">
+            <VBox renderType="Bare"><Label text="Requests" /><Title text="{view>/usage/totals/requests}" level="H3" /><Text text="{= ${view>/usage/totals/failed} + ' failed' }" class="ipSubtle" /></VBox>
+            <VBox renderType="Bare"><Label text="Model calls" /><Title text="{view>/usage/totals/modelCalls}" level="H3" /></VBox>
+            <VBox renderType="Bare"><Label text="Input tokens" /><Title text="{path: 'view>/usage/totals/inputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
+            <VBox renderType="Bare"><Label text="Output tokens" /><Title text="{path: 'view>/usage/totals/outputTokens', formatter: '.formatter.tokens'}" level="H3" /></VBox>
+            <VBox renderType="Bare"><Label text="Tokens per request" /><Title text="{path: 'view>/usage/totals/avgTokensPerRequest', formatter: '.formatter.tokens'}" level="H3" /></VBox>
+            <VBox renderType="Bare">
+              <Label text="Budget per message" />
+              <Title text="{path: 'view>/usage/budget/limit', formatter: '.formatter.tokens'}" level="H3" />
+              <Text text="{parts: ['view>/usage/budget/maxPerRequest', 'view>/usage/budget/maxShare', 'view>/usage/budget/stoppedAtBudget'], formatter: '.budgetText'}" class="ipSubtle" />
+            </VBox>
+          </HBox>
+          <!-- column charts, half the width each (stacked on narrow screens); they grow with new days and models -->
+          <HBox renderType="Bare" class="ipChartGrid sapUiMediumMarginTop">
+            <VBox renderType="Bare" class="ipChartCard">
+              <Title text="Tokens per day" level="H5" />
+              <VBox id="tokensByDayChart" renderType="Bare" visible="{= ${view>/usage/totals/requests} > 0 }" />
+              <Text text="No chat requests in this period" visible="{= !${view>/usage/totals/requests} }" class="ipSubtle ipChartEmpty" />
+            </VBox>
+            <VBox renderType="Bare" class="ipChartCard">
+              <Title text="Tokens per model" level="H5" />
+              <VBox id="tokensByModelChart" renderType="Bare" visible="{= ${view>/usage/byModel}.length > 0 }" />
+              <Text text="No model calls in this period" visible="{= !${view>/usage/byModel}.length }" class="ipSubtle ipChartEmpty" />
+            </VBox>
+          </HBox>
+        </Panel>
 
-      <Table items="{view>/filtered}" busy="{view>/busy}" busyIndicatorDelay="0" growing="true" growingThreshold="50" class="ipCard" sticky="ColumnHeaders,HeaderToolbar">
-        <headerToolbar>
-          <OverflowToolbar>
-            <SearchField width="16rem" placeholder="Search target or user" liveChange=".onSearch" />
-            <Select selectedKey="{view>/action}" items="{view>/actions}" change=".applyFilter" width="13rem" tooltip="Action">
-              <core:Item key="{view>key}" text="{view>text}" />
-            </Select>
-            <Select selectedKey="{view>/status}" change=".applyFilter" width="9rem" tooltip="Result">
-              <core:Item key="" text="All results" />
-              <core:Item key="SUCCESS" text="Success" />
-              <core:Item key="FAILED" text="Failed" />
-            </Select>
-            <Text text="{= ${view>/filtered}.length + ' entries' }" class="ipSubtle" />
-          </OverflowToolbar>
-        </headerToolbar>
-        <noData>
-          <IllustratedMessage
-            illustrationType="{= ${view>/entries}.length ? 'sapIllus-NoFilterResults' : 'sapIllus-NoActivities' }"
-            title="{= ${view>/entries}.length ? 'No matching entries' : 'No activity yet' }"
-            description="{= ${view>/entries}.length ? 'Adjust the filters.' : 'Create a package, deploy an iFlow or approve a proposal — it will be recorded here.' }"
-          />
-        </noData>
-        <columns>
-          <Column width="9rem"><Text text="When" /></Column>
-          <Column><Text text="Action" /></Column>
-          <Column><Text text="Target" /></Column>
-          <Column minScreenWidth="Tablet" demandPopin="true"><Text text="User" /></Column>
-          <Column width="8rem"><Text text="Result" /></Column>
-        </columns>
-        <items>
-          <ColumnListItem type="{= ${view>details} ? 'Navigation' : 'Inactive' }" press=".onDetails">
-            <cells>
-              <Text text="{path: 'view>createdAt', formatter: '.formatter.relativeTime'}" tooltip="{path: 'view>createdAt', formatter: '.formatter.dateTime'}" />
-              <Text text="{path: 'view>action', formatter: '.formatter.humanize'}" class="sapMTextBold" />
-              <ObjectIdentifier title="{view>targetId}" text="{view>targetType}" />
-              <Text text="{view>user}" />
-              <ObjectStatus text="{view>status}" state="{path: 'view>status', formatter: '.formatter.statusState'}" inverted="true" class="ipNoWrap" />
-            </cells>
-          </ColumnListItem>
-        </items>
-      </Table>
+        <!-- the log: paged on the server, scrolls inside a limited height so the page does not grow -->
+        <Panel expandable="true" expanded="true" class="ipCard">
+          <headerToolbar>
+            <OverflowToolbar style="Clear">
+              <Title text="{= 'Activity log · ' + ${view>/entries}.length + (${view>/more} ? '+' : '') }" level="H5" />
+              <ToolbarSpacer />
+              <SearchField width="16rem" placeholder="Search target or user" search=".onSearch" value="{view>/search}" />
+              <Select selectedKey="{view>/action}" items="{view>/actions}" change=".loadLog" width="13rem" tooltip="Action">
+                <core:Item key="{view>key}" text="{view>text}" />
+              </Select>
+              <Select selectedKey="{view>/status}" change=".loadLog" width="9rem" tooltip="Result">
+                <core:Item key="" text="All results" />
+                <core:Item key="SUCCESS" text="Success" />
+                <core:Item key="FAILED" text="Failed" />
+              </Select>
+            </OverflowToolbar>
+          </headerToolbar>
+          <VBox renderType="Bare" class="ipLogScroll">
+            <Table items="{view>/entries}" busy="{view>/busy}" busyIndicatorDelay="0" sticky="ColumnHeaders">
+              <infoToolbar>
+                <OverflowToolbar visible="{= !!${view>/logError} }" design="Info">
+                  <Text text="{= 'The activity log could not be loaded: ' + ${view>/logError} }" />
+                </OverflowToolbar>
+              </infoToolbar>
+              <noData>
+                <IllustratedMessage
+                  illustrationType="{= ${view>/filtered} ? 'sapIllus-NoFilterResults' : 'sapIllus-NoActivities' }"
+                  illustrationSize="ExtraSmall"
+                  enableVerticalResponsiveness="true"
+                  title="{= ${view>/filtered} ? 'No matching entries' : 'No activity in this period' }"
+                  description="{= ${view>/filtered} ? 'Adjust the search or the filters.' : 'Create a package, deploy an iFlow or approve a proposal — it will be recorded here.' }"
+                />
+              </noData>
+              <columns>
+                <Column width="9rem"><Text text="When" /></Column>
+                <Column><Text text="Action" /></Column>
+                <Column><Text text="Target" /></Column>
+                <Column minScreenWidth="Tablet" demandPopin="true"><Text text="User" /></Column>
+                <Column width="8rem"><Text text="Result" /></Column>
+              </columns>
+              <items>
+                <ColumnListItem type="{= ${view>details} ? 'Navigation' : 'Inactive' }" press=".onDetails">
+                  <cells>
+                    <Text text="{path: 'view>createdAt', formatter: '.formatter.relativeTime'}" tooltip="{path: 'view>createdAt', formatter: '.formatter.dateTime'}" />
+                    <Text text="{path: 'view>action', formatter: '.formatter.humanize'}" class="sapMTextBold" />
+                    <ObjectIdentifier title="{view>targetId}" text="{view>targetType}" />
+                    <Text text="{view>user}" />
+                    <ObjectStatus text="{view>status}" state="{path: 'view>status', formatter: '.formatter.statusState'}" inverted="true" class="ipNoWrap" />
+                  </cells>
+                </ColumnListItem>
+              </items>
+            </Table>
+            <HBox justifyContent="Center" visible="{view>/more}" class="sapUiSmallMarginTopBottom">
+              <Button text="Load more" icon="sap-icon://drill-down" press=".onLoadMore" busy="{view>/busy}" busyIndicatorDelay="0" />
+            </HBox>
+          </VBox>
+        </Panel>
       </VBox>
     </f:content>
   </f:DynamicPage>

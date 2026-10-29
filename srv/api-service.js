@@ -6,7 +6,7 @@ const proposals = require('./lib/proposals')
 const { audited } = require('./lib/audit')
 const { getStats } = require('./lib/stats')
 const { explain, parsedIflow } = require('./lib/explain')
-const { usageSummary } = require('./lib/usage')
+const { usageSummary, activitySummary } = require('./lib/usage')
 
 /** The running server's git commit, for measurements (BUILD_COMMIT wins; null without .git) */
 const COMMIT = (() => {
@@ -191,6 +191,7 @@ module.exports = class ApiService extends cds.ApplicationService {
 
     this.on('llmHealth', () => llm.health())
     this.on('usage', (req) => usageSummary({ days: req.data.days, user: req.user }))
+    this.on('activitySummary', (req) => activitySummary({ days: req.data.days, user: req.user }))
 
     this.on('chat', (req) => {
       const { sessionId, message, defaults, attachments } = req.data

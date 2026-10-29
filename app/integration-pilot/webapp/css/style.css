@@ -567,16 +567,29 @@
 .ipUsageKpis > * {
   min-width: 0;
 }
-/* the two usage tables: half the width each, a clear gap between them; stacked below 1100px */
-.ipUsageTables {
+/* Activity: two column charts side by side, half the width each; stacked below 1100px */
+.ipChartGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 2rem;
 }
 @media (max-width: 1100px) {
-  .ipUsageTables {
+  .ipChartGrid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+.ipChartCard {
+  min-width: 0;
+}
+.ipChartEmpty {
+  display: block;
+  padding: 3rem 0;
+  text-align: center;
+}
+/* Activity log: scrolls inside a limited height (column headers stick), so the page does not grow */
+.ipLogScroll {
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 /* Monitor: collapsible sections; the artifact list scrolls inside a limited height, so the message

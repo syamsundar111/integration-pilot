@@ -412,6 +412,17 @@ service ApiService {
   /** GET /api/usage(days=30) — AI usage of chat requests (tokens, model calls) for the Activity page */
   function usage(days : Integer) returns UsageSummary;
 
+  type ActivitySummary {
+    days     : Integer;
+    since    : String;
+    totals   : { writes : Integer; failed : Integer; };
+    byDay    : many { day : String; success : Integer; failed : Integer; };
+    byAction : many { action : String; success : Integer; failed : Integer; count : Integer; };
+  }
+
+  /** GET /api/activitySummary(days=30) — writes per day and per action (audit log), for the Activity charts */
+  function activitySummary(days : Integer) returns ActivitySummary;
+
   // --- History --------------------------------------------------------------
 
   /** GET /api/AuditLog?$orderby=createdAt desc&$top=50 */

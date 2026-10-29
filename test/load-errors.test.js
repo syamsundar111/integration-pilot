@@ -46,6 +46,7 @@ function controller(name, deps) {
     setModel: (m, n) => (models[n] = m),
     getModel: (n) => models[n],
     getRouter: () => ({ getRoute: () => ({ attachPatternMatched: () => {} }) }),
+    byId: (id) => ({ id }),
     showError: jest.fn()
   })
   ctl.onInit()
@@ -118,7 +119,8 @@ describe('Activity AI usage', () => {
   test('a failed load shows the error and clears the old numbers; the audit log still loads', async () => {
     const usage = { totals: { requests: 3, failed: 1 }, byDay: [], byModel: [] }
     const { api, failing } = apiStub({ '/usage': usage, '/AuditLog': [{ action: 'deploy' }] })
-    const { ctl, view } = controller('Activity', [null, null, null, api])
+    const charts = { column: async () => ({}) }
+    const { ctl, view } = controller('Activity', [null, null, null, api, charts])
     ctl.formatter = { humanize: (s) => s }
     ctl.applyFilter = () => {}
     expect(view.getProperty('/usage/totals/failed')).toBe(0) // before the first load

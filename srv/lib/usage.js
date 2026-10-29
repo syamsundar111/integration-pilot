@@ -64,4 +64,39 @@ async function usageSummary({ days = 30, user } = {}) {
   }
 }
 
-module.exports = { usageSummary }
+/**
+ * Activity (audit log) summary for the Activity page charts: writes of the last N days, successful
+ * and failed, one row per day and one per action. Aggregated here, so the page never loads the
+ * whole log to count it.
+ * @returns {Promise<{ days: number, since: string, totals: { writes: number, failed: number }, byDay: object[], byAction: object[] }>}
+ */
+async function activitySummary({ days = 30, user } = {}) {
+  days = Math.min(Math.max(Math.round(Number(days) || 30), 1), MAX_DAYS)
+  const since = new Date(Date.now() - days * 86_400_000).toISOString()
+  const rows = await cds.tx({ user }, (tx) => tx.run(SELECT.from('iflowpilot.AuditLog').columns('action', 'status', 'createdAt').where({ createdAt: { '>=': since } })))
+  const totals = { writes: 0, failed: 0 }
+  const byDay = {}
+  const byAction = {}
+  for (const r of rows) {
+    const failed = r.status === 'FAILED'
+    totals.writes++
+    if (failed) totals.failed++
+    const d = (byDay[String(r.createdAt).slice(0, 10)] ??= { success: 0, failed: 0 })
+    d[failed ? 'failed' : 'success']++
+    const a = (byAction[r.action] ??= { success: 0, failed: 0 })
+    a[failed ? 'failed' : 'success']++
+  }
+  return {
+    days,
+    since,
+    totals,
+    byDay: Object.entries(byDay)
+      .map(([day, c]) => ({ day, ...c }))
+      .sort((a, b) => a.day.localeCompare(b.day)),
+    byAction: Object.entries(byAction)
+      .map(([action, c]) => ({ action, ...c, count: c.success + c.failed }))
+      .sort((a, b) => b.count - a.count || a.action.localeCompare(b.action))
+  }
+}
+
+module.exports = { usageSummary, activitySummary }
