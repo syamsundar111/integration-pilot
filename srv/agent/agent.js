@@ -296,17 +296,47 @@ async function existingIflowAnswer(user, sessionId, message) {
     }
     if (!found) return null
     const where = found.packageId || packageId
+    // an id clash holds on the whole tenant; a name clash only in that package
+    const why = ids.includes(found.id)
+      ? 'iFlow IDs are unique on the whole tenant, so it cannot be created again in another package under this ID.'
+      : 'Names are unique within a package.'
+    const free = await freeName(name, packageId)
     return [
-      `An iFlow **"${found.name || found.id}"** (id \`${found.id}\`) already exists in package \`${where}\`. Nothing has been proposed yet.`,
+      `An iFlow **"${found.name || found.id}"** (id \`${found.id}\`) already exists in package \`${where}\`. ${why} Nothing has been proposed yet.`,
       '',
       'What should I do?',
       `- **Update the existing iFlow**: say "update it" and what to change.`,
-      `- **Create a new iFlow**: tell me the name to use (e.g. "${name} 2").`
-    ].join('\n')
+      free
+        ? `- **Create a new iFlow as "${free.name}"** (id \`${free.id}\`): just say "okay". The package is the one in your message, otherwise the first package; you can change it in the proposal panel.`
+        : null,
+      `- **Use another name**: tell me the name.`
+    ]
+      .filter((l) => l !== null)
+      .join('\n')
   } catch (e) {
     LOG.info(`Check for an existing iFlow '${name}' skipped: ${e.message}`)
     return null
   }
+}
+
+/**
+ * The first of "<name> 2" … "<name> 5" whose id is free on the tenant and whose name is free in the
+ * package of the message; null if none is (or CPI cannot be asked), then the user names one
+ */
+async function freeName(name, packageId) {
+  const inPackage = packageId ? await cpi.listIflows(packageId).catch(() => []) : []
+  for (let n = 2; n <= 5; n++) {
+    const candidate = `${name} ${n}`
+    const id = candidate.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_.-]/g, '')
+    if (inPackage.some((f) => String(f.name || '').trim().toLowerCase() === candidate.toLowerCase())) continue
+    const taken = await cpi.getIflow(id).then(
+      () => true,
+      (e) => (e.status === 404 ? false : null)
+    )
+    if (taken === null) return null
+    if (!taken) return { name: candidate, id }
+  }
+  return null
 }
 
 // --- progress events ------------------------------------------------------------------

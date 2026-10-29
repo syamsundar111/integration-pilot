@@ -1668,7 +1668,9 @@ describe('an iFlow that exists already: ask the user, do not rename silently (re
     expect(lastTool()).toMatchObject({
       valid: false,
       errors: ["IFLOW_EXISTS id: an iFlow 'Orders_In' (\"Orders In\") already exists in package 'PilotReference'"],
-      instruction: expect.stringMatching(/^Do not choose another id or name on your own\. Tell the user .* and ask: update the existing iFlow .* or create a new iFlow, and with which name\?/)
+      instruction: expect.stringMatching(
+        /^Do not choose another id or name on your own\. Tell the user .* and ask: update the existing iFlow .* or create a new iFlow, and with which name\? Suggest a name \("Orders In 2"\); if they agree \("okay", "yes"\), use it without asking again\./
+      )
     })
   })
 
@@ -1790,16 +1792,60 @@ describe('a create request for an existing iFlow is answered before any model ca
     const turn = await chat({ message: 'Create an iFlow "Order Intake".\nTrigger: HTTPS sender with path /orders/intake\nPackage: Demo.Integrations, name "Demo Integrations"' })
     expect(llm.chat).not.toHaveBeenCalled()
     expect(turn.proposals).toEqual([])
-    expect(turn.text).toMatch(/^An iFlow \*\*"Order Intake"\*\* \(id `Order_Intake`\) already exists in package `Demo\.Integrations`\. Nothing has been proposed yet\./)
-    expect(turn.text).toMatch(/Update the existing iFlow.*\n.*Create a new iFlow/)
+    expect(turn.text).toMatch(
+      /^An iFlow \*\*"Order Intake"\*\* \(id `Order_Intake`\) already exists in package `Demo\.Integrations`\. iFlow IDs are unique on the whole tenant, so it cannot be created again in another package under this ID\. Nothing has been proposed yet\./
+    )
+    expect(turn.text).toMatch(/Update the existing iFlow.*\n.*Create a new iFlow as "Order Intake 2"\*\* \(id `Order_Intake_2`\): just say "okay"\..*proposal panel\.\n.*Use another name/)
+  })
+
+  test('without a package in the message the same answer comes (the id is unique on the tenant)', async () => {
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (id === 'Order_Intake') return { id, name: 'Order Intake', packageId: 'Demo.Integrations' }
+      throw notFound()
+    })
+    llm.chat.mockClear()
+    const turn = await chat({ message: 'Create an iFlow "Order Intake".\nTrigger: HTTPS sender with path /orders/intake, JSON in.' })
+    expect(llm.chat).not.toHaveBeenCalled()
+    expect(turn.text).toContain('cannot be created again in another package under this ID')
+    expect(turn.text).toContain('otherwise the first package; you can change it in the proposal panel')
+  })
+
+  test('the suggested name skips ids that are taken; none free or CPI failing: no suggestion, the user names one', async () => {
+    const taken = new Set(['Order_Intake', 'Order_Intake_2', 'Order_Intake_3'])
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (taken.has(id)) return { id, name: id.replace(/_/g, ' '), packageId: 'Demo.Integrations' }
+      throw notFound()
+    })
+    let turn = await chat({ message: 'Create an iFlow "Order Intake"' })
+    expect(turn.text).toContain('**Create a new iFlow as "Order Intake 4"** (id `Order_Intake_4`)')
+
+    for (const n of [4, 5]) taken.add(`Order_Intake_${n}`)
+    turn = await chat({ message: 'Create an iFlow "Order Intake"' })
+    expect(turn.text).not.toContain('Create a new iFlow as')
+    expect(turn.text).toContain('- **Use another name**: tell me the name.')
+
+    cpi.getIflow.mockImplementation(async (id) => {
+      if (id === 'Order_Intake') return { id, name: 'Order Intake', packageId: 'Demo.Integrations' }
+      throw Object.assign(new Error('CPI down'), { status: 503 })
+    })
+    turn = await chat({ message: 'Create an iFlow "Order Intake"' })
+    expect(turn.text).not.toContain('Create a new iFlow as')
   })
 
   test('the same name in the package of the message (another id): asked at once', async () => {
-    cpi.listIflows.mockImplementation(async (pkg) => (pkg === 'Demo.Integrations' ? [{ id: 'OrderIntakeV1', name: 'Order Intake', packageId: pkg }] : []))
+    cpi.listIflows.mockImplementation(async (pkg) =>
+      pkg === 'Demo.Integrations'
+        ? [
+            { id: 'OrderIntakeV1', name: 'Order Intake', packageId: pkg },
+            { id: 'OrderIntakeV2', name: 'order intake 2', packageId: pkg }
+          ]
+        : []
+    )
     llm.chat.mockClear()
     const turn = await chat({ message: 'Create an iFlow "order intake"\nPackage: Demo.Integrations' })
     expect(llm.chat).not.toHaveBeenCalled()
-    expect(turn.text).toContain('(id `OrderIntakeV1`) already exists in package `Demo.Integrations`')
+    expect(turn.text).toContain('(id `OrderIntakeV1`) already exists in package `Demo.Integrations`. Names are unique within a package.')
+    expect(turn.text).toContain('**Create a new iFlow as "order intake 3"** (id `order_intake_3`)') // "order intake 2" is taken in the package
   })
 
   test('a new name, no name at all, or CPI not reachable: the model runs as usual', async () => {

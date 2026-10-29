@@ -142,7 +142,8 @@ function duplicateIflow(ctx, spec, existing, by) {
     ],
     instruction:
       `Do not choose another id or name on your own. Tell the user that "${found.name}" (id ${found.id}) already exists in package ${found.packageId}, ` +
-      'and ask: update the existing iFlow (then call getIflowSpec and proposeIflowUpdate), or create a new iFlow, and with which name? Propose nothing until they answer.'
+      'and ask: update the existing iFlow (then call getIflowSpec and proposeIflowUpdate), or create a new iFlow, and with which name? ' +
+      `Suggest a name ("${found.name} 2"); if they agree ("okay", "yes"), use it without asking again. Propose nothing until they answer.`
   }
 }
 

@@ -164,6 +164,8 @@ describe('system prompt: patterns loaded on demand (review item 6)', () => {
     expect(flat).toMatch(/v1 cannot build ProcessDirect; the HTTPS workaround is public and needs authentication/)
     expect(flat).toMatch(/To update, change, extend or fix an existing iFlow, first call `getPattern` with `updateIflow`/)
     expect(flat).toMatch(/Never call `proposeIflow` for an iFlow that already exists, and never list the changes yourself/)
+    // "okay" to a suggested name is an answer: the name is not asked again
+    expect(flat).toMatch(/If the user agrees to a suggested name \("okay", "yes", "create a new one"\), use that name and the id it gives \(`Order_Intake_2`\) at once; do not ask for the name again/)
     expect(flat).toMatch(/Before proposing or changing it, call `getPattern` with `importedIflow`/)
     expect(flat).not.toMatch(/CSRF Protected/) // moved
     expect(read('updateIflow')).toMatch(/SCRIPT_UNCHANGED/)

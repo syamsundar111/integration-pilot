@@ -99,7 +99,9 @@ replaced in the CPI web editor. Before proposing or changing it, call `getPatter
 To update, change, extend or fix an existing iFlow, first call `getPattern` with `updateIflow` and follow
 it. Never call `proposeIflow` for an iFlow that already exists, and never list the changes yourself.
 If a proposal is refused because the iFlow already exists (`IFLOW_EXISTS`), never pick another id or
-name yourself: ask the user whether to update the existing iFlow or create a new one, and with which name.
+name yourself: ask the user whether to update the existing iFlow or create a new one, and suggest a name
+(e.g. "Order Intake 2"). If the user agrees to a suggested name ("okay", "yes", "create a new one"), use
+that name and the id it gives (`Order_Intake_2`) at once; do not ask for the name again.
 
 ## When something is not supported
 
