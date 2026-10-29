@@ -1,6 +1,6 @@
 /**
  * docs/prompt-guide.md: the worked examples are test cases. The small flow's improved request passes
- * the prompt linter with the session defaults, its expected spec validates and builds with the
+ * the prompt linter, its expected spec validates and builds with the
  * attached scripts, and importing the built iFlow gives the same spec back. The larger examples pass
  * the linter and match the measurement requests.
  */
@@ -17,7 +17,6 @@ const GUIDE = read('docs/prompt-guide.md')
 const FIXTURE = 'test/fixtures/users-summary'
 const spec = JSON.parse(read(`${FIXTURE}/spec.json`))
 const attachments = { 'summarizeUsers.groovy': read(`${FIXTURE}/summarizeUsers.groovy`), 'buildErrorMessage.groovy': read(`${FIXTURE}/buildErrorMessage.groovy`) }
-const defaults = { packageId: spec.packageId, timer: 'once', authNote: 'RCVR_Users and RCVR_Todos need no authentication' }
 
 function loadUi5Module(file) {
   let exported
@@ -35,9 +34,9 @@ const strip = (s) => JSON.parse(JSON.stringify(s, (k, v) => (k === 'description'
 const sortParams = (s) => ({ ...s, parameters: Object.fromEntries(Object.entries(s.parameters).sort()) })
 
 describe('prompt guide: small flow (Users Summary)', () => {
-  test('the first request lacks package and authentication; the improved one passes with the defaults', () => {
-    expect(lint(read('scripts/measure/users-summary-request.md')).map((w) => w.key)).toEqual(['package', 'auth'])
-    expect(lint(example('improved-request'), { defaults })).toEqual([])
+  test('both requests pass the pre-send check (package, trigger and authentication get defaults)', () => {
+    expect(lint(read('scripts/measure/users-summary-request.md'))).toEqual([])
+    expect(lint(example('improved-request'))).toEqual([])
   })
 
   test('the measurement script sends the same improved request', () => {

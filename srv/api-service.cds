@@ -240,13 +240,6 @@ service ApiService {
     createdAt : Timestamp;
   }
 
-  /** Session defaults from the chat panel; sent with each message, stored on the session */
-  type SessionDefaults {
-    packageId : String; // target package id
-    timer     : String; // 'once' = timer, run once after deployment
-    authNote  : String; // receiver authentication to set up after creation
-  }
-
   /** A .groovy or .xsl/.xslt file sent with a chat message (UTF-8 text) */
   type AttachmentInput {
     fileName : String;
@@ -260,12 +253,12 @@ service ApiService {
   }
 
   /**
-   * POST /api/chat { sessionId?, message, defaults?, attachments? } — starts a turn and returns at once
+   * POST /api/chat { sessionId?, message, attachments? } — starts a turn and returns at once
    * (omit sessionId to start a new conversation). Poll GET /api/chat/turns/{turnId}.
-   * defaults replace the session's stored defaults; omit them to keep the stored ones.
+   * Package, trigger and authentication come from the message; what it leaves out gets a default.
    * attachments are stored in the session (same name: replaced); specs reference them by file name.
    */
-  action chat(sessionId : UUID, message : String, defaults : SessionDefaults, attachments : many AttachmentInput) returns TurnStarted;
+  action chat(sessionId : UUID, message : String, attachments : many AttachmentInput) returns TurnStarted;
 
   /**
    * GET /api/chat/turns/{id} (alias of /api/ChatTurns/{id}): status RUNNING|DONE|FAILED|CANCELLED,

@@ -129,11 +129,13 @@ describe('system prompt: review items 1, 2, 4 and 5', () => {
   test('1: sensible defaults, questions only about real decisions, trivial fixes applied', () => {
     expect(flat).not.toMatch(/ask concise questions about what is missing/)
     expect(flat).toMatch(/\*\*Assume sensible defaults; ask only about real decisions\.\*\*/)
-    for (const d of ['end: `none`', 'no exception subprocess unless the user asks', 'JSON in and out unless the user says otherwise', 'none needed when the user says "no authentication"'])
+    expect(flat).toMatch(/\*\*Never ask about the package, the trigger or authentication\*\*/)
+    for (const d of ['end: `none`', 'no exception subprocess unless the user asks', 'JSON in and out unless the user says otherwise', 'authentication: none (`authType: "None"`)'])
       expect(flat).toContain(d)
-    expect(flat).toMatch(/the \*\*trigger\*\*, if neither the message nor the session defaults give it/)
-    expect(flat).toMatch(/the \*\*target package\*\*, if neither the message nor the session defaults give it/)
-    expect(flat).toMatch(/\*\*values only the user can know\*\*: real URLs, field rules/)
+    expect(flat).toMatch(/trigger: `httpsSender` with the address made from the iFlow name in lower case, words joined by `-` \(e\.g\. "Order Intake" -> `\/order-intake`\)/)
+    expect(flat).toMatch(/if they name none, do not look one up: set `packageId` to `NoPackageGiven`/)
+    expect(flat).not.toMatch(/session defaults/i)
+    expect(flat).toMatch(/\*\*values only the user can know\*\*: real\s+URLs, field rules/)
     expect(flat).toMatch(/Apply trivial fixes yourself and say so in one line, without asking: duplicate step names .*package ID characters/)
   })
 

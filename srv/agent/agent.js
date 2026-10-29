@@ -49,7 +49,6 @@ const cutOffKeptNote = (finished) => {
 const HISTORY_LIMIT = 40 // earlier user messages and answers sent back to the model
 const INTERRUPTED = 'Interrupted by server restart — please send your message again.'
 const { toPackageId } = require('../lib/package-id')
-const MAX_AUTH_NOTE = 500
 
 const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 'utf8')
 
@@ -74,36 +73,6 @@ const fail = (status, code, message) => Object.assign(new Error(message), { stat
 /** AbortControllers of turns running in this process */
 const running = new Map()
 
-// --- session defaults ----------------------------------------------------------------
-
-/**
- * Session defaults from the chat panel, checked and trimmed; undefined if none were sent
- * (the stored ones stay), {} to clear them.
- */
-function normalizeDefaults(d) {
-  if (d == null) return undefined
-  const out = {}
-  const packageId = String(d.packageId ?? '').trim()
-  const timer = String(d.timer ?? '').trim()
-  const authNote = String(d.authNote ?? '').trim()
-  if (packageId) {
-    // a Name with underscores or spaces -> its ID, as CPI does ("test_1" -> "test1")
-    const pkg = toPackageId(packageId)
-    if (!pkg.id) throw fail(400, 'INVALID_DEFAULTS', `Default package '${packageId}' has no letters or digits for a package ID`)
-    out.packageId = pkg.id
-    if (pkg.name) out.packageName = pkg.name
-  }
-  if (timer) {
-    if (timer !== 'once') throw fail(400, 'INVALID_DEFAULTS', `Default timer '${timer}' is not supported; v1 only runs once after deployment ('once')`)
-    out.timer = timer
-  }
-  if (authNote) {
-    if (authNote.length > MAX_AUTH_NOTE) throw fail(400, 'INVALID_DEFAULTS', `Default authentication note: at most ${MAX_AUTH_NOTE} characters`)
-    out.authNote = authNote
-  }
-  return out
-}
-
 const ORIGIN_NOTE = { iflow: ', from the existing iFlow', import: ', from the imported iFlow', ai: ', written by you with writeScript' }
 
 /** Attached files as context: names, sizes and how to reference them — never their content */
@@ -126,41 +95,6 @@ function draftContext(draft) {
     'It is the latest spec of the conversation; earlier copies are not repeated in the history. ' +
     'Read it with getDraftSpec only if you need to change it; change it with editDraftSpec; propose it with { "useDraftSpec": true }.'
   )
-}
-
-/** Session defaults as structured context for the model, '' without defaults */
-function defaultsContext(defaults, packageExists) {
-  if (!defaults || !Object.keys(defaults).length) return ''
-  const structured = {
-    ...(defaults.packageId && { packageId: defaults.packageId }),
-    ...(defaults.packageName && { packageName: defaults.packageName }),
-    ...(defaults.timer && { trigger: { type: 'timer', mode: defaults.timer } }),
-    ...(defaults.authNote && { receiverAuthentication: defaults.authNote })
-  }
-  const rules = [
-    defaults.packageId &&
-      `- Use packageId as the spec's packageId. ${
-        packageExists === true
-          ? 'It exists on the tenant: do not call listPackages or listIflows to check it.'
-          : packageExists === false
-            ? 'It does not exist on the tenant yet; the proposal panel lets the user create it. Do not call listPackages to look for it.'
-            : 'Whether it exists was not checked.'
-      }${defaults.packageName ? ` The user named it '${defaults.packageName}': ${toPackageId(defaults.packageName).note} Say this in one line; do not ask about it.` : ''}`,
-    defaults.timer && '- Use this trigger.',
-    defaults.authNote &&
-      '- Create every receiver with authType "None", and tell the user in your summary to set up this authentication in the CPI web editor after creation.'
-  ].filter(Boolean)
-  return `Session defaults (set by the user for this conversation; they override earlier messages; use them and never ask about them):\n${JSON.stringify(structured)}\n${rules.join('\n')}`
-}
-
-/** Whether a package exists on the tenant; undefined when CPI could not be asked */
-async function packageExists(id) {
-  try {
-    await cpi.getPackage(id)
-    return true
-  } catch (e) {
-    return e.status === 404 ? false : undefined
-  }
 }
 
 // --- persistence -------------------------------------------------------------------
@@ -244,14 +178,13 @@ const STATUS_MEANING = {
   FAILED: 'approved, but creating it on the tenant failed'
 }
 
-/** System prompt + live context: date, session defaults and the status of this session's proposals */
+/** System prompt + live context: date and the status of this session's proposals */
 async function systemMessage(user, sessionId, message = '') {
   const { Proposal, ChatSession } = E()
   const { proposals, session } = await db(user, async (tx) => ({
     proposals: await tx.run(SELECT.from(Proposal).where({ session_ID: sessionId }).orderBy('createdAt')),
-    session: await tx.run(SELECT.one.from(ChatSession, sessionId).columns('defaults', 'draftSpec', 'promptSections'))
+    session: await tx.run(SELECT.one.from(ChatSession, sessionId).columns('draftSpec', 'promptSections'))
   }))
-  const defaults = session?.defaults ? JSON.parse(session.defaults) : null
   const files = await attachmentStore.list(user, sessionId)
   const lines = proposals.map((p) => {
     const result = p.result ? JSON.parse(p.result) : {}
@@ -263,7 +196,6 @@ async function systemMessage(user, sessionId, message = '') {
     lines.length
       ? `Proposals in this conversation (current status; it overrides anything said earlier in the conversation):\n${lines.join('\n')}`
       : 'No proposals in this conversation yet.',
-    defaultsContext(defaults, defaults?.packageId ? await packageExists(defaults.packageId) : undefined),
     draftContext(session?.draftSpec ? JSON.parse(session.draftSpec) : null),
     attachmentsContext(files)
   ].filter(Boolean)
@@ -344,11 +276,7 @@ async function existingIflowAnswer(user, sessionId, message) {
   const name = String(message || '').match(CREATE_NAMED)?.[1]?.trim()
   if (!name) return null
   const fromLine = String(message).match(PACKAGE_LINE)?.[1]?.trim()
-  let packageId = fromLine ? toPackageId(fromLine.replace(/^["“]|["”]$/g, '')).id : null
-  if (!packageId) {
-    const s = await db(user, (tx) => tx.run(SELECT.one.from(E().ChatSession, sessionId).columns('defaults')))
-    packageId = s?.defaults ? JSON.parse(s.defaults).packageId : null
-  }
+  const packageId = fromLine ? toPackageId(fromLine.replace(/^["“]|["”]$/g, '')).id : null
   const ids = [...new Set([name.replace(/\s+/g, '_'), name.replace(/\s+/g, '')].map((id) => id.replace(/[^A-Za-z0-9_.-]/g, '')).filter(Boolean))]
   try {
     let found = null
@@ -441,15 +369,12 @@ async function expireStaleTurns(user, sessionId) {
  * Starts a turn and returns immediately; the agent runs in the background.
  * @returns {Promise<{ turnId: string, sessionId: string, status: 'RUNNING' }>}
  */
-async function startTurn({ sessionId, message, defaults, attachments = [], user }) {
+async function startTurn({ sessionId, message, attachments = [], user }) {
   if (!message || !String(message).trim()) throw fail(400, 'EMPTY_MESSAGE', 'Message is empty')
-  const sessionDefaults = normalizeDefaults(defaults)
   ;(attachments || []).forEach(attachmentStore.check) // fail before a new session is created
   sessionId = await ensureSession(user, sessionId, message)
   await expireStaleTurns(user, sessionId)
-  const { ChatTurn, ChatSession } = E()
-  if (sessionDefaults)
-    await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ defaults: Object.keys(sessionDefaults).length ? JSON.stringify(sessionDefaults) : null })))
+  const { ChatTurn } = E()
   if (attachments?.length) await attachmentStore.save(user, sessionId, attachments)
 
   const turnId = cds.utils.uuid()
@@ -674,8 +599,7 @@ async function runTurn({ turnId, sessionId, message, user, signal }) {
 async function importIntoSession({ sessionId, fileName, buffer, packageId, user }) {
   const { ChatSession, ChatTurn } = E()
   if (sessionId) {
-    const s = await db(user, (tx) => ownSession(tx, user, sessionId, ['defaults']))
-    packageId ||= s.defaults ? JSON.parse(s.defaults).packageId : undefined
+    await db(user, (tx) => ownSession(tx, user, sessionId))
     await expireStaleTurns(user, sessionId)
     if (await db(user, (tx) => tx.run(SELECT.one.from(ChatTurn).columns('ID').where({ session_ID: sessionId, status: 'RUNNING' }))))
       throw fail(409, 'TURN_IN_PROGRESS', 'The assistant is still working in this conversation. Wait for it or cancel it, then import.')

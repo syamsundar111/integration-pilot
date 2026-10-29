@@ -440,18 +440,11 @@
 }
 /* below the chat list: never squeezed; the message list above gives way instead */
 .ipPane > .ipFiles,
-.ipPane > .ipDefaults,
 .ipPane > .ipComposer {
   flex: 0 0 auto;
 }
 .ipFiles {
   padding: 0.25rem 0.5rem 0;
-}
-.ipDefaults {
-  border-top: 1px solid var(--sapList_BorderColor);
-}
-.ipDefaults .sapMPanelContent {
-  padding: 0.25rem 0.75rem 0.75rem;
 }
 .ipComposer {
   padding: 0.5rem;
@@ -523,13 +516,6 @@
 .ipNoWrap .sapMObjStatusText {
   white-space: nowrap;
 }
-/* a toolbar label that keeps its full width; the text after it is shortened instead
-   (more specific than the toolbar's own .sapMTBShrinkItem rule, which would shrink it) */
-.sapMTB > .ipNoShrink.sapMTBShrinkItem,
-.ipNoShrink {
-  flex-shrink: 0;
-}
-
 .ipWarnText.sapMText {
   color: var(--sapCriticalTextColor);
   font-size: var(--sapFontSmallSize);

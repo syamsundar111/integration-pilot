@@ -2,30 +2,28 @@ sap.ui.define([], () => {
   'use strict'
 
   /**
-   * Client-side checks of an iFlow request before it is sent (no LLM call): missing package,
-   * trigger or authentication info, step kinds v1 cannot build, too many steps, and {{Param}}
-   * references outside URLs. Each finding costs the user a clarification round or a failed
+   * Client-side checks of an iFlow request before it is sent (no LLM call): step kinds v1 cannot
+   * build, too many steps, unfilled template fields, a package name without a valid ID, and {{Param}}
+   * references outside URLs (a missing package, trigger or authentication gets a default instead). Each finding costs the user a clarification round or a failed
    * proposal, so they are shown as warnings with "Send anyway" / "Edit". A follow-up message is
    * checked together with the earlier ones and shows only what is new since the first message.
    */
 
   const MAX_STEPS = 50
 
-  /** Fill-in template for the empty chat (replaces the starter prompts) */
+  /** Fill-in template for the empty chat (replaces the starter prompts). Trigger, package and
+   * authentication are left out: the assistant defaults them (HTTPS, first package, none) */
   const TEMPLATE = [
     'Create an iFlow.',
-    'Trigger: <timer, run once after deployment — or HTTPS sender with path, e.g. /orders/create>',
     'Steps (in order, at most 50):',
     '1. <step type and name, e.g. Content Modifier "Set Properties": property Source = constant Shop>',
     '2. <…>',
     'Receivers: <name, method and URL of each HTTP call; externalize a URL as {{Name}} with a default>',
-    'Authentication: <None, or method and credential name per receiver>',
-    'Package: <existing package id, or a new id (letters, digits, dots) and name>',
     'Error handling: <exception subprocess: what to set, log or return when a step fails>'
   ].join('\n')
 
   // Unfilled template fields
-  const PLACEHOLDER = /<(timer, run once|step type and name|…|name, method and URL|None, or method|existing package id|exception subprocess:)[^>\n]*>/
+  const PLACEHOLDER = /<(step type and name|…|name, method and URL|exception subprocess:)[^>\n]*>/
 
   const BUILD_REQUEST = /\b(create|build|generate|design|make|propose|new)\b[\s\S]{0,80}\b(i-?flows?|integration flows?|flows?)\b/i
   const FLOW_CHANGE = /\b(create|build|generate|design|propose|add|insert|include|change|update|replace|extend)\b/i
@@ -43,11 +41,6 @@ sap.ui.define([], () => {
     ['write variables', /\bwrite variables?\b/i],
     ['process call', /\b(local )?process call\b/i]
   ]
-
-  const PACKAGE = /\bpackages?\b/i
-  const TRIGGER = /\b(timer|scheduled?|run once|cron|https(?!:\/\/)|http sender|sender|endpoint|called via|trigger(ed)?)\b/i
-  const CALLS_RECEIVER = /https?:\/\/|\{\{|\breceivers?\b|\brequest[- ]reply\b|\b(post|put|patch|send)s?\b[^.\n]{0,60}\b(to|url|endpoint|api)\b/i
-  const AUTH = /\b(auth\w*|oauth\w*|basic|credentials?|certificates?|api[- ]?keys?|saml|bearer|no auth)\b/i
 
   // Quoted text is data or a description, not a step: "REPLACE WITH Router ..." may span lines (up to 600 characters)
   const stripQuoted = (text) => text.replace(/`[^`]{0,600}`/g, ' ').replace(/"[^"]{0,600}"/g, ' ').replace(/'[^'\n]*'/g, ' ')
@@ -101,16 +94,15 @@ sap.ui.define([], () => {
   }
 
   /**
-   * Findings as { key, message, items? }. Missing info and unsupported steps are checked in the
+   * Findings as { key, message, items? }. Unsupported steps are checked in the
    * conversation (all user messages so far); the template, step count and parameters only in the
    * message being sent.
    */
-  function findings(conversation, message, defaults, draft) {
+  function findings(conversation, message) {
     const warnings = []
     const warn = (key, msg, items) => warnings.push({ key, message: msg, ...(items && { items }) })
 
-    // the session default package overrides the message
-    const named = defaults.packageId ? null : (message.match(PACKAGE_QUOTED) || message.match(PACKAGE_WORD) || [])[1]
+    const named = (message.match(PACKAGE_QUOTED) || message.match(PACKAGE_WORD) || [])[1]
     const pkg = toPackageId(named)
     if (pkg.name) {
       if (pkg.id) warnings.push({ key: 'packageId', level: 'info', message: pkg.note })
@@ -119,18 +111,9 @@ sap.ui.define([], () => {
 
     if (PLACEHOLDER.test(message)) warn('template', 'Some template fields are still unfilled (text in <…>). Fill them in or delete those lines.')
 
-    const isBuild = BUILD_REQUEST.test(conversation)
-    if (!isBuild && !FLOW_CHANGE.test(message)) return warnings
-
-    if (isBuild) {
-      // a draft spec (e.g. an imported iFlow) has a trigger and a package; the proposal panel can change the package
-      if (!PACKAGE.test(conversation) && !defaults.packageId && !(draft && draft.packageId))
-        warn('package', 'No target package. Name an existing package id, or a new id (letters, digits, dots) and name — or set it in the session defaults.')
-      if (!TRIGGER.test(conversation) && !defaults.timer && !(draft && draft.trigger))
-        warn('trigger', 'No trigger. Say whether the flow runs once on a timer or is called via HTTPS (with the path) — or set the timer in the session defaults.')
-      if (CALLS_RECEIVER.test(conversation) && !AUTH.test(conversation) && !defaults.authNote)
-        warn('auth', 'No authentication info for the receivers. Say "no authentication", or the method and credential name — or add an auth note in the session defaults.')
-    }
+    // a missing package, trigger or authentication is no warning: the assistant uses defaults
+    // (first package on the tenant, HTTPS trigger, no authentication) and says so
+    if (!BUILD_REQUEST.test(conversation) && !FLOW_CHANGE.test(message)) return warnings
 
     const found = unsupportedIn(conversation)
     if (found.length) warn('unsupported', WARNINGS.unsupported(found), found)
@@ -149,21 +132,20 @@ sap.ui.define([], () => {
 
   /**
    * @param {string} text - the message about to be sent
-   * @param {{ defaults?: { packageId?: string, timer?: string, authNote?: string }, history?: string[], draft?: { trigger?: boolean, packageId?: string } }} [options]
+   * @param {{ history?: string[] }} [options]
    *   history: the earlier user messages of the conversation, oldest first. On a follow-up only the
    *   warnings that are new compared with the first message are returned.
-   *   draft: the conversation's draft spec (e.g. an imported iFlow): its trigger and package count as given.
    * @returns {{ key: string, level?: 'info', message: string }[]} warnings, [] if fine; level 'info'
    *   is information only (e.g. the package ID derived from a Name) and needs no confirmation
    */
-  function lint(text, { defaults = {}, history = [], draft = null } = {}) {
+  function lint(text, { history = [] } = {}) {
     const message = String(text || '')
     const past = history.map((m) => String(m || '')).filter((m) => m.trim())
-    const current = findings([...past, message].join('\n\n'), message, defaults, draft)
+    const current = findings([...past, message].join('\n\n'), message)
     const strip = ({ key, level, message: msg }) => ({ key, ...(level && { level }), message: msg })
     if (!past.length) return current.map(strip)
 
-    const first = findings(past[0], past[0], defaults, draft)
+    const first = findings(past[0], past[0])
     return current
       .flatMap((w) => {
         const before = first.find((f) => f.key === w.key)

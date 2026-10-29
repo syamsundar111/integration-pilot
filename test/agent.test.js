@@ -6,7 +6,7 @@ process.env.LLM_MODEL = 'test/model'
 process.env.LLM_RETRY_BASE_MS = '1'
 process.env.DEPLOY_POLL_INTERVAL_MS = '10'
 process.env.DEPLOY_POLL_TIMEOUT_MS = '300'
-process.env.AGENT_ASK_PACKAGE = 'false' // the package rule has its own tests ('package not given')
+process.env.AGENT_DEFAULT_PACKAGE = 'false' // the default-package rule has its own tests ('package not named')
 
 jest.mock('../srv/lib/llm', () => ({ chat: jest.fn(), health: jest.fn() }))
 jest.mock('../srv/lib/cpi-client', () => {
@@ -98,7 +98,7 @@ describe('agent', () => {
     // the hard limits come first, and the model is told not to print specs or ask for given defaults
     expect(lastCall.messages[0].content).toMatch(/^## Hard limits\n/)
     expect(lastCall.messages[0].content).toContain('Never print the spec JSON in chat')
-    expect(lastCall.messages[0].content).toContain('never ask about them')
+    expect(lastCall.messages[0].content).toContain('Never ask about the package, the trigger or authentication')
     expect(lastCall.tools.map((t) => t.function.name)).toEqual(
       expect.arrayContaining(['listPackages', 'listIflows', 'getIflowDetails', 'getRuntimeStatus', 'getMessageLogs', 'getSupportedSteps', 'validateSpec', 'explainIflow', 'proposeIflow', 'proposePackage'])
     )
@@ -382,16 +382,6 @@ describe('package Name vs ID (manual test 10)', () => {
     expect(data.proposals[0]).toMatchObject({ kind: 'PACKAGE', packageId: 'SalesOrdersEU', spec: { id: 'SalesOrdersEU', name: 'Sales_Orders EU' } })
   })
 
-  test('a default package Name is stored with its ID, and the iFlow proposal creates it with the Name', async () => {
-    const { data, toolResult } = await propose('PkgName_6', 'TEAMEU', { defaults: { packageId: 'TEAM_EU' } })
-    const { data: session } = await GET(`/api/ChatSessions/${data.sessionId}`)
-    expect(JSON.parse(session.defaults)).toMatchObject({ packageId: 'TEAMEU', packageName: 'TEAM_EU' })
-    const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
-    expect(system).toContain("The user named it 'TEAM_EU': Package ID will be TEAMEU (CPI does not allow underscores in IDs).")
-    expect(toolResult.packageNote).toMatch(/approving creates it with the name 'TEAM_EU'/)
-    const { data: stored } = await GET(`/api/Proposals/${data.proposals[0].ID}`)
-    expect(stored).toMatchObject({ packageId: 'TEAMEU', packageName: 'TEAM_EU' })
-  })
 })
 
 describe('proposal execution', () => {
@@ -753,29 +743,15 @@ describe('spec arguments in the wrong shape', () => {
   })
 })
 
-describe('session defaults', () => {
-  test('are stored on the session and sent to the model as structured context', async () => {
-    const defaults = { packageId: 'IntegrationPilot.Demo', timer: 'once', authNote: 'OAuth2 Client Credentials, credential DEMO_OAUTH' }
+describe('package, trigger and authentication have defaults (the session defaults panel was removed)', () => {
+  test('the model is told the defaults and never to ask about them; no session defaults in the context', async () => {
     llm.chat.mockResolvedValueOnce(answer('ok'))
-    const turn = await chat({ message: 'Create the iFlow', defaults })
+    await chat({ message: 'Create the iFlow' })
     const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
-    expect(system).toContain('{"packageId":"IntegrationPilot.Demo","trigger":{"type":"timer","mode":"once"},"receiverAuthentication":"OAuth2 Client Credentials, credential DEMO_OAUTH"}')
-    expect(system).toMatch(/never ask about them/)
-    const { data: session } = await GET(`/api/ChatSessions/${turn.sessionId}`)
-    expect(JSON.parse(session.defaults)).toEqual(defaults)
-
-    // omitted: the stored defaults stay; empty: cleared
-    llm.chat.mockResolvedValueOnce(answer('ok'))
-    await chat({ sessionId: turn.sessionId, message: 'next' })
-    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('"packageId":"IntegrationPilot.Demo"')
-    llm.chat.mockResolvedValueOnce(answer('ok'))
-    await chat({ sessionId: turn.sessionId, message: 'again', defaults: { packageId: '', timer: '', authNote: '' } })
-    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).not.toContain('Session defaults')
-  })
-
-  test('invalid defaults are rejected', async () => {
-    await expect(POST('/api/chat', { message: 'x', defaults: { packageId: '___' } })).rejects.toMatchObject({ response: { status: 400 } })
-    await expect(POST('/api/chat', { message: 'x', defaults: { timer: 'hourly' } })).rejects.toMatchObject({ response: { status: 400 } })
+    expect(system).toContain('Never ask about the package, the trigger or authentication')
+    expect(system).toMatch(/trigger: `httpsSender` with the address made from the iFlow name/)
+    expect(system).toMatch(/set `packageId` to\s+`NoPackageGiven`/)
+    expect(system).not.toContain('Session defaults')
   })
 })
 
@@ -1244,14 +1220,6 @@ describe('fewer and smaller model inputs', () => {
     }
   })
 
-  test('the default package is checked on the tenant, so the model need not list packages', async () => {
-    llm.chat.mockResolvedValueOnce(answer('ok'))
-    await chat({ message: 'x', defaults: { packageId: 'PilotReference' } })
-    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('It exists on the tenant: do not call listPackages or listIflows to check it.')
-    llm.chat.mockResolvedValueOnce(answer('ok'))
-    await chat({ message: 'x', defaults: { packageId: 'Not.There' } })
-    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toContain('It does not exist on the tenant yet')
-  })
 })
 
 describe('token budget per message', () => {
@@ -1508,35 +1476,43 @@ describe('conditional system prompt sections', () => {
   })
 })
 
-describe('package not given (measurement (e): the model chose PilotReference itself)', () => {
-  beforeEach(() => (process.env.AGENT_ASK_PACKAGE = 'true'))
-  afterEach(() => (process.env.AGENT_ASK_PACKAGE = 'false'))
+describe('package not named: the first package on the tenant, no question (the proposal panel can change it)', () => {
+  beforeEach(() => {
+    process.env.AGENT_DEFAULT_PACKAGE = 'true'
+    cpi.listPackages.mockImplementation(async () => [
+      { id: 'PilotReference', name: 'Pilot Reference', shortText: 'x' },
+      { id: 'Second.Pkg', name: 'Second Package', shortText: 'y' }
+    ])
+  })
+  afterEach(() => {
+    process.env.AGENT_DEFAULT_PACKAGE = 'false'
+    cpi.listPackages.mockImplementation(async () => [{ id: 'PilotReference', name: 'Pilot Reference', shortText: 'x' }])
+  })
   const lastToolResult = () => JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
-  const spec = (id) => ({ ...sample, id, name: id })
+  const spec = (id, packageId) => ({ ...sample, id, name: id, packageId })
 
-  test('first message without a package: refused, the model is told to ask with suggestions', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_1') })).mockResolvedValueOnce(answer('Which package should I use?'))
+  test('no package in the message: proposed in the first package on the tenant, with a note; nothing is asked', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_1', 'NoPackageGiven') })).mockResolvedValueOnce(answer('ready'))
     const turn = await chat({ message: 'Every hour get users from https://jsonplaceholder.typicode.com/users and post them to https://httpbin.org/post' })
-    expect(lastToolResult()).toMatchObject({
-      valid: false,
-      errors: ['PACKAGE_NOT_GIVEN packageId: the user did not name a target package and there is no session default'],
-      instruction: expect.stringMatching(/^Nothing was proposed\. Ask the user which package to use, e\.g\. PilotReference \(Pilot Reference\)/)
-    })
-    expect(turn.proposals).toEqual([])
-
-    // the user answers; from the second message on, the proposal goes through
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_1') })).mockResolvedValueOnce(answer('ready'))
-    const next = await chat({ sessionId: turn.sessionId, message: 'Use sensible defaults.' })
-    expect(next.proposals).toEqual([expect.objectContaining({ iflowId: 'Ask_Pkg_1', packageId: 'PilotReference' })])
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Default_Pkg_1', packageId: 'PilotReference' })])
+    expect(lastToolResult()).toMatchObject({ valid: true, packageDefault: expect.stringMatching(/^No package was named, so the first package on the tenant is used: PilotReference \("Pilot Reference"\)\./) })
   })
 
-  test('a package named in the message (ID or name) or a session default is enough', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_2') })).mockResolvedValueOnce(answer('ready'))
-    expect((await chat({ message: 'Build it in package Pilot Reference' })).proposals).toHaveLength(1)
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_3') })).mockResolvedValueOnce(answer('ready'))
-    expect((await chat({ message: 'Build it in PilotReference' })).proposals).toHaveLength(1)
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Ask_Pkg_4') })).mockResolvedValueOnce(answer('ready'))
-    expect((await chat({ message: 'Build it', defaults: { packageId: 'PilotReference' } })).proposals).toHaveLength(1)
+  test('a package the model picked itself is replaced too; one named in the message (ID or name) stays', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_2', 'Second.Pkg') })).mockResolvedValueOnce(answer('ready'))
+    expect((await chat({ message: 'Build it' })).proposals[0].packageId).toBe('PilotReference')
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_3', 'Second.Pkg') })).mockResolvedValueOnce(answer('ready'))
+    expect((await chat({ message: 'Build it in Second.Pkg' })).proposals[0].packageId).toBe('Second.Pkg')
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_4', 'Second.Pkg') })).mockResolvedValueOnce(answer('ready'))
+    expect((await chat({ message: 'Build it in package Second Package' })).proposals[0].packageId).toBe('Second.Pkg')
+  })
+
+  test('the package of an earlier proposal of the conversation stays', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_5', 'Second.Pkg') })).mockResolvedValueOnce(answer('ready'))
+    const first = await chat({ message: 'Build it in Second.Pkg' })
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_6', 'Second.Pkg') })).mockResolvedValueOnce(answer('ready'))
+    const next = await chat({ sessionId: first.sessionId, message: 'one more like it' })
+    expect(next.proposals[0].packageId).toBe('Second.Pkg')
   })
 })
 
@@ -1824,14 +1800,6 @@ describe('a create request for an existing iFlow is answered before any model ca
     const turn = await chat({ message: 'Create an iFlow "order intake"\nPackage: Demo.Integrations' })
     expect(llm.chat).not.toHaveBeenCalled()
     expect(turn.text).toContain('(id `OrderIntakeV1`) already exists in package `Demo.Integrations`')
-  })
-
-  test('the package from the session defaults when the message names none', async () => {
-    cpi.listIflows.mockImplementation(async (pkg) => (pkg === 'PilotReference' ? [{ id: 'Stock1', name: 'Stock Sync', packageId: pkg }] : []))
-    llm.chat.mockClear()
-    const turn = await chat({ message: 'Create an iFlow "Stock Sync" that runs once', defaults: { packageId: 'PilotReference' } })
-    expect(llm.chat).not.toHaveBeenCalled()
-    expect(turn.text).toContain('(id `Stock1`) already exists in package `PilotReference`')
   })
 
   test('a new name, no name at all, or CPI not reachable: the model runs as usual', async () => {

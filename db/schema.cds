@@ -7,7 +7,7 @@ entity ChatSession : cuid, managed {
   titleEdited : Boolean default false; // renamed by the user: automatic names (iFlow of a proposal or import) no longer apply
   keep        : Boolean default false; // kept by the user: never deleted by the inactivity cleanup (srv/agent/agent.js)
   promptSections : String(200); // JSON array of conditional system prompt sections in use; sticky: only grows (srv/agent/agent.js)
-  defaults    : LargeString; // JSON { packageId?, timer?, authNote? }: session defaults from the chat panel
+  defaults    : LargeString; // no longer used (the session defaults panel was removed); kept: SQLite schema evolution cannot drop columns
   draftSpec   : LargeString; // JSON { spec, source, at }: the conversation's working spec (e.g. an imported iFlow); scripts are attachments
   messages    : Composition of many ChatMessage on messages.session = $self;
   attachments : Composition of many Attachment on attachments.session = $self;

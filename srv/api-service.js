@@ -194,9 +194,9 @@ module.exports = class ApiService extends cds.ApplicationService {
     this.on('activitySummary', (req) => activitySummary({ days: req.data.days, user: req.user }))
 
     this.on('chat', (req) => {
-      const { sessionId, message, defaults, attachments } = req.data
+      const { sessionId, message, attachments } = req.data
       if (!message?.trim()) req.reject(400, 'message is required')
-      return agent.startTurn({ sessionId, message, defaults, attachments, user: req.user })
+      return agent.startTurn({ sessionId, message, attachments, user: req.user })
     })
 
     this.on('importIflow', (req) => {

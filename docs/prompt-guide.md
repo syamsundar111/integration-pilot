@@ -49,7 +49,6 @@ Error handling: <exception subprocess: what to set, log or return when a step fa
 
 Before sending, the chat checks the request without calling the model. It warns about:
 
-- a missing package, trigger or authentication (unless set in the session defaults)
 - steps v1 cannot build (router, splitter, gather, join, multicast, XSLT, mapping, SFTP, write variables, process call)
 - more than 25 numbered steps
 - `{{…}}` used anywhere other than a URL
@@ -57,17 +56,17 @@ Before sending, the chat checks the request without calling the model. It warns 
 
 Choose **Edit** to fix the request, or **Send anyway**.
 
-## Set the session defaults
+## Package, trigger and authentication: defaults
 
-Open **Session defaults** above the input and set:
+The assistant never stops to ask for these. What your request leaves out gets a default, and the
+proposal says which:
 
-- **Target package**: the package id. It is used as the spec's package.
-- **Trigger**: *Timer, run once after deployment*, if that is the trigger.
-- **Receiver authentication**: what you will configure after creation, for example
-  *OAuth2 Client Credentials with credential DEMO_OAUTH on all receivers*.
-
-They are sent with every message as structured context, and the assistant does not ask about
-them again.
+- **Package**: the first package on the tenant. Pick another one, or create a new package, in the
+  proposal panel before approving.
+- **Trigger**: an HTTPS sender with a path made from the iFlow name ("Order Intake" ->
+  `/order-intake`). Write "timer, run once" or another path to change it.
+- **Authentication**: none. Receivers are created without authentication; set it up in the CPI web
+  editor after creation if a target system needs it.
 
 ## Attach scripts instead of describing them
 
@@ -127,8 +126,8 @@ precise about the flow, but two things make it more expensive than it needs to b
 
 ### The improved request
 
-1. Set the session defaults: target package `IntegrationPilot.Demo`, timer run once after deployment,
-   and the receiver authentication note (here: none needed).
+1. Name the package and the trigger in the request (`package IntegrationPilot.Demo`, `timer, run once`),
+   or leave them out to get the defaults.
 2. Attach the two scripts `summarizeUsers.groovy` and `buildErrorMessage.groovy` (both are in
    [test/fixtures/users-summary/](../test/fixtures/users-summary/)).
 3. Send the request, which no longer describes the scripts:
@@ -172,7 +171,7 @@ spec with the attached scripts, and an import of the built iFlow back into the s
 An HTTPS-triggered flow that calls the test API four times with Groovy between the calls, posts the
 result to `https://httpbin.org/post`, and answers the caller. Everything is given up front: package,
 trigger, authentication, numbered steps with names, every URL as a parameter with a default, and the
-error handling, so the pre-send check passes without session defaults.
+error handling.
 
 <!-- example:orchestration-request -->
 ```text

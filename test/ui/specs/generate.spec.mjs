@@ -1,6 +1,6 @@
 /**
  * Generate page (and the usage panel on Activity) against the faked backend: request template,
- * pre-send warnings, session defaults, attachments, import, proposal panel (approve, reject with
+ * pre-send warnings, attachments, import, proposal panel (approve, reject with
  * reason, package selection) and the token usage display.
  */
 import fs from 'node:fs'
@@ -99,12 +99,12 @@ describe('Generate page', () => {
 
   it('warns before sending; Edit keeps the text, Send anyway sends', async () => {
     await newChat()
-    const request = 'Create an iFlow that posts the order to https://example.org/orders'
+    const request = 'Create an iFlow that splits the orders with a splitter and posts them to https://example.org/orders'
     await type(request)
     await pressSend()
     const warnings = await warningTexts()
-    expect(warnings).toHaveLength(3)
-    expect(warnings.join('\n')).toMatch(/No target package[\s\S]*No trigger[\s\S]*No authentication info/)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toMatch(/Not supported in v1: splitter/)
 
     await (await button('Edit', true)).press()
     expect(await chat('/input')).toBe(request)
@@ -115,22 +115,15 @@ describe('Generate page', () => {
     await waitForAnswer()
     const messages = await chat('/messages')
     expect(messages[0].kind).toBe('user')
-    expect(messages[1].html).toContain('Fake answer to: Create an iFlow that posts')
+    expect(messages[1].html).toContain('Fake answer to: Create an iFlow that splits')
   })
 
-  it('session defaults silence the warnings and are stored on the session', async () => {
+  it('a request without package, trigger and authentication is sent at once (they get defaults)', async () => {
     await newChat()
-    const panel = await control('defaultsPanel')
-    await panel.setExpanded(true)
-    await (await control('defaultPackage')).setValue('PilotReference')
-    await (await control('defaultTimer')).setSelectedKey('once')
-    await (await control('defaultAuth')).setValue('No authentication')
     await type('Create an iFlow that posts the order to https://example.org/orders')
     await pressSend()
     await waitForAnswer() // no warning dialog in between
-    const session = await api(`/ChatSessions/${await chat('/sessionId')}`)
-    expect(JSON.parse(session.defaults)).toEqual({ packageId: 'PilotReference', timer: 'once', authNote: 'No authentication' })
-    await panel.setExpanded(false)
+    expect((await chat('/messages'))[1].html).toContain('Fake answer to: Create an iFlow that posts')
   })
 
   it('attaches a Groovy file, sends it with the message and removes it', async () => {

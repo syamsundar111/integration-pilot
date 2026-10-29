@@ -18,19 +18,13 @@ const USERS_SUMMARY = fs.readFileSync(path.join(__dirname, '../scripts/measure/u
 const keys = (warnings) => warnings.map((w) => w.key)
 
 describe('prompt linter', () => {
-  test('the Users Summary request only lacks package and authentication', () => {
-    // {{…}} are URLs; the a.–g. lines of the script description are not steps
-    expect(keys(lint(USERS_SUMMARY))).toEqual(['package', 'auth'])
+  test('the Users Summary request passes: {{…}} are URLs, the a.–g. lines of the script description are not steps', () => {
+    expect(lint(USERS_SUMMARY)).toEqual([])
     expect(estimateSteps(USERS_SUMMARY)).toBe(7)
   })
 
-  test('session defaults silence the missing-info warnings', () => {
-    expect(lint(USERS_SUMMARY, { defaults: { packageId: 'IntegrationPilot.Demo', timer: 'once', authNote: 'OAuth2 Client Credentials' } })).toEqual([])
-  })
-
-  test('missing trigger, package and auth on a build request', () => {
-    expect(keys(lint('Create an iFlow that posts the order to https://example.org/orders'))).toEqual(['package', 'trigger', 'auth'])
-    expect(keys(lint('Create an iFlow, timer run once, package Pilot, that posts to https://example.org with no authentication'))).toEqual([])
+  test('a missing trigger, package or authentication is no warning: the assistant uses defaults', () => {
+    expect(lint('Create an iFlow that posts the order to https://example.org/orders')).toEqual([])
   })
 
   test('unsupported step kinds, ignoring quoted text', () => {
@@ -77,15 +71,9 @@ describe('prompt linter', () => {
   describe('follow-up messages (manual test 9)', () => {
     const first = 'Create an iFlow in package Pilot, HTTPS sender /orders, no authentication. Split the orders with a splitter and send them via SFTP, then post to https://example.org/orders.'
 
-    test('the check runs on the whole conversation: no false "no trigger" or "no authentication"', () => {
-      // alone, the follow-up looks like a build request without trigger and auth
-      expect(keys(lint('Build the iFlow and post the result to https://example.org/target'))).toEqual(expect.arrayContaining(['trigger', 'auth']))
-      expect(lint('Build the iFlow and post the result to https://example.org/target', { history: [first] })).toEqual([])
-    })
-
-    test('session defaults count for the whole conversation', () => {
-      const request = 'Create an iFlow that posts the order to https://example.org/orders'
-      expect(lint('Yes, build it', { history: [request], defaults: { packageId: 'P', timer: 'once', authNote: 'none' } })).toEqual([])
+    test('the check runs on the whole conversation: a step kind warned about before is not repeated', () => {
+      expect(keys(lint('Build it with the splitter.'))).toEqual(['unsupported'])
+      expect(lint('Build it with the splitter.', { history: [first] })).toEqual([])
     })
 
     test('unsupported step names in a negation are not flagged', () => {
@@ -106,10 +94,7 @@ describe('prompt linter', () => {
     })
 
     test('only warnings that are new compared with the first message are shown', () => {
-      // missing package was already shown for the first message
-      const noPackage = 'Create an iFlow on a timer that posts to https://example.org/x, no authentication.'
-      expect(keys(lint(noPackage))).toEqual(['package'])
-      expect(lint('Also add a Content Modifier that sets header Source = SF.', { history: [noPackage] })).toEqual([])
+      expect(lint('Also add a Content Modifier that sets header Source = SF.', { history: [first] })).toEqual([])
       // a step kind not named before is new; the ones already warned about are not repeated
       const w = lint('Add a multicast after step 2 and a router.', { history: [first] })
       expect(keys(w)).toEqual(['unsupported'])
@@ -135,9 +120,8 @@ describe('prompt linter', () => {
       expect(w).toEqual([{ key: 'packageId', message: expect.stringMatching(/no letters or digits/) }])
     })
 
-    test('not for data values or when the session default package is set', () => {
+    test('not for data values', () => {
       expect(lint('Create an iFlow on a timer in package P, no auth. Set property packagename = TEAM_EU.')).toEqual([])
-      expect(lint('Create an iFlow in package test_1 on a timer, no auth.', { defaults: { packageId: 'Other' } })).toEqual([])
     })
 
     test('not repeated on follow-ups', () => {
@@ -146,11 +130,9 @@ describe('prompt linter', () => {
     })
   })
 
-  test('an imported draft counts as trigger and package (manual test 15)', () => {
-    const history = ['Import the iFlow from PlantMaintenanceIFlow.zip.']
-    const message = 'Propose the imported iFlow as a new iFlow.'
-    expect(keys(lint(message, { history }))).toEqual(['package', 'trigger']) // without the draft
-    expect(lint(message, { history, draft: { trigger: true, packageId: 'Imported' } })).toEqual([])
+  test('proposing an imported iFlow gives no warning (manual test 15)', () => {
+    expect(lint('Propose the imported iFlow as a new iFlow.', { history: ['Import the iFlow from PlantMaintenanceIFlow.zip.'] })).toEqual([])
   })
+
 })
 

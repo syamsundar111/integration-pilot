@@ -18,14 +18,8 @@ sap.ui.define(
 
     const POLL_MS = 2000
     const PACKAGE_ID = /^[A-Za-z0-9.]+$/ // CPI rejects underscores and other special characters
-    const NO_DEFAULTS = { packageId: '', timer: '', authNote: '' }
     const MIN_SPLIT = 25 // the chat pane takes 25–75 % of the width
     const MAX_SPLIT = 75
-    /** { trigger, packageId } of a stored draft spec (JSON { spec, source, … }), or null */
-    const draftInfo = (draftSpec) => {
-      const spec = draftSpec ? JSON.parse(draftSpec).spec : null
-      return spec ? { trigger: !!spec.trigger, packageId: spec.packageId || '' } : null
-    }
     const MAX_ATTACHMENT_KB = 200
     const MAX_IMPORT_MB = 10
     const ATTACHMENT_NAME = /^([A-Za-z][A-Za-z0-9_]*\.groovy|[A-Za-z][A-Za-z0-9_.-]*\.xslt?)$/
@@ -91,7 +85,6 @@ sap.ui.define(
             writing: false, // approve / retry / package change running: their buttons wait
             packages: [],
             pkg: { editing: false },
-            defaults: { ...NO_DEFAULTS },
             importing: false,
             files: [] // attached files: { fileName, pending, content? } (pending: sent with the next message) or stored { ID, fileName, lines, origin }
           }),
@@ -248,17 +241,6 @@ sap.ui.define(
         }
       },
 
-      /** The draft spec's trigger and package, for the pre-send check */
-      async loadDraft(sessionId) {
-        if (!sessionId) return
-        try {
-          const session = await api.get(`/ChatSessions/${api.seg(sessionId)}${api.q({ $select: 'draftSpec' })}`)
-          if (sessionId === this.chat().getProperty('/sessionId')) this.chat().setProperty('/draft', draftInfo(session.draftSpec))
-        } catch (e) {
-          // the check then works without the draft
-        }
-      },
-
       async loadPackages() {
         try {
           this.chat().setProperty('/packages', await api.get('/Packages'))
@@ -284,9 +266,7 @@ sap.ui.define(
         if (!sessionId) {
           c.setProperty('/messages', [])
           c.setProperty('/proposals', [])
-          c.setProperty('/defaults', { ...NO_DEFAULTS })
           c.setProperty('/files', unsent)
-          c.setProperty('/draft', null)
           this.setActive(null)
           return
         }
@@ -308,11 +288,7 @@ sap.ui.define(
             this.startTurnPolling(running[0].ID, new Date(running[0].createdAt).getTime(), running[0].events || [])
           }
           c.setProperty('/messages', messages)
-          const stored = session.defaults ? JSON.parse(session.defaults) : {}
-          // show the package as the user typed it: a Name ("test_1") is stored with its derived ID
-          c.setProperty('/defaults', { ...NO_DEFAULTS, ...stored, packageId: stored.packageName || stored.packageId || '' })
           c.setProperty('/files', unsent)
-          c.setProperty('/draft', draftInfo(session.draftSpec))
           this.loadAttachments(sessionId)
           c.setProperty('/proposals', proposals)
           this.setActive(proposals[0] ? proposals[0].ID : null)
@@ -325,9 +301,7 @@ sap.ui.define(
             c.setProperty('/sessionId', '')
             c.setProperty('/messages', [])
             c.setProperty('/proposals', [])
-            c.setProperty('/defaults', { ...NO_DEFAULTS })
             c.setProperty('/files', [])
-            c.setProperty('/draft', null)
             this.setActive(null)
             this.showError(e, 'Could not load the conversation')
           }
@@ -462,9 +436,8 @@ sap.ui.define(
         const message = (text || '').trim()
         if (!message || c.getProperty('/turn') || c.getProperty('/starting')) return
         const view = this._view // the conversation this message belongs to
-        const defaults = this.currentDefaults()
         const history = c.getProperty('/messages').filter((m) => m.kind === 'user').map((m) => m.text) // checked as one conversation
-        const findings = promptLint.lint(message, { defaults, history, draft: c.getProperty('/draft') })
+        const findings = promptLint.lint(message, { history })
         const infos = findings.filter((w) => w.level === 'info')
         if (findings.length > infos.length) {
           if (!(await this.confirmWarnings(findings))) {
@@ -478,10 +451,10 @@ sap.ui.define(
         c.setProperty('/starting', true)
         const sessionId = c.getProperty('/sessionId')
         try {
-          // the defaults go with every message as structured context; the server stores them on the session
+          // package, trigger and authentication come from the message; the assistant defaults the rest
           const pending = c.getProperty('/files').filter((f) => f.pending)
           const attachments = pending.map((f) => ({ fileName: f.fileName, content: f.content }))
-          const started = await api.post('/chat', { ...(sessionId && { sessionId }), message, defaults, ...(attachments.length && { attachments }) })
+          const started = await api.post('/chat', { ...(sessionId && { sessionId }), message, ...(attachments.length && { attachments }) })
           if (view !== this._view) {
             // the user opened another conversation meanwhile: the answer belongs to the one it was sent from
             this.loadSessions()
@@ -505,30 +478,6 @@ sap.ui.define(
         } finally {
           c.setProperty('/starting', false)
         }
-      },
-
-      // --- session defaults (package, timer, auth note) ---------------------------------------------
-
-      /** The defaults panel's values, trimmed */
-      currentDefaults() {
-        const d = this.chat().getProperty('/defaults')
-        return { packageId: d.packageId.trim(), timer: d.timer, authNote: d.authNote.trim() }
-      },
-
-      /** Panel header: what is set */
-      defaultsSummary(packageId, timer, authNote) {
-        const parts = [packageId && `package ${packageId.trim()}`, timer === 'once' && 'timer, run once', authNote && authNote.trim() && 'auth note'].filter(Boolean)
-        return parts.length ? parts.join(' · ') : 'none set: the assistant asks for package, trigger and authentication'
-      },
-
-      /** A Name with underscores or spaces is fine: its ID is derived like in CPI (shown as information) */
-      defaultsPackageState(packageId) {
-        const pkg = promptLint.toPackageId(packageId)
-        return !pkg.name ? 'None' : pkg.id ? 'Information' : 'Error'
-      },
-
-      defaultsPackageStateText(packageId) {
-        return promptLint.toPackageId(packageId).note || 'Use letters, digits or dots for the package ID'
       },
 
       // --- AI usage ---------------------------------------------------------------------------------
@@ -621,8 +570,7 @@ sap.ui.define(
             reader.readAsDataURL(file)
           })
           const sessionId = c.getProperty('/sessionId')
-          const packageId = this.currentDefaults().packageId
-          const result = await api.post('/importIflow', { ...(sessionId && { sessionId }), fileName: file.name, contentBase64, ...(packageId && { packageId }) })
+          const result = await api.post('/importIflow', { ...(sessionId && { sessionId }), fileName: file.name, contentBase64 })
           this.toast(`Imported ${result.spec.id}${result.placeholders ? ` — ${result.placeholders} placeholder(s) to replace` : ''}`)
           this._skipLoad = null
           if (result.sessionId !== sessionId) {
@@ -699,7 +647,6 @@ sap.ui.define(
           this.addMessage({ kind: 'error', html: userHtml(err.message + (err.hint ? `\n${err.hint}` : '')), usage, usageText: this.formatter.usageLine(usage) })
           if (err.code === 'LLM_RATE_LIMITED') this.toast('AI rate limit reached — wait a minute before the next message.')
         }
-        this.loadDraft(c.getProperty('/sessionId')) // the turn may have written the draft spec
         const created = t.proposals || []
         if (created.length) {
           const existing = c.getProperty('/proposals').filter((p) => !created.some((x) => x.ID === p.ID))

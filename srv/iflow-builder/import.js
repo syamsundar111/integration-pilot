@@ -380,7 +380,7 @@ async function importIflow(buffer, { fileName, packageId }) {
     ...(Object.keys(params).length && { parameters: params }),
     ...(resources.length && { resources })
   }
-  if (spec.packageId === 'Imported') notes.push('Target package: set one before proposing (session defaults or the proposal panel)')
+  if (spec.packageId === 'Imported') notes.push('Target package: set one before proposing (in your message or in the proposal panel)')
   if (placeholders) notes.push(`${placeholders} placeholder step(s) say what to replace them with in the CPI web editor`)
   const { valid, errors } = validate(spec, { attachments: Object.keys(attachments) })
   return { spec, attachments, notes, placeholders, valid, errors }

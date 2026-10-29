@@ -259,41 +259,37 @@ async function attachmentsOf(ctx) {
 }
 
 /**
- * The package rule, enforced: on the first message of a conversation, a new iFlow needs a package the
- * user named (in a message, by ID or name) or a session default. Otherwise the model must ask instead of
- * choosing one itself. From the second message on the user has had the chance to answer (also "use
- * sensible defaults"), so the model's choice stands. AGENT_ASK_PACKAGE=false turns it off (tests).
+ * The target package when the user names none: the first package on the tenant, in CPI's order. The
+ * proposal goes on with it (no question to the user); they change it, or create a new package, in the
+ * proposal panel. Named = the package's id or name appears in a message of the user in this
+ * conversation, or an earlier proposal of this conversation used it. AGENT_DEFAULT_PACKAGE=false
+ * keeps the model's package (tests).
+ * @returns {Promise<{ packageId: string, note: string }|null>} null: keep the spec's package
  */
-async function packageNotGiven(ctx, spec, pkg) {
-  if (process.env.AGENT_ASK_PACKAGE === 'false' || !ctx.sessionId) return null
-  if ((await defaultsOf(ctx)).packageId) return null
-  const rows = await cds.tx({ user: ctx.user }, (tx) =>
-    tx.run(SELECT.from('iflowpilot.ChatMessage').columns('role', 'content', 'toolCalls').where({ session_ID: ctx.sessionId, role: { in: ['user', 'assistant'] } }))
-  )
-  if (rows.some((m) => m.role === 'assistant' && !m.toolCalls)) return null // not the first message
-  const text = [ctx.message || '', ...rows.filter((m) => m.role === 'user').map((m) => m.content || '')].join('\n').toLowerCase()
+async function defaultPackage(ctx, spec, pkg) {
+  if (process.env.AGENT_DEFAULT_PACKAGE === 'false') return null
   const packages = await cpi.listPackages().catch(() => [])
-  const existing = packages.find((p) => p.id === spec.packageId) || (await getPackageOrNull(spec.packageId).catch(() => null))
+  if (!packages.length) return null // an empty tenant: the package the spec names is created on approval
+  const rows = ctx.sessionId
+    ? await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.from('iflowpilot.ChatMessage').columns('content').where({ session_ID: ctx.sessionId, role: 'user' })))
+    : []
+  const text = [ctx.message || '', ...rows.map((m) => m.content || '')].join('\n').toLowerCase()
+  const existing = packages.find((p) => p.id === spec.packageId)
   const named = [spec.packageId, pkg?.name, existing?.name].filter(Boolean).some((n) => text.includes(String(n).toLowerCase()))
   if (named) return null
-  const suggestions = packages.slice(0, 5).map((p) => `${p.id} (${p.name})`)
+  if (ctx.sessionId && (await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.one.from('iflowpilot.Proposal').columns('ID').where({ session_ID: ctx.sessionId, packageId: spec.packageId })))))
+    return null // the package of an earlier proposal of this conversation
+  const first = packages[0]
+  if (first.id === spec.packageId) return null
   return {
-    valid: false,
-    errors: [`PACKAGE_NOT_GIVEN packageId: the user did not name a target package and there is no session default`],
-    instruction: `Nothing was proposed. Ask the user which package to use${suggestions.length ? `, e.g. ${suggestions.join(', ')}` : ''}, or whether to create a new one; do not choose one yourself. Keep the scripts you wrote; propose the same spec with the package the user names.`
+    packageId: first.id,
+    note: `No package was named, so the first package on the tenant is used: ${first.id} ("${first.name}"). Tell the user this in one line, and that they can pick another package or create a new one in the proposal panel before approving.`
   }
 }
 
 /** Tool-result field for type fixes the assistant must mention */
 const autoFixes = (fixes) =>
   fixes.length ? { autoFixes: [`type expression -> constant (the value has no \${...}): ${fixes.join(', ')}`], autoFixNote: 'Tell the user these fixes in one line.' } : {}
-
-/** The conversation's session defaults ({ packageId?, packageName?, ... }) */
-async function defaultsOf(ctx) {
-  if (!ctx.sessionId) return {}
-  const s = await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.one.from('iflowpilot.ChatSession', ctx.sessionId).columns('defaults')))
-  return s?.defaults ? JSON.parse(s.defaults) : {}
-}
 
 /** The conversation's draft spec { spec, source, at }, or null */
 async function draftOf(ctx) {
@@ -633,14 +629,18 @@ const handlers = {
     if (error) return error
     const notJson = unparsableSpec(spec)
     if (notJson) return notJson
-    const pkg = await resolvePackage(spec.packageId)
+    let pkg = await resolvePackage(spec.packageId)
     if (pkg.error) return { valid: false, errors: [pkg.error] }
     if (pkg.note) spec = { ...spec, packageId: pkg.id }
+    // no package named by the user: the first package on the tenant (changeable in the proposal panel)
+    const chosen = await defaultPackage(ctx, spec, pkg)
+    if (chosen) {
+      spec = { ...spec, packageId: chosen.packageId }
+      pkg = { id: chosen.packageId }
+    }
     const typed = normalizeTypes(spec) // expression without ${...} -> constant
     spec = typed.spec
-    if (args.spec) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
-    const ask = await packageNotGiven(ctx, spec, pkg)
-    if (ask) return ask
+    if (args.spec || chosen) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues, warnings: specNotes } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix only what these errors name and propose again.')
@@ -655,12 +655,6 @@ const handlers = {
       const sameName = (await cpi.listIflows(spec.packageId)).find((f) => String(f.name || '').trim().toLowerCase() === String(spec.name || '').trim().toLowerCase())
       if (sameName) return duplicateIflow(ctx, spec, sameName, 'name')
     }
-    if (!pkgExists && !pkg.name) {
-      // the default package given as a Name ("test_1"): create it with that Name
-      const defaults = await defaultsOf(ctx)
-      if (defaults.packageName && defaults.packageId === spec.packageId) pkg.name = defaults.packageName
-    }
-
     const { summary } = await build(spec, { attachments }) // proves the spec builds into a zip
     const proposalId = await storeProposal(ctx, { kind: 'IFLOW', spec, iflowId: spec.id, packageId: spec.packageId, packageName: pkg.name, attachments })
     return {
@@ -669,6 +663,7 @@ const handlers = {
       iflowId: spec.id,
       status: 'PENDING',
       ...(pkg.note && { packageIdNote: `${pkg.note} Tell the user exactly this, in one line; do not ask about it.` }),
+      ...(chosen && { packageDefault: chosen.note }),
       ...autoFixes(typed.fixes),
       ...(specNotes?.length && { specNotes }),
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
