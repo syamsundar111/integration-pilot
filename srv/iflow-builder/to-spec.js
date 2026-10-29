@@ -117,6 +117,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
 
   if (!parsed.linear) blockers.push('the flow branches (router, multicast or several paths)')
   if (parsed.localProcesses?.length) blockers.push(`local integration processes: ${parsed.localProcesses.join(', ')}`)
+  if ((parsed.integrationProcesses?.length || 0) > 1) blockers.push(`${parsed.integrationProcesses.length} integration processes: ${parsed.integrationProcesses.join(', ')} (the spec holds one)`)
 
   const t = parsed.trigger || {}
   let trigger = null

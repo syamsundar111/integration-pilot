@@ -162,6 +162,7 @@ describe('import', () => {
     ${flow('F7', 'S2', 'End10')}
   </bpmn2:process>
   <bpmn2:process id="Process_2" name="LIP_Exception Subprocess">
+    <bpmn2:extensionElements>${prop('processType', 'directCall')}</bpmn2:extensionElements>
     <bpmn2:startEvent id="L_Start" name="Start 2"/>
     ${cm('L1', 'CM_SetMessage', { properties: [row('Error_Message', 'expression', '${exception.message}')] })}
     <bpmn2:callActivity id="L2" name="Script_Groovy_SetCustomHeaders"><bpmn2:extensionElements>${prop('activityType', 'Script')}${prop('subActivityType', 'GroovyScript')}${prop('script', 'Groovy_MPLLogs.groovy')}</bpmn2:extensionElements></bpmn2:callActivity>

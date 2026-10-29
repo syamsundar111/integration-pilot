@@ -42,6 +42,47 @@ describe('parser', () => {
   })
 })
 
+describe('main process: by type, not by position (Ref_Structure: a local process comes first in the file)', () => {
+  const JSZip = require('jszip')
+  const { importIflow } = require('../srv/iflow-builder/import')
+  const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+
+  /** Ref_Structure with LIP_FetchPage turned into a second integration process (no processType directCall) */
+  async function twoIntegrationProcesses() {
+    const zip = await JSZip.loadAsync(readRef('Ref_Structure.zip'))
+    const name = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+    const xml = await zip.file(name).async('string')
+    const start = xml.indexOf('<bpmn2:process id="Process_16"')
+    const end = xml.indexOf('</bpmn2:extensionElements>', start)
+    const head = xml.slice(start, end).replace(/<ifl:property>\s*<key>processType<\/key>\s*<value>directCall<\/value>\s*<\/ifl:property>/, '')
+    zip.file(name, xml.slice(0, start) + head + xml.slice(end))
+    return zip.generateAsync({ type: 'nodebuffer' })
+  }
+
+  test('the integration process is the main flow; the local processes stay local', async () => {
+    const r = await parse(readRef('Ref_Structure.zip'))
+    expect(r.trigger).toMatchObject({ type: 'timer', mode: 'once' })
+    expect(r.steps.map((s) => s.name)).toEqual(['CM_SetBody', 'ITSPL_Orders', 'PC_HandleOrder', 'GA_Orders', 'LPC_FetchPages', 'GSPL_Orders'])
+    expect(r.integrationProcesses).toEqual(['Integration Process'])
+    expect([...r.localProcesses].sort()).toEqual(['LIP_FetchPage', 'LIP_HandleOrder'])
+    expect(r.localProcessSteps.map((p) => `${p.name}: ${p.steps.map((s) => s.name)}`).sort()).toEqual(['LIP_FetchPage: CM_SetHasMore', 'LIP_HandleOrder: CM_MarkOrder'])
+    expect(r.warnings).toEqual([])
+  })
+
+  test('more than one integration process: the first is shown, and Explain, Import and updates say so', async () => {
+    const zip = await twoIntegrationProcesses()
+    const r = await parse(zip)
+    expect(r.integrationProcesses).toEqual(['LIP_FetchPage', 'Integration Process'])
+    expect(r.localProcesses).toEqual(['LIP_HandleOrder'])
+    expect(r.warnings).toEqual(['The iFlow has 2 integration processes ("LIP_FetchPage", "Integration Process"); only "LIP_FetchPage" is shown as the main flow.'])
+
+    const imported = await importIflow(zip, { fileName: 'two.zip', packageId: 'PilotReference' })
+    expect(imported.notes).toContain('Only the integration process "LIP_FetchPage" was imported; not imported: Integration Process')
+
+    expect(specFromParsed(r, { packageId: 'PilotReference' }).blockers).toContain('2 integration processes: LIP_FetchPage, Integration Process (the spec holds one)')
+  })
+})
+
 describe('round trip: build -> parse', () => {
   /** Reduces a spec to what the parser reports, using builder default names */
   async function roundTrip(spec) {

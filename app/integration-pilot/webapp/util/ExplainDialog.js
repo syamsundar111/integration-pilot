@@ -58,6 +58,8 @@ sap.ui.define(
               items: [new Title({ text: s.name || label, level: 'H3' }), new ObjectStatus({ text: s.id || '' }).addStyleClass('ipMono sapUiSmallMarginBegin')]
             })
           )
+          // what the parsed structure may not show correctly (e.g. several integration processes)
+          for (const w of s.warnings || []) content.addItem(new MessageStrip({ type: 'Warning', showIcon: true }).setText(w))
           content.addItem(new HTML({ content: `<div class="ipFlowBox">${flowDiagram.toHtml(flowDiagram.fromParsed(s))}</div>`, sanitizeContent: false }))
           if (r.explanation) {
             content.addItem(new FormattedText({ htmlText: markdown.toHtml(r.explanation) }).addStyleClass('ipBubbleText'))

@@ -258,7 +258,7 @@ function endKind(node) {
 
 /**
  * @param {Buffer|string} input - zip as Buffer or base64 string
- * @returns {Promise<{ id, name, description, trigger, steps, end, exceptionSubprocess, adapters, parameters, scripts, mappings, files, linear, mainPath }>}
+ * @returns {Promise<{ id, name, description, trigger, steps, end, exceptionSubprocess, adapters, parameters, scripts, mappings, files, linear, mainPath, integrationProcesses, localProcesses, warnings }>}
  */
 async function parse(input) {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(String(input), 'base64')
@@ -294,18 +294,24 @@ async function parse(input) {
   if (!definitions || definitions.localName !== 'definitions') throw Object.assign(new Error('The .iflw is not valid BPMN XML'), { code: 'INVALID_IFLOW', status: 400 })
 
   const collaboration = child(definitions, 'collaboration')
-  const participants = Object.fromEntries(
-    childrenNamed(collaboration, 'participant').map((p) => [p.getAttribute('id'), { name: p.getAttribute('name'), type: p.getAttribute('ifl:type'), processRef: p.getAttribute('processRef') }])
-  )
   const flowsRaw = childrenNamed(collaboration, 'messageFlow').map((node) => ({ node, id: node.getAttribute('id'), source: node.getAttribute('sourceRef'), target: node.getAttribute('targetRef') }))
   const adapters = flowsRaw.map(adapterOf)
   const adaptersBySource = Object.fromEntries(adapters.map((a) => [a.source, a]))
   const adaptersByTarget = Object.fromEntries(adapters.map((a) => [a.target, a]))
 
-  // Main integration process (local processes are listed separately)
+  // Main integration process: the one that is not a local process (processType directCall). Not by
+  // position or participant: local processes are "IntegrationProcess" participants too, and may come first.
   const processes = childrenNamed(definitions, 'process')
-  const mainRef = Object.values(participants).find((p) => p.type === 'IntegrationProcess')?.processRef
-  const main = processes.find((p) => p.getAttribute('id') === mainRef) || processes[0]
+  const locals = processes.filter((p) => props(p).processType === 'directCall')
+  const integrationProcesses = processes.filter((p) => !locals.includes(p))
+  const main = integrationProcesses[0] || processes[0]
+  const warnings = []
+  if (integrationProcesses.length > 1)
+    warnings.push(
+      `The iFlow has ${integrationProcesses.length} integration processes (${integrationProcesses.map((p) => `"${p.getAttribute('name')}"`).join(', ')}); only "${main.getAttribute('name')}" is shown as the main flow.`
+    )
+  else if (!integrationProcesses.length && main)
+    warnings.push(`The iFlow has no integration process, only local processes; "${main.getAttribute('name')}" is shown as the main flow.`)
 
   // Exception subprocesses are reported separately, not as steps of the main flow
   const isExceptionSubprocess = (el) => el.localName === 'subProcess' && props(el).activityType === 'ErrorEventSubProcessTemplate'
@@ -403,9 +409,12 @@ async function parse(input) {
     mainPath: branching, // branching flows only: { steps (routers carry routes), end }
     exceptionSubprocess: exceptionSubprocesses[0] || null,
     exceptionSubprocessCount: exceptionSubprocesses.length,
-    localProcesses: processes.filter((p) => p !== main).map((p) => p.getAttribute('name')),
+    // names of all processes that are not local (normally one: the main flow); more than one is in warnings
+    integrationProcesses: integrationProcesses.map((p) => p.getAttribute('name')),
+    warnings, // for the user: what the parsed structure may not show correctly
+    localProcesses: locals.filter((p) => p !== main).map((p) => p.getAttribute('name')),
     // their steps, for Process Calls the import can inline: [{ id, name, steps, linear }]
-    localProcessSteps: processes
+    localProcessSteps: locals
       .filter((p) => p !== main)
       .map((p) => {
         const w = walk(p)

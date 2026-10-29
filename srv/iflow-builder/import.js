@@ -334,6 +334,9 @@ async function importIflow(buffer, { fileName, packageId }) {
 
   const notImported = (parsed.localProcesses || []).filter((n) => !inlined.has(n))
   if (notImported.length) notes.push(`Local integration processes are not imported: ${notImported.join(', ')}`)
+  if ((parsed.integrationProcesses?.length || 0) > 1)
+    notes.push(`Only the integration process "${parsed.integrationProcesses[0]}" was imported; not imported: ${parsed.integrationProcesses.slice(1).join(', ')}`)
+  else if (parsed.warnings?.length) notes.push(...parsed.warnings)
 
   // --- limits: merge consecutive placeholders, longest runs first ---------------------------
   const mergeRuns = (list, max, where) => {
