@@ -61,11 +61,18 @@ const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 
  * (sticky), so the rules do not change between messages. Order is fixed, not the order of activation.
  */
 const UNSUPPORTED_TEXT = /\b(router|splitter|gather|multicast|aggregator|join(?!\s+(to|with|on|by)\b)|xslt|(message|graphical|operation|xml|edmx|value)\s+mapping|mapping\s+(step|artifact)|sftp|write variables?|process ?call|processdirect|local integration process)\b/i
+// words of a request that needs a feature section; the core prompt keeps a pointer line for requests that use other words
+const ROUTING_TEXT = /\b(rout(e|es|er|ers|ing)|branch(es|ing)?|conditions?|conditional|otherwise|depending on|if (it|the|a)\b[^.\n]{0,60}\b(else|otherwise))\b/i
+const SPLITTING_TEXT = /\b(split(s|ter|ters|ting)?|gather|for (each|every)|each (item|order|record|entry|line|element|row|message)|per (item|order|record|entry|line|element|row)|one by one|individually|local (integration )?process(es)?|process calls?|loop(s|ing)?|iterat\w*|paging|page by page|next page|batch(es)?)\b/i
 const PROMPT_SECTIONS = [
   // the conversation has files (attached, written by the assistant, from an iFlow or an import)
   { name: 'attachedFiles', applies: ({ files }) => files.length > 0 },
   // unsupported step kinds are mentioned, or the draft has REPLACE WITH placeholders (e.g. an import)
-  { name: 'unsupportedSteps', applies: ({ userText, placeholders }) => placeholders > 0 || UNSUPPORTED_TEXT.test(userText) }
+  { name: 'unsupportedSteps', applies: ({ userText, placeholders }) => placeholders > 0 || UNSUPPORTED_TEXT.test(userText) },
+  // routers: the request branches, or the draft has a router
+  { name: 'routing', applies: ({ userText, draftTypes }) => draftTypes.has('router') || ROUTING_TEXT.test(userText) },
+  // splitters, gathers, process calls and local processes: the request works per item or reuses steps, or the draft has them
+  { name: 'splitting', applies: ({ userText, draftTypes }) => ['splitter', 'gather', 'processCall'].some((t) => draftTypes.has(t)) || SPLITTING_TEXT.test(userText) }
 ].map((s) => ({ ...s, text: fs.readFileSync(path.join(__dirname, 'prompt-sections', `${s.name}.md`), 'utf8').trim() }))
 
 const db = (user, fn) => cds.tx({ user }, fn)
@@ -210,11 +217,12 @@ async function promptSections(user, sessionId, session, { files, message }) {
   const used = new Set(session?.promptSections ? JSON.parse(session.promptSections) : [])
   const draft = session?.draftSpec ? JSON.parse(session.draftSpec).spec : null
   const placeholders = allSteps(draft).filter((x) => /^REPLACE WITH /.test(x.step?.description || '')).length
+  const draftTypes = new Set(allSteps(draft).map((x) => x.step?.type))
   const { ChatMessage } = E()
   const past = await db(user, (tx) => tx.run(SELECT.from(ChatMessage).columns('content').where({ session_ID: sessionId, role: 'user' })))
   const userText = [...past.map((m) => m.content || ''), message].join('\n')
   const before = used.size
-  for (const s of PROMPT_SECTIONS) if (!used.has(s.name) && s.applies({ files, userText, placeholders })) used.add(s.name)
+  for (const s of PROMPT_SECTIONS) if (!used.has(s.name) && s.applies({ files, userText, placeholders, draftTypes })) used.add(s.name)
   if (used.size !== before) {
     const { ChatSession } = E()
     await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ promptSections: JSON.stringify(PROMPT_SECTIONS.map((s) => s.name).filter((n) => used.has(n))) })))

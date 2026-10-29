@@ -45,7 +45,11 @@ const definitions = [
     sinceHours: { type: 'integer', minimum: 1, maximum: 720 },
     top: { type: 'integer', minimum: 1, maximum: 50 }
   }),
-  fn('getSupportedSteps', 'Spec v1 format in short, with an example. Call once before proposing. full: the JSON schema (rarely needed).', { full: { type: 'boolean' } }),
+  fn(
+    'getSupportedSteps',
+    'Spec v1 format in short, with an example. Call once before proposing. topics: also the format and rules of routing (router) or splitting (splitter, gather, process calls, local processes) when you need them. full: the JSON schema (rarely needed).',
+    { topics: { type: 'array', items: { type: 'string', enum: ['routing', 'splitting'] } }, full: { type: 'boolean' } }
+  ),
   fn('validateSpec', 'Check a spec without proposing it; only after a failed proposal. Returns { valid } or errors "CODE path: message".', {
     spec: { type: 'object' },
     useDraftSpec: { type: 'boolean', description: 'validate the draft spec' }
@@ -102,7 +106,10 @@ At most ${MAX_STEPS_PER_EDIT} steps per call. Returns the outline and open error
 
 // --- helpers -----------------------------------------------------------------------
 
-/** The spec format in short (getSupportedSteps); test/agent.test.js keeps it in line with spec-schema.json */
+/**
+ * The spec format in short (getSupportedSteps); test/agent.test.js keeps it in line with spec-schema.json. The steps
+ * of a topic (TOPICS) are only sent when the conversation needs them, like the prompt section of the same name.
+ */
 const SPEC_FORMAT = {
   spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50, counting route and local process steps), end, exceptionSubprocess?, localProcesses?, parameters?, resources? }',
   trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
@@ -128,6 +135,27 @@ const SPEC_FORMAT = {
   parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId, or a constant header/property value "{{Name}}"',
   resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
   names: 'id: letters, digits, _ · packageId: letters, digits, dots (a Name with _ or spaces is turned into the ID) · fileName, system: letter first, then letters, digits, _ · step names unique'
+}
+
+// Topics: steps whose format and rules are sent only when a conversation needs them (srv/agent/prompt-sections/<topic>.md)
+const TOPICS = {
+  routing: { steps: ['router'], summary: 'router: branch into routes by conditions (route ends, joins)' },
+  splitting: { steps: ['splitter', 'gather', 'processCall'], summary: 'splitter / gather: steps per item; local processes run by a processCall (also looping)' }
+}
+for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
+
+/** The conditional prompt sections a conversation has (agent.js promptSections) */
+async function sessionSections(ctx) {
+  if (!ctx.sessionId) return []
+  const row = await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.one.from('iflowpilot.ChatSession', ctx.sessionId).columns('promptSections')))
+  return row?.promptSections ? JSON.parse(row.promptSections) : []
+}
+
+/** Adds sections to a conversation, so they are in the prompt from the next model call on */
+async function addSessionSections(ctx, names) {
+  if (!ctx.sessionId) return
+  const all = [...new Set([...(await sessionSections(ctx)), ...names])]
+  await cds.tx({ user: ctx.user }, (tx) => tx.run(UPDATE('iflowpilot.ChatSession', ctx.sessionId).set({ promptSections: JSON.stringify(all) })))
 }
 
 /** Validation result for the model: codes and short messages, never the spec itself */
@@ -470,11 +498,25 @@ const handlers = {
     return cpi.listMessageLogs({ iflowId, status, sinceHours, top })
   },
 
-  async getSupportedSteps({ full } = {}) {
+  async getSupportedSteps({ full, topics = [] } = {}, ctx = {}) {
     // The compact format is enough to write a spec and is about a quarter of the schema's size; it is
-    // re-sent with every later model call of the message, so its size counts several times.
+    // re-sent with every later model call of the message, so its size counts several times. Steps of a
+    // topic come only when the conversation uses it (its prompt section) or the model asks for it.
+    const inPrompt = await sessionSections(ctx)
+    const wanted = Object.keys(TOPICS).filter((t) => topics.includes(t) && !inPrompt.includes(t))
+    if (wanted.length) await addSessionSections(ctx, wanted) // sticky, as if the conversation had asked for it
+    const active = Object.keys(TOPICS).filter((t) => inPrompt.includes(t) || wanted.includes(t))
+    const hidden = new Set(Object.entries(TOPICS).flatMap(([t, def]) => (active.includes(t) ? [] : def.steps)))
+    const format = {
+      ...SPEC_FORMAT,
+      steps: Object.fromEntries(Object.entries(SPEC_FORMAT.steps).filter(([type]) => !hidden.has(type))),
+      ...(!active.includes('splitting') && { localProcesses: undefined })
+    }
+    const more = Object.keys(TOPICS).filter((t) => !active.includes(t))
     return {
-      ...(full ? { schema: { ...schema, examples: undefined } } : { format: SPEC_FORMAT }),
+      ...(full ? { schema: { ...schema, examples: undefined } } : { format }),
+      ...(wanted.length && { rules: Object.fromEntries(wanted.map((t) => [t, TOPICS[t].rules()])) }),
+      ...(more.length && { moreTopics: Object.fromEntries(more.map((t) => [t, TOPICS[t].summary])) }),
       example: schema.examples[0],
       notes: [
         'Flows run trigger -> steps in order -> end; a router step branches into routes that end or continue with the next step. Error handling goes into the optional top-level exceptionSubprocess (not into steps).',

@@ -11,6 +11,10 @@ const sample = require('../srv/iflow-builder/samples/Pilot_Test_1.json')
 
 const PROMPT = fs.readFileSync(path.join(__dirname, '../srv/agent/system-prompt.md'), 'utf8')
 const flat = PROMPT.replace(/\s+/g, ' ')
+// sections added only while a conversation needs them (srv/agent/agent.js PROMPT_SECTIONS)
+const sectionFlat = (name) => fs.readFileSync(path.join(__dirname, `../srv/agent/prompt-sections/${name}.md`), 'utf8').replace(/\s+/g, ' ')
+const routing = sectionFlat('routing')
+const splitting = sectionFlat('splitting')
 
 const routingSpec = {
   ...sample,
@@ -170,9 +174,9 @@ describe('system prompt: patterns loaded on demand (review item 6)', () => {
     expect(flat).toMatch(/Never call `proposeIflow` for an iFlow that already exists, and never list the changes yourself/)
     // phase 1b: routers on the main line, the default route last, spaces around Non-XML operators,
     // routes that end or continue; error handling ends with escalation (or error) for new iFlows
-    expect(flat).toMatch(/except the \*\*default route\*\*: exactly one, `"default": true`, no condition, listed \*\*last\*\*/)
-    expect(flat).toMatch(/NonXML: `\$\{property\.x\} = 'A'`, always with spaces around the operator/)
-    expect(flat).toMatch(/If every route ends, the router must be the last step and the main `end` is `\{ "type": "none" \}`/)
+    expect(routing).toMatch(/except the \*\*default route\*\*: exactly one, `"default": true`, no condition, listed \*\*last\*\*/)
+    expect(routing).toMatch(/NonXML: `\$\{property\.x\} = 'A'`, always with spaces around the operator/)
+    expect(routing).toMatch(/If every route ends, the router must be the last step and the main `end` is `\{ "type": "none" \}`/)
     expect(flat).toMatch(/for a new iFlow use `escalation` \(or `error`\) unless the user asks for a response to the sender as the result/)
     // phase 1a tenant check: "with default value X" on a {{Param}} filled the Default Value column too
     expect(flat).toMatch(/For a `\{\{Param\}\}`, "default value" \/ "default" means the parameter's value in `parameters`\. Set a row's `default` \(the Content Modifier's Default Value column\) only when the user asks for that column explicitly/)
@@ -231,13 +235,17 @@ describe('system prompt: scripts in batches ((d) run)', () => {
 
 
 describe('system prompt: splitters and local processes (phase 2)', () => {
-  test('the rules are in the prompt', () => {
-    expect(flat).toMatch(/Always set `stopOnException`: `true` = one failing item stops the rest, `false` = the other items still run; if the request does not say, ask/)
-    expect(flat).toMatch(/there is no second splitter and \*\*no router\*\* between a splitter and its gather \(CPI refuses a router there\): to route each item, call a local process that contains the router/)
-    expect(flat).toMatch(/A router after a splitter without a gather is fine/)
-    expect(flat).toMatch(/Exchange properties set while processing one item do not reach the steps after the gather: results must travel in the message body/)
-    expect(flat).toMatch(/on the main line, in a route or in the exception subprocess/)
-    expect(flat).toMatch(/a route there continues or ends with a plain End, `\{ "event": "message" \}`, which returns to the caller: the flow goes on after the `processCall`/)
+  test('the rules are in the splitting section; the core keeps a pointer to it and to the routing section (prompt size)', () => {
+    expect(flat).toMatch(/Splitting: a `splitter` step runs the next steps once per item \(for each order, record, line\.\.\.\), until a `gather`/)
+    expect(flat).toMatch(/if a section is missing, call `getSupportedSteps` with `topics: \["routing"\]` or `\["splitting"\]` before you use the step/)
+    expect(flat).not.toMatch(/Always set `stopOnException`/) // the details are only in the section
+    expect(flat).not.toMatch(/listed \*\*last\*\*/)
+    expect(splitting).toMatch(/Always set `stopOnException`: `true` = one failing item stops the rest, `false` = the other items still run; if the request does not say, ask/)
+    expect(splitting).toMatch(/there is no second splitter and \*\*no router\*\* between a splitter and its gather \(CPI refuses a router there\): to route each item, call a local process that contains the router/)
+    expect(splitting).toMatch(/A router after a splitter without a gather is fine/)
+    expect(splitting).toMatch(/Exchange properties set while processing one item do not reach the steps after the gather: results must travel in the message body/)
+    expect(splitting).toMatch(/on the main line, in a route or in the exception subprocess/)
+    expect(splitting).toMatch(/a route there continues or ends with a plain End, `\{ "event": "message" \}`, which returns to the caller: the flow goes on after the `processCall`/)
     expect(flat).not.toMatch(/Splitter and mapping are not supported/)
   })
 
