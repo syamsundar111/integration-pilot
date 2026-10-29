@@ -33,7 +33,7 @@ prompt and the tokens used reported per prompt.
 | c | HTTP receiver: authentication (None, Basic, OAuth2 Client Credentials) with credential name, proxy Internet / On-Premise with location ID, timeout | Ref_Receivers | done |
 | c2 | Credential name and location ID as externalized parameters, with the regression test update | Ref_Receivers (new version: RR_OAuth's credential name and RR_OnPrem's location ID externalized) | done |
 | 1a | No change to the flow structure: Content Modifier sources (Global/Local Variable, Header, Property, XPath with data type), a constant as an externalized parameter, the Default column; Write Variables (global and local scope); Timer start every N minutes (UTC) | Ref_Variables, Ref_Router_Ends (timer) | done |
-| 1b | Branching: Router with conditions and a default route; routes that end (Message, Escalation or Error End) or join again; Error and Escalation End in the exception subprocess; the spec format for branches is agreed before coding | Ref_Router_Ends | open |
+| 1b | Branching: Router with conditions and a default route; routes that end (Message, Escalation or Error End) or join again; Error and Escalation End in the exception subprocess (format agreed, see below) | Ref_Router_Ends | done |
 | 2 | General and Iterating Splitter, Gather; local integration process with Process Call and Looping Process Call | Ref_Structure | open |
 | 3 | SOAP 1.x and Mail receivers | Ref_Receivers | open |
 | 4 | Message Mapping that refers to an existing mapping artifact (a `PH_` placeholder if it does not exist); XSLT Mapping step | Ref_Mapping, MM_DummyOrderToNotif | open |
@@ -46,9 +46,9 @@ prompt and the tokens used reported per prompt.
 ## Open before a step can start
 
 - **Confirmed values per phase** (add to `reference/confirmed-values.json` when the phase starts):
-  phase 1b: Ref_Router_Ends (`R_Other` default route); phase 3: the Mail values in Ref_Receivers.
-  In: step c's (OAuth2 Client Credentials, On-Premise) and 1a's (Global/Local Variable source types,
-  Write Variables types, scopes and data type, timer every 15 minutes, Header and Property sources).
+  phase 3: the Mail values in Ref_Receivers. In: step c's (OAuth2 Client Credentials, On-Premise), 1a's
+  (Global/Local Variable source types, Write Variables types, scopes and data type, timer every 15 minutes,
+  Header and Property sources) and 1b's (the expression type XML of the default route `R_Other`).
   Not confirmed yet, so it warns: the Content Modifier data type java.lang.Boolean.
 - **Phase 2:** re-select the Gather values of `GA_Orders` in Ref_Structure in the CPI editor
   (Ref_Multicast_Enrich's Gathers matter only for phase 9).
@@ -56,6 +56,24 @@ prompt and the tokens used reported per prompt.
   to Ref_Receivers (today: no WSDL, no operation name).
 - **Phase 8:** Ref_Transform refers to `DummyItems.xsd` and `DummyItem.xsd`, which are missing in
   its ZIP.
+
+## The branch format and how later phases fit it
+
+Since 1b the spec is a main line of steps in which a step may hold nested step lists that either end or
+continue with the next main-line step (a router's routes). Later phases use the same shape, so the
+validator (step paths, names, the 50-step count over all nested steps), the builder (a lane per nested
+list, one column per node, receivers above the pool) and import/update need no rework:
+
+- **Splitter and Gather (phase 2):** a `splitter` step on the main line with the per-item `steps`; the
+  items continue to a `gather` (the join), or each item runs to the end without one.
+- **Local processes and Process Call (phase 2):** a top-level `localProcesses: [{ name, steps }]`; a
+  `processCall` step (also looping: condition, maximum) names one, on the main line or inside a route
+  (as `PC_Exception Subprocess` inside Router 2's default route of the original interface).
+- **Multicast and Join (phase 9):** a `multicast` step like a router without conditions: `branches`
+  that all run, and join again at the step after it (with a Gather).
+
+Not in 1b: routers inside routes (refused, Import makes them a placeholder). They fit the same shape and
+come when a real interface needs them.
 
 ## Later (no phase yet)
 
@@ -67,6 +85,12 @@ From the former reference export checklist; each needs a reference export first.
 - Proposal panel, credentials note: for a credential given as a parameter, name the credential that must
   exist, e.g. "DUMMY_OAUTH_CRED (parameter OAuthCredential)", not "{{OAuthCredential}}" (the chat answer
   already does this).
+- Escalation End: the receiver categories (Receiver not reachable, Receiver not found, Not authenticated,
+  Not authorized, Receiver tries to redirect, Internal server error in receiver); today Others and
+  Routing condition not met.
+- Proposal panel, diagram summary: show the Escalation End category on the route lines and the "On error"
+  line, as the step cards do.
+- User-facing notes: phrase them without the builder version ("For a method v1 does not set…").
 - More timer schedules: every N hours, daily, weekly and monthly at a time, other time zones, and the
   scheduler externalized as `{{Scheduler}}`.
 

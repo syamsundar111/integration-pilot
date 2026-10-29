@@ -36,5 +36,16 @@
     "every": {
       "15": "Every 15, re-selected in Ref_Router_Ends (Timer 1), 2026-10-29"
     }
+  },
+  "Router": {
+    "expressionType": {
+      "XML": "re-selected in Ref_Router_Ends (R_Other, the default route of RT_Xml, stored with its expression type), 2026-10-29"
+    }
+  },
+  "Escalation End": {
+    "category": {
+      "Others": "Others - not further qualified, set in Ref_Router_Ends (EE_Exception) in the CPI editor, 2026-10-29",
+      "RoutingConditionNotMet": "Routing condition not met, set in Ref_Router_Ends (EE_Route) in the CPI editor, 2026-10-29"
+    }
   }
 }

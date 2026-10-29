@@ -303,3 +303,51 @@ describe('Generate page: conversation list shows when a conversation is deleted 
     expect(ctl.sessionInfo({ modifiedAt: daysAgo(2), keep: false })).toBe('2 days ago')
   })
 })
+
+describe('proposal panel for routers (phase 1b)', () => {
+  /** The controller with a stub flow diagram, showing one proposal; returns chat>/active */
+  function activeFor(spec) {
+    const promptLint = factoryOf(path.join(WEBAPP, 'util/promptLint.js'))()
+    const markdown = factoryOf(path.join(WEBAPP, 'util/markdown.js'))()
+    const flowDiagram = { toHtml: () => '', fromSpec: () => ({}) }
+    const proto = factoryOf(path.join(WEBAPP, 'controller/Generate.controller.js'))({ extend: (_n, p) => p }, function () {}, null, null, null, null, null, null, {}, markdown, flowDiagram, promptLint)
+    const ctl = Object.create(proto)
+    const proposal = { ID: 'p1', kind: 'IFLOW', status: 'PENDING', iflowId: spec.id, packageId: 'P', spec, createdAt: new Date().toISOString() }
+    const chat = model({ proposals: [proposal], activeId: 'p1', packages: [], files: [] })
+    Object.assign(ctl, { chat: () => chat, formatter: { relativeTime: () => 'now' } })
+    ctl.refreshActive()
+    return chat.getProperty('/active')
+  }
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: '1' }] })
+  const xmlRouter = { type: 'router', name: 'RT_Type', expressionType: 'XML', routes: [{ name: 'X', condition: "/a = 'x'" }, { name: 'Other', default: true }] }
+  const base = (steps, extra = {}) => ({ id: 'F', name: 'F', trigger: { type: 'timer', mode: 'once' }, steps, end: { type: 'none' }, ...extra })
+
+  test('an XML router after a Content Modifier (routers in between skipped) gets the XML input notice', () => {
+    const nonXml = { type: 'router', name: 'RT_Check', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1' }, { name: 'D', default: true }] }
+    expect(activeFor(base([cm('CM_SetInput'), nonXml, xmlRouter])).xmlRouterText).toMatch(/on the routes of RT_Type \(after CM_SetInput\): it cannot tell/)
+    expect(activeFor(base([{ type: 'jsonToXml', name: 'ToXml' }, xmlRouter])).xmlRouterText).toBe('')
+    expect(activeFor(base([cm('A'), nonXml])).xmlRouterText).toBe('')
+  })
+
+  test('route steps are numbered under their router; End and error handling show their end events (Escalation End with its category)', () => {
+    const routes = [
+      { name: 'X', condition: "/a = 'x'", steps: [cm('InRoute')] },
+      { name: 'Y', condition: "/a = 'y'", end: { event: 'escalation', category: 'RoutingConditionNotMet' } },
+      { name: 'Other', default: true }
+    ]
+    const active = activeFor(base([cm('A'), { ...xmlRouter, routes }], { exceptionSubprocess: { steps: [cm('E')], end: { event: 'escalation' } } }))
+    const cards = active.stepCards.map((c) => [c.title, c.type])
+    expect(cards).toEqual(
+      expect.arrayContaining([
+        ['2. RT_Type', 'Router'],
+        ['2.1.1 InRoute', 'Content Modifier · route X'],
+        ['End', 'Message End']
+      ])
+    )
+    expect(active.stepCards.find((c) => c.type === 'Router').lines).toMatch(/Y: \/a = 'y' → Escalation End \(Routing condition not met\)/)
+    // no category: the default "Others - not further qualified"
+    expect(active.stepCards.find((c) => c.type === 'Exception Subprocess').lines).toMatch(
+      /ends with an Escalation End \(Others - not further qualified\): the message is shown as escalated/
+    )
+  })
+})

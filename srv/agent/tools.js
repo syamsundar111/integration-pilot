@@ -14,6 +14,7 @@ const attachmentStore = require('../lib/attachments')
 const { sampleResponse } = require('../lib/sample-response')
 const { parse } = require('../iflow-builder/parser')
 const { specFromParsed, describeChanges } = require('../iflow-builder/to-spec')
+const { allSteps } = require('../iflow-builder/spec-steps')
 
 const LOG = cds.log('agent')
 const MAX_RESULT_CHARS = 12_000
@@ -103,7 +104,7 @@ At most ${MAX_STEPS_PER_EDIT} steps per call. Returns the outline and open error
 
 /** The spec format in short (getSupportedSteps); test/agent.test.js keeps it in line with spec-schema.json */
 const SPEC_FORMAT = {
-  spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50), end, exceptionSubprocess?, parameters?, resources? }',
+  spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50 with routers and the steps inside routes), end, exceptionSubprocess?, parameters?, resources? }',
   trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
   steps: {
     contentModifier:
@@ -112,11 +113,13 @@ const SPEC_FORMAT = {
     jsonToXml: '{ type, name?, description? }',
     xmlToJson: '{ type, name?, description? }',
     writeVariables: '{ type, name?, description?, variables: [{ name, type: property|xpath, value, datatype? (xpath), global? (Global Scope, default false) }] } — main flow only',
+    router:
+      '{ type, name?, description?, expressionType: XML|NonXML, routes: [{ name, condition (XPath, or ${…} with spaces around the operator), steps?: [step], end?: { event: message|escalation|error, name?, category? (escalation: Others|RoutingConditionNotMet) } }, …, { name, default: true, steps?, end? } (last)] } — main line only; a route without end continues with the step after the router; if every route ends, the router is the last step and end is { "type": "none" }',
     requestReplyHttp:
       '{ type, name?, description?, system?, url: "https://…" | "{{Param}}", method: GET|POST|PUT|PATCH|DELETE, authType: None|Basic|"OAuth2 Client Credentials", credentialName? (deployed credential name or "{{Param}}", never a secret; required unless None), proxyType?: Internet|On-Premise, locationId? (On-Premise only; name or "{{Param}}"), timeout? (ms, default 60000) }'
   },
-  end: ['{ "type": "none" }', '{ "type": "httpReceiver", system?, url, method, authType, credentialName?, proxyType?, locationId?, timeout? } (as requestReplyHttp)'],
-  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson }',
+  end: ['{ "type": "none", event?: message|escalation|error, category? (escalation: Others|RoutingConditionNotMet) }', '{ "type": "httpReceiver", system?, url, method, authType, credentialName?, proxyType?, locationId?, timeout? } (as requestReplyHttp)'],
+  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson, end?: { event: message|escalation|error, name?, category? } (new iFlows: escalation or error) }',
   parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId, or a constant header/property value "{{Name}}"',
   resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
   names: 'id: letters, digits, _ · packageId: letters, digits, dots (a Name with _ or spaces is turned into the ID) · fileName, system: letter first, then letters, digits, _ · step names unique'
@@ -396,7 +399,7 @@ async function filesOfOtherIflows(ctx, iflowId) {
   const names = proposals.flatMap((p) => Object.keys(p.attachments ? JSON.parse(p.attachments) : {}))
   const draft = (await draftOf(ctx))?.spec
   if (draft && draft.id !== iflowId)
-    for (const s of [...(draft.steps || []), ...(draft.exceptionSubprocess?.steps || [])]) if (s.type === 'groovyScript' && s.fileName) names.push(`${s.fileName}.groovy`)
+    for (const { step: s } of allSteps(draft)) if (s?.type === 'groovyScript' && s.fileName) names.push(`${s.fileName}.groovy`)
   return new Set(names)
 }
 
@@ -406,7 +409,9 @@ async function filesOfOtherIflows(ctx, iflowId) {
  * An upload of the user with the same name is kept: it replaces the iFlow's file.
  */
 async function detachFiles(ctx, spec, resources = {}) {
-  const steps = [...spec.steps, ...(spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript' && s.code != null)
+  const steps = allSteps(spec)
+    .map((x) => x.step)
+    .filter((s) => s?.type === 'groovyScript' && s.code != null)
   const files = [...steps.map((s) => ({ fileName: `${s.fileName}.groovy`, content: s.code })), ...Object.entries(resources).map(([fileName, content]) => ({ fileName, content }))]
   // a script written earlier with writeScript wins (the model may write the new version before loading
   // the iFlow), unless it belongs to another iFlow of this conversation: then this iFlow's file is loaded
@@ -414,7 +419,12 @@ async function detachFiles(ctx, spec, resources = {}) {
   const replaceAi = files.map((f) => f.fileName).filter((f) => otherIflows.has(f))
   const stored = new Set(files.length ? await attachmentStore.save(ctx.user, ctx.sessionId, files, 'iflow', { replaceAi }) : [])
   ctx.attachments = undefined // reload: new files
-  const strip = (s) => (s.type === 'groovyScript' && s.code != null ? (({ code, ...rest }) => rest)(s) : s)
+  const strip = (s) =>
+    s.type === 'groovyScript' && s.code != null
+      ? (({ code, ...rest }) => rest)(s)
+      : s.type === 'router'
+        ? { ...s, routes: s.routes.map((r) => (r.steps ? { ...r, steps: r.steps.map(strip) } : r)) }
+        : s
   return {
     spec: { ...spec, steps: spec.steps.map(strip), ...(spec.exceptionSubprocess && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: spec.exceptionSubprocess.steps.map(strip) } }) },
     attachedFiles: files.map((f) => f.fileName).filter((f) => stored.has(f)),
@@ -468,7 +478,7 @@ const handlers = {
       ...(full ? { schema: { ...schema, examples: undefined } } : { format: SPEC_FORMAT }),
       example: schema.examples[0],
       notes: [
-        'Flows are linear: trigger -> steps in order -> end. Error handling goes into the optional top-level exceptionSubprocess (not into steps).',
+        'Flows run trigger -> steps in order -> end; a router step branches into routes that end or continue with the next step. Error handling goes into the optional top-level exceptionSubprocess (not into steps).',
         'exceptionSubprocess runs when a step fails; its result is returned to the HTTPS sender. ${exception.message} holds the error text; set header CamelHttpResponseCode to return an HTTP error status.',
         'To change an existing iFlow: getIflowSpec, change the spec, proposeIflowUpdate. Never use proposeIflow with an existing id.',
         'HTTP receivers: authType None, Basic or OAuth2 Client Credentials with credentialName (the name of deployed security material, never a password); proxyType Internet or On-Premise (locationId optional); timeout in ms.',
@@ -753,11 +763,15 @@ const handlers = {
 
     // Scripts: the proposal's file against the iFlow's current code
     const currentCode = Object.fromEntries(
-      [...current.spec.steps, ...(current.spec.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript').map((s) => [`${s.fileName}.groovy`, s.code])
+      allSteps(current.spec)
+        .map((x) => x.step)
+        .filter((s) => s.type === 'groovyScript')
+        .map((s) => [`${s.fileName}.groovy`, s.code])
     )
     const scripts = Object.fromEntries(
-      [...spec.steps, ...(spec.exceptionSubprocess?.steps || [])]
-        .filter((s) => s.type === 'groovyScript')
+      allSteps(spec)
+        .map((x) => x.step)
+        .filter((s) => s?.type === 'groovyScript')
         .map((s) => `${s.fileName}.groovy`)
         .map((f) => [f, currentCode[f] == null ? 'new' : attachments[f] === currentCode[f] ? 'unchanged' : 'changed'])
     )

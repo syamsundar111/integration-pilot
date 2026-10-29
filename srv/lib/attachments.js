@@ -4,6 +4,7 @@
  * so the model never receives or writes the script bodies.
  */
 const cds = require('@sap/cds')
+const { allSteps } = require('../iflow-builder/spec-steps')
 
 const MAX_BYTES = 200 * 1024
 const MAX_PER_SESSION = 20
@@ -81,7 +82,7 @@ async function contents(user, sessionId) {
 
 /** File names a spec takes from attachments: scripts without code and resources */
 function referencedBy(spec) {
-  const steps = [...(spec?.steps || []), ...(spec?.exceptionSubprocess?.steps || [])]
+  const steps = allSteps(spec).map((x) => x.step) // main flow, routes and exception subprocess
   return [...steps.filter((s) => s?.type === 'groovyScript' && s.code == null && s.fileName).map((s) => `${s.fileName}.groovy`), ...(spec?.resources || [])]
 }
 

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://iflow-pilot/spec-schema.json",
   "title": "iFlow spec v1",
-  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Router, splitter and mapping are not supported yet. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver, and as a constant header or property value. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
+  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Routers branch on the main line into routes that end or continue with the step after the router; splitter and mapping are not supported yet. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver, and as a constant header or property value. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
   "type": "object",
   "required": [
     "id",
@@ -128,7 +128,7 @@
         "steps"
       ],
       "additionalProperties": false,
-      "description": "Exception Subprocess: runs when any step of the main flow fails, instead of the normal end. Its steps run in order and end with a Message End, so for an HTTPS trigger the resulting message is returned to the sender as the response. The error text is available as ${exception.message}. Set header CamelHttpResponseCode (e.g. 500) to return an HTTP error status instead of 200.",
+      "description": "Exception Subprocess: runs when any step of the main flow fails, instead of the normal end. Its steps run in order and end with its end event (Message End by default), so for an HTTPS trigger the resulting message is returned to the sender as the response. The error text is available as ${exception.message}. Set header CamelHttpResponseCode (e.g. 500) to return an HTTP error status instead of 200.",
       "properties": {
         "name": {
           "$ref": "#/definitions/stepName",
@@ -141,6 +141,10 @@
           "items": {
             "$ref": "#/definitions/exceptionStep"
           }
+        },
+        "end": {
+          "$ref": "#/definitions/endEvent",
+          "description": "End event of the subprocess. Default message (failed messages then look completed in monitoring); prefer escalation or error"
         }
       }
     },
@@ -396,6 +400,101 @@
         }
       }
     },
+    "router": {
+      "type": "object",
+      "required": [
+        "type",
+        "expressionType",
+        "routes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "router"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "expressionType": {
+          "enum": [
+            "XML",
+            "NonXML"
+          ],
+          "description": "Condition type of all routes: XML (XPath) or NonXML (Camel simple)"
+        },
+        "routes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/definitions/route"
+          }
+        }
+      }
+    },
+    "route": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Route name, unique within the router"
+        },
+        "condition": {
+          "type": "string",
+          "minLength": 1,
+          "description": "XML: an XPath condition, e.g. /root/type = 'X'. NonXML: a Camel simple condition with spaces around the operator, e.g. ${property.x} = 'A'. Not on the default route."
+        },
+        "default": {
+          "const": true,
+          "description": "The default route: exactly one per router, listed last, without a condition"
+        },
+        "steps": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/step"
+          },
+          "description": "Steps of this route (no router). Without an end, the route continues with the step after the router."
+        },
+        "end": {
+          "$ref": "#/definitions/endEvent",
+          "description": "The route ends here. Missing: it continues with the step after the router."
+        }
+      }
+    },
+    "endEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "enum": [
+            "message",
+            "escalation",
+            "error"
+          ],
+          "description": "message: completed; escalation: escalated in monitoring; error: failed"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "category": {
+          "enum": [
+            "Others",
+            "RoutingConditionNotMet"
+          ],
+          "description": "Escalation End only: the escalation category shown in monitoring. Others (default, 'Others - not further qualified') or RoutingConditionNotMet ('Routing condition not met')"
+        }
+      }
+    },
     "converter": {
       "type": "object",
       "additionalProperties": false,
@@ -522,6 +621,21 @@
       "properties": {
         "type": {
           "const": "none"
+        },
+        "event": {
+          "enum": [
+            "message",
+            "escalation",
+            "error"
+          ],
+          "description": "Optional end event of the main flow; default message"
+        },
+        "category": {
+          "enum": [
+            "Others",
+            "RoutingConditionNotMet"
+          ],
+          "description": "With event escalation: the escalation category (default Others)"
         }
       }
     },
@@ -538,7 +652,8 @@
             "jsonToXml",
             "xmlToJson",
             "requestReplyHttp",
-            "writeVariables"
+            "writeVariables",
+            "router"
           ]
         }
       },
@@ -613,6 +728,18 @@
           },
           "then": {
             "$ref": "#/definitions/writeVariables"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "router"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/router"
           }
         }
       ]

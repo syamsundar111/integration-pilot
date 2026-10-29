@@ -1,7 +1,8 @@
 ## Hard limits
 
 Every spec must respect these limits; the validator rejects anything else:
-- At most 50 steps in the main flow (10 in the exception subprocess).
+- At most 50 steps in the main flow, counting routers and the steps inside routes (route ends do not
+  count); 10 in the exception subprocess.
 - Step names are unique (main flow and exception subprocess together), receiver `system` names are
   unique, and Groovy `fileName`s are unique.
 - `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver,
@@ -15,7 +16,8 @@ Every spec must respect these limits; the validator rejects anything else:
   `default` (the Content Modifier's Default Value column) only when the user asks for that column
   explicitly, e.g. "Default Value column = X".
 - `body` is a string.
-- The flow is linear: trigger, steps in order, end. No router, splitter, multicast or join.
+- The flow runs trigger, steps in order, end; a `router` step branches (see Routers). No splitter,
+  multicast or join step.
 - Start and end events are not steps: the trigger and the end are the top-level `trigger` and `end`.
 - `spec` is a JSON object, never a JSON string. Propose or validate only the real spec, never test
   specs, and write only the scripts the flow uses (no test or trial scripts).
@@ -89,13 +91,32 @@ or deployed unless a tool result says so.
 - End: `httpReceiver { url, method, authType, ... }` (receiver settings as in Authentication) or `none`.
 - Error handling: an optional **Exception Subprocess** (`exceptionSubprocess { name?, steps }`, a
   top-level field, not a step). It runs when any step fails. Its steps (`contentModifier`,
-  `groovyScript`, `jsonToXml`, `xmlToJson`) run in order and end with a Message End, so for an HTTPS
+  `groovyScript`, `jsonToXml`, `xmlToJson`) run in order and end with its `end` event, so for an HTTPS
   trigger the result is returned to the sender. Use `${exception.message}` for the error text, and set
   header `CamelHttpResponseCode` (e.g. `500`) so the sender gets an HTTP error status, not 200.
   When the user asks to "catch errors", "add exception handling" or "return an error response",
   use `exceptionSubprocess`. Do not write Groovy try/catch for this.
-- Router, splitter and mapping are not supported. Say so plainly, and offer an alternative (see
+- The subprocess `end` is `{ "event": "message" | "escalation" | "error", "name"?, "category"? }`. A Message End (the
+  default) makes a failed message look completed in monitoring: for a new iFlow use `escalation` (or
+  `error`) unless the user asks for a response to the sender as the result, and say which in one line.
+- Splitter and mapping are not supported. Say so plainly, and offer an alternative (see
   "When something is not supported").
+
+## Routers
+
+A `router` step branches the main line: `{ "type": "router", "name", "expressionType": "XML" | "NonXML",
+"routes": [...] }`. Routes are evaluated in order; each has a `name` and a `condition` (XML: an XPath like
+`/root/type = 'X'`; NonXML: `${property.x} = 'A'`, always with spaces around the operator), except the
+**default route**: exactly one, `"default": true`, no condition, listed **last**. A route may have its
+own `steps` (no router inside a route) and either an `end` (`{ "event": "message" | "escalation" |
+"error", "name"?, "category"? }`), or no end: then it continues with the step after the router, where the continuing
+routes join again. A call to another system inside a route is a `requestReplyHttp` step before its end.
+If every route ends, the router must be the last step and the main `end` is `{ "type": "none" }`.
+An Escalation End has a `category` shown in monitoring: `Others` (the default, "Others - not further
+qualified") or `RoutingConditionNotMet` ("Routing condition not met", e.g. for a route taken because no
+expected value matched); other categories are not supported yet. Only an Escalation End has a category.
+Routers sit on the main line only; nested routing is not supported (decide it in a groovyScript that
+sets a property for the next router on the main line).
 
 ## Attached files
 

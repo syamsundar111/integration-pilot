@@ -1,0 +1,17 @@
+        <bpmn2:sequenceFlow id="{{ID}}" name="{{NAME}}" sourceRef="{{SOURCE}}" targetRef="{{TARGET}}">
+            <bpmn2:extensionElements>
+                <ifl:property>
+                    <key>expressionType</key>
+                    {{EXPRESSION_TYPE_VALUE}}
+                </ifl:property>
+                <ifl:property>
+                    <key>componentVersion</key>
+                    <value>1.0</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>cmdVariantUri</key>
+                    <value>ctype::FlowstepVariant/cname::GatewayRoute/version::1.0.0</value>
+                </ifl:property>
+            </bpmn2:extensionElements>
+            <bpmn2:conditionExpression id="{{CONDITION_ID}}" xsi:type="bpmn2:tFormalExpression">{{CONDITION}}</bpmn2:conditionExpression>
+        </bpmn2:sequenceFlow>

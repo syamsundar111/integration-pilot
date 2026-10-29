@@ -20,6 +20,7 @@ const { importIflow } = require('../iflow-builder/import')
 const tools = require('./tools')
 const cpi = require('../lib/cpi-client')
 const history = require('./history')
+const { allSteps } = require('../iflow-builder/spec-steps')
 
 const LOG = cds.log('agent')
 const maxIterations = () => Number(process.env.AGENT_MAX_MODEL_CALLS || 20)
@@ -90,7 +91,7 @@ function attachmentsContext(files) {
 function draftContext(draft) {
   if (!draft?.spec) return ''
   const { spec, source, valid } = draft
-  const placeholders = [...(spec.steps || []), ...(spec.exceptionSubprocess?.steps || [])].filter((s) => /^REPLACE WITH /.test(s.description || '')).length
+  const placeholders = allSteps(spec).filter((x) => /^REPLACE WITH /.test(x.step?.description || '')).length
   return (
     `Draft spec of this conversation (${source}${valid ? ', valid' : ''}): ${spec.id} "${spec.name}", ${spec.steps?.length || 0} steps${placeholders ? `, ${placeholders} placeholder(s)` : ''}, package ${spec.packageId}. ` +
     'It is the latest spec of the conversation; earlier copies are not repeated in the history. ' +
@@ -208,7 +209,7 @@ async function systemMessage(user, sessionId, message = '') {
 async function promptSections(user, sessionId, session, { files, message }) {
   const used = new Set(session?.promptSections ? JSON.parse(session.promptSections) : [])
   const draft = session?.draftSpec ? JSON.parse(session.draftSpec).spec : null
-  const placeholders = [...(draft?.steps || []), ...(draft?.exceptionSubprocess?.steps || [])].filter((s) => /^REPLACE WITH /.test(s?.description || '')).length
+  const placeholders = allSteps(draft).filter((x) => /^REPLACE WITH /.test(x.step?.description || '')).length
   const { ChatMessage } = E()
   const past = await db(user, (tx) => tx.run(SELECT.from(ChatMessage).columns('content').where({ session_ID: sessionId, role: 'user' })))
   const userText = [...past.map((m) => m.content || ''), message].join('\n')

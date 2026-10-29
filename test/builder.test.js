@@ -236,7 +236,7 @@ describe('builder', () => {
   })
 
   test('throws INVALID_SPEC with readable errors', async () => {
-    await expect(build(baseSpec({ steps: [{ type: 'router' }] }))).rejects.toMatchObject({ code: 'INVALID_SPEC', errors: [expect.stringContaining("'router' is not supported in v1")] })
+    await expect(build(baseSpec({ steps: [{ type: 'splitter' }] }))).rejects.toMatchObject({ code: 'INVALID_SPEC', errors: [expect.stringContaining("'splitter' is not supported yet")] })
   })
 
   test('helpers: java date, properties escaping, manifest folding', () => {
@@ -244,5 +244,107 @@ describe('builder', () => {
     expect(propEscape('https://a.b/c?x=1#f')).toBe('https\\://a.b/c?x\\=1\\#f')
     expect(propEscape(' lead\\ü')).toBe('\\ lead\\\\\\u00FC')
     expect(manifestHeader('K', 'v'.repeat(100)).split('\r\n')[1]).toMatch(/^ v+$/)
+  })
+})
+
+describe('routers (phase 1b): graph, joins, end events and layout', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: name }] })
+  const rr = (name, system) => ({ type: 'requestReplyHttp', name, system, url: `https://${system.toLowerCase()}.example.com/api`, method: 'POST', authType: 'None' })
+  const spec = baseSpec({
+    steps: [
+      cm('Prepare'),
+      {
+        type: 'router',
+        name: 'Check',
+        expressionType: 'NonXML',
+        routes: [
+          { name: 'Valid', condition: "${property.ok} = 'true'", steps: [rr('Send', 'ERP')] },
+          { name: 'Retry', condition: "${property.ok} = 'retry'", steps: [cm('MarkRetry')] },
+          { name: 'Invalid', default: true, steps: [cm('LogInvalid')], end: { event: 'escalation', name: 'End Invalid' } }
+        ]
+      },
+      cm('Join'),
+      rr('Notify', 'Notify')
+    ],
+    exceptionSubprocess: { steps: [cm('SetError')], end: { event: 'error' } }
+  })
+  const box = (doc, id) => {
+    const b = all(all(doc, 'BPMNShape').find((s) => s.getAttribute('bpmnElement') === id), 'Bounds')[0]
+    return { x: +b.getAttribute('x'), y: +b.getAttribute('y'), w: +b.getAttribute('width'), h: +b.getAttribute('height') }
+  }
+  const named = (doc, name) => [...doc.getElementsByTagName('*')].find((e) => e.getAttribute('name') === name)
+  const incoming = (el) => all(el, 'incoming').filter((x) => x.parentNode === el).map((x) => x.textContent)
+
+  test('the router writes its default route; continuing routes join at the next step; ending routes end', async () => {
+    const { doc } = await built(spec)
+    const gateway = all(doc, 'exclusiveGateway')[0]
+    const routes = all(doc, 'sequenceFlow').filter((f) => f.getAttribute('sourceRef') === gateway.getAttribute('id'))
+    // the spec's order: CPI evaluates routes in order (a route that continues without steps is not moved last)
+    expect(routes.map((f) => f.getAttribute('name'))).toEqual(['Valid', 'Retry', 'Invalid'])
+    expect(all(gateway, 'outgoing').map((o) => routes.find((f) => f.getAttribute('id') === o.textContent).getAttribute('name'))).toEqual(['Valid', 'Retry', 'Invalid'])
+    expect(gateway.getAttribute('default')).toBe(routes.find((f) => f.getAttribute('name') === 'Invalid').getAttribute('id'))
+    expect(all(routes.find((f) => f.getAttribute('name') === 'Invalid'), 'conditionExpression')).toEqual([])
+    expect(all(routes.find((f) => f.getAttribute('name') === 'Valid'), 'conditionExpression')[0].textContent).toBe("${property.ok} = 'true'")
+    // Send (route Valid) and MarkRetry (route Retry) both lead into Join
+    expect(incoming(named(doc, 'Join'))).toHaveLength(2)
+    const ends = all(doc, 'endEvent').filter((e) => e.parentNode.localName === 'process')
+    expect(ends.map((e) => [e.getAttribute('name'), all(e, 'escalationEventDefinition').length + all(e, 'messageEventDefinition').length])).toEqual(
+      expect.arrayContaining([
+        ['End Invalid', 1],
+        ['End', 1]
+      ])
+    )
+    expect(all(named(doc, 'End Invalid'), 'escalationEventDefinition')).toHaveLength(1)
+    // the exception subprocess ends with an Error End
+    expect(all(all(doc, 'subProcess')[0], 'errorEventDefinition').length).toBe(2) // error start + error end
+  })
+
+  test('layout: lanes inside the pool, nothing overlaps, receivers above the pool, the subprocess below every lane', async () => {
+    const { doc } = await built(spec)
+    const pool = box(doc, 'Participant_Process_1')
+    const nodes = [...all(doc, 'callActivity'), ...all(doc, 'serviceTask'), ...all(doc, 'exclusiveGateway'), ...all(doc, 'endEvent'), ...all(doc, 'startEvent')]
+      .filter((n) => n.parentNode.localName === 'process')
+      .map((n) => ({ id: n.getAttribute('id'), ...box(doc, n.getAttribute('id')) }))
+    const sub = box(doc, all(doc, 'subProcess')[0].getAttribute('id'))
+    const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+    for (const n of nodes) {
+      expect(n.x).toBeGreaterThanOrEqual(pool.x)
+      expect(n.y + n.h).toBeLessThanOrEqual(sub.y) // every lane above the subprocess
+      for (const m of nodes) if (m !== n) expect(overlap(n, m)).toBe(false)
+    }
+    expect(sub.y + sub.h).toBeLessThanOrEqual(pool.y + pool.h)
+    // one column per node: a connector straight up from a step meets no other node
+    expect(new Set(nodes.map((n) => n.x + n.w / 2)).size).toBe(nodes.length)
+    // receivers above the pool, each in its step's column
+    for (const p of all(doc, 'participant').filter((x) => x.getAttribute('ifl:type') === 'EndpointRecevier')) {
+      const r = box(doc, p.getAttribute('id'))
+      expect(r.y + r.h).toBeLessThan(pool.y)
+      const flow = all(doc, 'messageFlow').find((f) => f.getAttribute('targetRef') === p.getAttribute('id'))
+      const step = nodes.find((n) => n.id === flow.getAttribute('sourceRef'))
+      expect(r.x + r.w / 2).toBe(step.x + step.w / 2)
+    }
+  })
+
+  test('a route that continues without steps keeps its place among the routes', async () => {
+    const r = baseSpec({
+      steps: [
+        cm('A'),
+        { type: 'router', name: 'R', expressionType: 'NonXML', routes: [{ name: 'Go', condition: '${a} = 1' }, { name: 'Stop', condition: '${a} = 2', end: { event: 'escalation' } }, { name: 'Other', default: true, steps: [cm('B')] }] },
+        cm('C')
+      ]
+    })
+    const { doc } = await built(r)
+    const gateway = all(doc, 'exclusiveGateway')[0]
+    const names = all(gateway, 'outgoing').map((o) => all(doc, 'sequenceFlow').find((f) => f.getAttribute('id') === o.textContent).getAttribute('name'))
+    expect(names).toEqual(['Go', 'Stop', 'Other'])
+  })
+
+  test('a router whose routes all end is the last step, and no main end is built', async () => {
+    const lastRouter = baseSpec({
+      steps: [cm('A'), { type: 'router', name: 'R', expressionType: 'XML', routes: [{ name: 'X', condition: "/a = 'x'", end: { event: 'message' } }, { name: 'Other', default: true, steps: [cm('B')], end: { event: 'error' } }] }]
+    })
+    const { doc } = await built(lastRouter)
+    const ends = all(doc, 'endEvent').filter((e) => e.parentNode.localName === 'process')
+    expect(ends).toHaveLength(2) // one per route, no main end
   })
 })

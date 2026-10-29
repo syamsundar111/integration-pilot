@@ -29,7 +29,8 @@ sap.ui.define(
       jsonToXml: 'JSON to XML',
       xmlToJson: 'XML to JSON',
       requestReplyHttp: 'Request Reply (HTTP)',
-      writeVariables: 'Write Variables'
+      writeVariables: 'Write Variables',
+      router: 'Router'
     }
     // Content Modifier sources as the CPI editor names them
     const SOURCE_LABELS = { globalVariable: 'global variable', localVariable: 'local variable', xpath: 'XPath' }
@@ -45,9 +46,37 @@ sap.ui.define(
         .filter(Boolean)
         .join(' · ')
 
+    /** Main-flow steps with the steps inside routes (after their router) */
+    const flowSteps = (spec) => spec.steps.flatMap((s) => [s, ...(s.type === 'router' ? (s.routes || []).flatMap((r) => r.steps || []) : [])])
+
+    // end events as the CPI editor names them, an Escalation End with its category
+    const END_EVENTS = { message: 'Message End', escalation: 'Escalation End', error: 'Error End' }
+    const CATEGORIES = { Others: 'Others - not further qualified', RoutingConditionNotMet: 'Routing condition not met' }
+    const endText = (end) => {
+      const event = (end && end.event) || 'message'
+      return event === 'escalation' ? `Escalation End (${CATEGORIES[end.category || 'Others'] || end.category})` : END_EVENTS[event]
+    }
+
+    /**
+     * Information for an XML router after a Content Modifier or Groovy script (the step before it on the main line,
+     * routers skipped): CPI cannot prove that such a step produces XML and shows a notice on the router's routes
+     */
+    function xmlRouterNote(spec) {
+      const hits = []
+      let before = null
+      for (const s of spec.steps) {
+        if (s.type !== 'router') before = s
+        else if (s.expressionType === 'XML' && before && ['contentModifier', 'groovyScript'].includes(before.type))
+          hits.push(`${s.name || 'the XML router'} (after ${before.name || STEP_TYPES[before.type]})`)
+      }
+      return hits.length
+        ? `CPI shows the notice "may not pass XML message to Sequence Flow. Sequence Flow supports XML input only" on the routes of ${hits.join(', ')}: it cannot tell that a Content Modifier or Groovy script produces XML. Not an error; make sure the body is XML at that point.`
+        : ''
+    }
+
     /** The note under a proposal with HTTP receivers: credentials to deploy, receivers without authentication */
     function receiversNote(spec) {
-      const calls = [...spec.steps.filter((s) => s.type === 'requestReplyHttp'), ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])]
+      const calls = [...flowSteps(spec).filter((s) => s.type === 'requestReplyHttp'), ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])]
       if (!calls.length) return ''
       const label = (c) => c.system || c.name || 'Receiver'
       const withAuth = calls.filter((c) => c.authType && c.authType !== 'None')
@@ -809,7 +838,8 @@ sap.ui.define(
           scripts: [],
           resourcesText: '',
           scriptsText: '',
-          receiversText: ''
+          receiversText: '',
+          xmlRouterText: ''
         }
 
         const stepCard = (s, prefix) => ({
@@ -829,7 +859,11 @@ sap.ui.define(
                 ? [`${s.method} ${s.url}`, receiverSettingsText(s)].filter(Boolean).join('\n')
                 : s.type === 'groovyScript'
                   ? `script/${s.fileName}.groovy${s.code == null ? ' (attached file)' : ''}`
-                  : s.type === 'writeVariables'
+                  : s.type === 'router'
+                    ? (s.routes || [])
+                        .map((r) => `${r.name}: ${r.default ? 'default' : r.condition} → ${r.end ? endText(r.end) : 'continues'}`)
+                        .join('\n')
+                    : s.type === 'writeVariables'
                     ? (s.variables || [])
                         .map((v) => `variable ${v.name} = ${v.value} (${v.type === 'xpath' ? 'XPath' : v.type}${v.datatype ? `, ${v.datatype}` : ''}, ${v.global ? 'global' : 'this iFlow only'})`)
                         .join('\n')
@@ -849,15 +883,34 @@ sap.ui.define(
                     ? `Every ${spec.trigger.minutes} minutes, all day, UTC`
                     : 'Runs once after deployment'
             },
-            ...spec.steps.map((s, i) => stepCard(s, `${i + 1}.`)),
+            // a router's route steps follow it, numbered router.route.step (3.2.1)
+            ...spec.steps.flatMap((s, i) => [
+              stepCard(s, `${i + 1}.`),
+              ...(s.type === 'router'
+                ? (s.routes || []).flatMap((r, j) => (r.steps || []).map((x, k) => ({ ...stepCard(x, `${i + 1}.${j + 1}.${k + 1}`), type: `${STEP_TYPES[x.type] || x.type} · route ${r.name}` })))
+                : [])
+            ]),
             {
               title: 'End',
-              type: spec.end.type === 'httpReceiver' ? 'HTTP receiver' : 'No receiver',
-              lines: spec.end.type === 'httpReceiver' ? [`${spec.end.method} ${spec.end.url}`, receiverSettingsText(spec.end)].filter(Boolean).join('\n') : ''
+              type: spec.end.type === 'httpReceiver' ? 'HTTP receiver' : endText(spec.end),
+              lines: (() => {
+                const last = spec.steps[spec.steps.length - 1]
+                if (last && last.type === 'router' && (last.routes || []).every((r) => r.end)) return 'Every route of the last router ends; the main flow has no end of its own'
+                return spec.end.type === 'httpReceiver' ? [`${spec.end.method} ${spec.end.url}`, receiverSettingsText(spec.end)].filter(Boolean).join('\n') : 'No receiver'
+              })()
             },
             ...(spec.exceptionSubprocess
               ? [
-                  { title: spec.exceptionSubprocess.name || 'Exception Subprocess 1', type: 'Exception Subprocess', lines: 'Runs when a step fails; its result is returned to the sender' },
+                  {
+                    title: spec.exceptionSubprocess.name || 'Exception Subprocess 1',
+                    type: 'Exception Subprocess',
+                    lines: (() => {
+                      const event = (spec.exceptionSubprocess.end && spec.exceptionSubprocess.end.event) || 'message'
+                      return event === 'message'
+                        ? 'Runs when a step fails; ends with a Message End: the result goes to the sender and the message looks completed in monitoring'
+                        : `Runs when a step fails; ends with an ${endText(spec.exceptionSubprocess.end)}: the message is shown as ${event === 'error' ? 'failed' : 'escalated'} in monitoring`
+                    })()
+                  },
                   ...spec.exceptionSubprocess.steps.map((s, i) => stepCard(s, `E${i + 1}.`))
                 ]
               : [])
@@ -883,6 +936,7 @@ sap.ui.define(
             ? `XSLT files added as src/main/resources/mapping/: ${spec.resources.join(', ')}. v1 has no XSLT step — add an XSLT Mapping step for them in the CPI web editor.`
             : ''
           active.receiversText = receiversNote(spec)
+          active.xmlRouterText = xmlRouterNote(spec)
         }
 
         // package editor defaults: closest existing package, else create under the requested id

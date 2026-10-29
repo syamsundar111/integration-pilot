@@ -164,6 +164,12 @@ describe('system prompt: patterns loaded on demand (review item 6)', () => {
     expect(flat).toMatch(/v1 cannot build ProcessDirect; the HTTPS workaround is public and needs authentication/)
     expect(flat).toMatch(/To update, change, extend or fix an existing iFlow, first call `getPattern` with `updateIflow`/)
     expect(flat).toMatch(/Never call `proposeIflow` for an iFlow that already exists, and never list the changes yourself/)
+    // phase 1b: routers on the main line, the default route last, spaces around Non-XML operators,
+    // routes that end or continue; error handling ends with escalation (or error) for new iFlows
+    expect(flat).toMatch(/except the \*\*default route\*\*: exactly one, `"default": true`, no condition, listed \*\*last\*\*/)
+    expect(flat).toMatch(/NonXML: `\$\{property\.x\} = 'A'`, always with spaces around the operator/)
+    expect(flat).toMatch(/If every route ends, the router must be the last step and the main `end` is `\{ "type": "none" \}`/)
+    expect(flat).toMatch(/for a new iFlow use `escalation` \(or `error`\) unless the user asks for a response to the sender as the result/)
     // phase 1a tenant check: "with default value X" on a {{Param}} filled the Default Value column too
     expect(flat).toMatch(/For a `\{\{Param\}\}`, "default value" \/ "default" means the parameter's value in `parameters`\. Set a row's `default` \(the Content Modifier's Default Value column\) only when the user asks for that column explicitly/)
     // "okay" to a suggested name is an answer: the name is not asked again

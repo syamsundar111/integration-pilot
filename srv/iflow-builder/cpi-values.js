@@ -23,6 +23,10 @@ const cmTypeFromCpi = (stored) => Object.keys(CM_SOURCE_TYPES).find((k) => CM_SO
 const WV_TYPES = ['property', 'xpath']
 const scopeOf = (variable) => (variable.global ? 'global' : 'local')
 
+// Escalation End category (stored as is): the default 'Others' ("Others - not further qualified"); the others
+// must be in the references and confirmed (receiver categories come when an interface needs them)
+const DEFAULT_ESCALATION_CATEGORY = 'Others'
+
 // XPath values need a data type; java.lang.String as in the references (and the CPI editor's default)
 const DEFAULT_XPATH_DATATYPE = 'java.lang.String'
 
@@ -71,6 +75,7 @@ module.exports = {
   WV_TYPES,
   scopeOf,
   DEFAULT_XPATH_DATATYPE,
+  DEFAULT_ESCALATION_CATEGORY,
   TIME_ZONE,
   scheduleOf,
   parseSchedule,

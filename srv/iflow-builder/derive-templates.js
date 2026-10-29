@@ -94,6 +94,16 @@ const VALUE_FIELDS = {
     variant: /cname::Variables\//,
     values: (p) => tableRows(p.variable).flatMap((c) => [['type', c[2]?.value], ['scope', c[4]?.value], ...(c[1]?.value ? [['datatype', c[1].value]] : [])])
   },
+  // the route of a router: its condition type (XML, NonXML)
+  Router: {
+    variant: /cname::GatewayRoute\//,
+    values: (p) => [['expressionType', p.expressionType]]
+  },
+  // an Escalation End: its category (ErrorCode: Others, RoutingConditionNotMet, ReceiverNotFound, ...)
+  'Escalation End': {
+    variant: /cname::EscalationEndEvent\//,
+    values: (p) => [['category', p.ErrorCode]]
+  },
   // the schedule of a timer start: repeat (NONE, MINUTES, ...) and, when repeating, the interval
   Timer: {
     variant: /cname::intermediatetimer\//,
@@ -116,7 +126,7 @@ async function referenceValues() {
   for (const file of fs.readdirSync(REF_DIR).filter((f) => f.endsWith('.zip')).sort()) {
     const { iflw } = await readZip(file)
     if (!iflw) continue // e.g. a Message Mapping artifact
-    for (const [element] of iflw.matchAll(/<bpmn2:(messageFlow|callActivity|startEvent)\b[\s\S]*?<\/bpmn2:\1>/g)) {
+    for (const [element] of iflw.matchAll(/<bpmn2:(messageFlow|callActivity|startEvent|sequenceFlow|endEvent)\b[^>]*[^/]>[\s\S]*?<\/bpmn2:\1>/g)) {
       const props = Object.fromEntries([...element.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
       for (const [component, { variant, values }] of Object.entries(VALUE_FIELDS)) {
         if (!variant.test(props.cmdVariantUri || '')) continue
@@ -246,6 +256,38 @@ async function main() {
   const variableTable = variables.iflw.match(/<key>variable<\/key>\s*<value>([^<]*)<\/value>/)[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
   t['write-variables-row.xml'] = apply(variableTable.match(/<row>.*?<\/row>/g)[1], 'write-variables-row', {
     texts: [['<cell>DUMMY_LOCAL_VAR</cell><cell>java.lang.String</cell><cell>xpath</cell><cell>/root/value</cell><cell>local</cell>', '<cell>{{NAME}}</cell><cell>{{DATATYPE}}</cell><cell>{{TYPE}}</cell><cell>{{VALUE}}</cell><cell>{{SCOPE}}</cell>']]
+  })
+
+  // Router (Ref_Router_Ends): the gateway, a route with a condition, the default route (stored with its
+  // expression type, as R_Other after re-saving), and the Escalation and Error End events
+  const re = routerEnds.iflw
+  t['iflw/router.xml'] = apply(block(re, 'id="ExclusiveGateway_11"'), 'router', {
+    attrs: { 'default="SequenceFlow_11"': 'default="{{DEFAULT}}"', 'id="ExclusiveGateway_11"': 'id="{{ID}}"', 'name="RT_Xml"': 'name="{{NAME}}"', '>SequenceFlow_10<': '>{{INCOMING}}<' },
+    texts: [['<bpmn2:outgoing>SequenceFlow_11</bpmn2:outgoing>\n            <bpmn2:outgoing>SequenceFlow_13</bpmn2:outgoing>', '<bpmn2:outgoing>{{OUTGOING}}</bpmn2:outgoing>']]
+  })
+  const conditionFlow = block(re, 'id="SequenceFlow_13"')
+  const conditionId = conditionFlow.match(/id="(FormalExpression_SequenceFlow_13_\d+)"/)[1] // with an export timestamp
+  t['iflw/route-condition.xml'] = apply(conditionFlow, 'route-condition', {
+    attrs: {
+      'id="SequenceFlow_13"': 'id="{{ID}}"',
+      'name="R_TypeX"': 'name="{{NAME}}"',
+      'sourceRef="ExclusiveGateway_11"': 'sourceRef="{{SOURCE}}"',
+      'targetRef="CallActivity_14"': 'targetRef="{{TARGET}}"',
+      [`id="${conditionId}"`]: 'id="{{CONDITION_ID}}"',
+      ">/root/type = 'X'<": '>{{CONDITION}}<'
+    },
+    props: { expressionType: 'EXPRESSION_TYPE_VALUE' }
+  })
+  t['iflw/route-default.xml'] = apply(block(re, 'id="SequenceFlow_11"'), 'route-default', {
+    attrs: { 'id="SequenceFlow_11"': 'id="{{ID}}"', 'name="R_Other"': 'name="{{NAME}}"', 'sourceRef="ExclusiveGateway_11"': 'sourceRef="{{SOURCE}}"', 'targetRef="CallActivity_15"': 'targetRef="{{TARGET}}"' },
+    props: { expressionType: 'EXPRESSION_TYPE_VALUE' }
+  })
+  t['iflw/end-escalation.xml'] = apply(block(re, 'id="EndEvent_16"'), 'end-escalation', {
+    attrs: { 'id="EndEvent_16"': 'id="{{ID}}"', 'name="EE_Route"': 'name="{{NAME}}"', '>SequenceFlow_17<': '>{{INCOMING}}<' },
+    props: { ErrorCode: 'CATEGORY_VALUE' } // the escalation category (Routing condition not met, Others, ...)
+  })
+  t['iflw/end-error.xml'] = apply(block(re, 'id="EndEvent_1"'), 'end-error', {
+    attrs: { 'id="EndEvent_1"': 'id="{{ID}}"', 'name="ERR_Route"': 'name="{{NAME}}"', '>SequenceFlow_8<': '>{{INCOMING}}<' }
   })
 
   t['iflw/step-groovy-script.xml'] = step('CallActivity_8', 'Groovy Script 1', 'SequenceFlow_6', 'SequenceFlow_14', { script: 'SCRIPT_VALUE' })

@@ -152,6 +152,16 @@ async function importIflow(buffer, { fileName, packageId }) {
   })
 
   /** "Route 1 (condition) continues; Route 2 (default) -> A -> B -> End 10" */
+  /** A NonXML condition with spaces around its operators (the validator requires them): ${property.x}='A' -> ${property.x} = 'A' */
+  const spacedCondition = (c, type) => {
+    if (type !== 'NonXML') return c
+    const parts = String(c).split(/(\$\{[^}]*\}|'[^']*')/) // operators only outside ${...} and '...'
+    return parts
+      .map((p, i) => (i % 2 ? p : p.replace(/\s*(!=|<=|>=|=~|=|<|>)\s*/g, ' $1 ')))
+      .join('')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+  }
   const describeRoutes = (routes) =>
     routes
       .map((r) => {
@@ -292,17 +302,51 @@ async function importIflow(buffer, { fileName, packageId }) {
   }
 
   // --- steps -----------------------------------------------------------------------------
-  const branching = parsed.mainPath
-  let steps = (branching ? branching.steps : parsed.steps || []).flatMap((s) => convert(s, { inException: false }))
-  if (branching) {
+  // a branching flow the spec can hold: routers with routes that end or join again (parser: routed)
+  const routed = parsed.routed && !parsed.routed.unsupported ? parsed.routed : null
+  const branching = routed ? null : parsed.mainPath
+  // an Escalation End's category: kept when the spec allows it, else the default with a note
+  const ESCALATION_CATEGORIES = require('./spec-schema.json').definitions.endEvent.properties.category.enum
+  const categoryOf = (category, where) => {
+    if (!category || ESCALATION_CATEGORIES.includes(category)) return category ? { category } : {}
+    notes.push(`${where}: the escalation category ${category} became Others; set ${category} in the CPI web editor`)
+    return { category: 'Others' }
+  }
+  const routeEnd = (end, where) => {
+    if (end.kind === 'message' || !['escalation', 'error'].includes(end.kind)) return { event: 'message', ...(end.name && { name: truncate(end.name, 100) }) }
+    return { event: end.kind, ...(end.name && { name: truncate(end.name, 100) }), ...(end.kind === 'escalation' && categoryOf(end.category, where)) }
+  }
+  const routerOf = (r) => ({
+    type: 'router',
+    ...(r.name && { name: truncate(r.name, 100) }),
+    expressionType: r.expressionType || 'NonXML',
+    routes: r.routes.map((route) => {
+      if (route.end && !['message', 'escalation', 'error'].includes(route.end.kind)) notes.push(`${r.name}, route ${route.name}: a ${route.end.kind} end became a Message End; set it in the CPI web editor`)
+      const steps_ = route.steps.flatMap((x) => convert(x, { inException: false }))
+      return {
+        name: truncate(route.name, 100),
+        ...(route.default ? { default: true } : { condition: spacedCondition(withDefaults(route.condition), r.expressionType) }),
+        ...(steps_.length && { steps: steps_ }),
+        ...(route.end && { end: routeEnd(route.end, `${r.name}, route ${route.name}`) })
+      }
+    })
+  })
+  let steps = routed
+    ? routed.steps.flatMap((s) => (s.type === 'router' ? [routerOf(s)] : convert(s, { inException: false })))
+    : (branching ? branching.steps : parsed.steps || []).flatMap((s) => convert(s, { inException: false }))
+  if (routed) notes.push(`The flow branches: ${routed.steps.filter((s) => s.type === 'router').length} router(s) were imported with their routes`)
+  else if (branching) {
+    if (parsed.routed?.unsupported) notes.push(`The routers could not be imported as routers: ${parsed.routed.unsupported}`)
     const routers = branching.steps.filter((s) => s.routes).length
     const side = branching.steps.flatMap((s) => (s.routes || []).filter((r) => !r.main)).reduce((n, r) => n + r.steps.length, 0)
     notes.push(`The flow branches: only the main path was imported (at each router, the route with a condition). ${side} step(s) of other routes are described in the ${routers} router placeholder(s)`)
   } else if (!parsed.linear) notes.push('The flow branches: the steps of all branches were put one after another; check the order')
 
   // --- end -------------------------------------------------------------------------------
-  const e = (branching ? branching.end : parsed.end) || {}
+  const e = (routed ? routed.end : branching ? branching.end : parsed.end) || {}
   let end = { type: 'none' }
+  if (routed && e.kind && e.kind !== 'message' && e.type === 'none')
+    end = { type: 'none', ...(['escalation', 'error'].includes(e.kind) && { event: e.kind }), ...(e.kind === 'escalation' && categoryOf(e.category, 'The main end')) }
   if (e.type === 'httpReceiver') {
     const system = identifier(e.system, 'Receiver')
     const url = httpUrl(e.url, system)
@@ -317,15 +361,26 @@ async function importIflow(buffer, { fileName, packageId }) {
   let exceptionSubprocess
   if (parsed.exceptionSubprocess) {
     const subSteps = parsed.exceptionSubprocess.steps.flatMap((s) => convert(s, { inException: true }))
-    if (subSteps.length) exceptionSubprocess = { ...(parsed.exceptionSubprocess.name && { name: truncate(parsed.exceptionSubprocess.name, 100) }), steps: subSteps }
-    else notes.push('The exception subprocess has no steps and was left out (the spec needs at least one)')
     const endKind = parsed.exceptionSubprocess.end
-    if (subSteps.length && endKind && endKind !== 'message') {
-      // v1 ends error handling with a Message End: monitoring then shows Completed instead of the original status
-      const kind = { escalation: 'Escalation End', error: 'Error End', terminate: 'Terminate End' }[endKind]
+    if (subSteps.length)
+      exceptionSubprocess = {
+        ...(parsed.exceptionSubprocess.name && { name: truncate(parsed.exceptionSubprocess.name, 100) }),
+        steps: subSteps,
+        // Escalation and Error End are kept (phase 1b)
+        ...(['escalation', 'error'].includes(endKind) && {
+          end: {
+            event: endKind,
+            ...(parsed.exceptionSubprocess.endName && { name: truncate(parsed.exceptionSubprocess.endName, 100) }),
+            ...(endKind === 'escalation' && categoryOf(parsed.exceptionSubprocess.endCategory, 'Exception subprocess'))
+          }
+        })
+      }
+    else notes.push('The exception subprocess has no steps and was left out (the spec needs at least one)')
+    if (subSteps.length && endKind === 'terminate') {
+      // the spec has no Terminate End: the import ends the subprocess with a Message End
       const last = subSteps.at(-1)
-      last.description = truncate([last.description, `Add in the CPI web editor: ${kind} after this step (the import ends the exception subprocess with a Message End)`].filter(Boolean).join('. '), 500)
-      notes.push(`Exception subprocess: the original ends with an ${kind}; v1 uses a Message End, so failed messages show as Completed in monitoring. Add in the CPI web editor: ${kind}`)
+      last.description = truncate([last.description, 'Add in the CPI web editor: Terminate End after this step (the import ends the exception subprocess with a Message End)'].filter(Boolean).join('. '), 500)
+      notes.push('Exception subprocess: the original ends with a Terminate End; the import uses a Message End. Add in the CPI web editor: Terminate End')
     }
   }
 
@@ -352,7 +407,9 @@ async function importIflow(buffer, { fileName, packageId }) {
       throw fail('IMPORT_TOO_LARGE', `The ${where.toLowerCase()} has ${out.length} steps after merging placeholders; v1 builds at most ${max}.`, 'Split the iFlow, or remove steps before importing.')
     return out
   }
-  steps = mergeRuns(steps, MAX_STEPS, 'Main flow')
+  // routers and the steps inside routes count towards the limit; only main-line placeholders are merged
+  const inRoutes = steps.filter((s) => s.type === 'router').reduce((n, r) => n + r.routes.reduce((m, x) => m + (x.steps?.length || 0), 0), 0)
+  steps = mergeRuns(steps, MAX_STEPS - inRoutes, 'Main flow')
   if (exceptionSubprocess) exceptionSubprocess.steps = mergeRuns(exceptionSubprocess.steps, MAX_EXCEPTION_STEPS, 'Exception subprocess')
 
   // --- unique names, placeholder markers removed ------------------------------------------------
@@ -360,8 +417,9 @@ async function importIflow(buffer, { fileName, packageId }) {
     const { placeholder: what, ...step } = s
     return { ...step, name: uniqueName(s.name || (what ? 'Placeholder' : step.type === 'groovyScript' ? 'Groovy Script' : step.type === 'contentModifier' ? 'Content Modifier' : words(step.type))) }
   }
-  const placeholders = [...steps, ...(exceptionSubprocess?.steps || [])].filter((s) => s.placeholder).length
-  steps = steps.map(finish)
+  const routeSteps = steps.filter((s) => s.type === 'router').flatMap((r) => r.routes.flatMap((x) => x.steps || []))
+  const placeholders = [...steps, ...routeSteps, ...(exceptionSubprocess?.steps || [])].filter((s) => s.placeholder).length
+  steps = steps.map((s) => (s.type === 'router' ? { ...finish(s), routes: s.routes.map((x) => (x.steps ? { ...x, steps: x.steps.map(finish) } : x)) } : finish(s)))
   if (exceptionSubprocess) {
     exceptionSubprocess.steps = exceptionSubprocess.steps.map(finish)
     exceptionSubprocess.name = uniqueName(exceptionSubprocess.name || 'Exception Subprocess 1')

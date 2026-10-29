@@ -26,8 +26,12 @@ describe('validator', () => {
     expect(errors).toEqual(expect.arrayContaining(["spec: missing required field 'name'", "spec: missing required field 'trigger'"]))
   })
 
-  test.each(['router', 'splitter', 'messageMapping', 'contentBasedRouter'])('rejects %s with a clear v1 message', (type) => {
-    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' is not supported in v1 — flows must be linear`))
+  test.each(['splitter', 'messageMapping'])('rejects %s with a clear message', (type) => {
+    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' is not supported yet \\(no splitter, multicast, join or mapping\\)`))
+  })
+
+  test('another router type points to the router format (phase 1b)', () => {
+    expectError(baseSpec({ steps: [{ type: 'contentBasedRouter' }] }), /steps\[0\]: 'contentBasedRouter' — a router is \{ "type": "router", "expressionType"/)
   })
 
   test('rejects unknown step, trigger and end types', () => {
@@ -182,7 +186,7 @@ describe('validator', () => {
       steps: [
         { type: 'contentModifier', name: 'A' },
         { type: 'contentModifier', name: 'A', headers: [{ name: 'X', type: 'numberRange', value: '/a' }] },
-        { type: 'router' },
+        { type: 'splitter' },
         ...Array.from({ length: 49 }, () => ({ type: 'jsonToXml' }))
       ],
       end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'Basic' } // no credentialName
@@ -224,7 +228,7 @@ describe('duplicate names say where and what to do ((d) run: three identical fai
     const r = validate(baseSpec({ steps: [{ type: 'jsonToXml', name: 'A' }], exceptionSubprocess: { steps: [cm, script, script] } }), { attachments: ['Script_SetCustomHeaders_Exc.groovy'] })
     const fix = 'the same step was added twice: remove exceptionSubprocess.steps[2] (editDraftSpec {"op":"removeStep","index":2,"exception":true})'
     expect(r.errors).toEqual([
-      `steps: step name 'Script_SetCustomHeaders_Exc' is used more than once, at exceptionSubprocess.steps[1] and exceptionSubprocess.steps[2] — step names must be unique (main flow and exception subprocess together); ${fix}`,
+      `steps: step name 'Script_SetCustomHeaders_Exc' is used more than once, at exceptionSubprocess.steps[1] and exceptionSubprocess.steps[2] — step names must be unique (main flow, routes and exception subprocess together); ${fix}`,
       `steps: Groovy fileName 'Script_SetCustomHeaders_Exc' is used more than once, at exceptionSubprocess.steps[1] and exceptionSubprocess.steps[2] — each script needs its own file; ${fix}`
     ])
   })
@@ -232,7 +236,7 @@ describe('duplicate names say where and what to do ((d) run: three identical fai
   test('different steps with one name: rename or remove', () => {
     const r = validate(baseSpec({ steps: [{ type: 'jsonToXml', name: 'Convert' }, { type: 'xmlToJson', name: 'Convert' }] }))
     expect(r.errors).toEqual([
-      `steps: step name 'Convert' is used more than once, at steps[0] and steps[1] — step names must be unique (main flow and exception subprocess together); rename all but one, or remove the extra step (editDraftSpec {"op":"removeStep","index":1})`
+      `steps: step name 'Convert' is used more than once, at steps[0] and steps[1] — step names must be unique (main flow, routes and exception subprocess together); rename all but one, or remove the extra step (editDraftSpec {"op":"removeStep","index":1})`
     ])
   })
 })
@@ -259,5 +263,72 @@ describe('characters (full review: MANIFEST injection and control characters)', 
     expect(h.split('\r\n').filter(Boolean).every((l) => Buffer.byteLength(l) <= 72)).toBe(true)
     expect(parseManifest(h)['Bundle-Name']).toBe(long)
     expect(Object.keys(parseManifest(manifestHeader('Bundle-Name', 'X\nSAP-BundleType: Evil')))).toEqual(['Bundle-Name'])
+  })
+})
+
+describe('routers (phase 1b)', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: '1' }] })
+  const router = (routes, expressionType = 'NonXML') => ({ type: 'router', name: 'RT', expressionType, routes })
+  const errs = (steps, end) => errorsOf(baseSpec({ steps, ...(end && { end }) }))
+
+  test('a valid router: conditions, a default route listed last, a route that ends', () => {
+    expect(errs([cm('A'), router([{ name: 'R1', condition: "${property.k} = 'A'", steps: [cm('B')] }, { name: 'R2', default: true, end: { event: 'error' } }]), cm('C')])).toEqual([])
+  })
+
+  test('exactly one default route, listed last, without a condition; every other route has a condition', () => {
+    expect(errs([router([{ name: 'R1', default: true }, { name: 'R2', default: true }])])).toEqual([expect.stringMatching(/^steps\[0\]\.routes: exactly one route needs "default": true \(found 2\)/)])
+    expect(errs([router([{ name: 'R2', default: true }, { name: 'R1', condition: '${a} = 1' }])])).toEqual(["steps[0].routes: list the default route 'R2' last — CPI evaluates it last"])
+    expect(errs([router([{ name: 'R1' }, { name: 'R2', default: true }])])).toEqual(["steps[0].routes[0]: a route that is not the default needs a 'condition'"])
+    expect(errs([router([{ name: 'R1', condition: '${a} = 1' }, { name: 'R2', default: true, condition: '${b} = 2' }])])).toEqual(["steps[0].routes[1]: the default route has no condition — remove 'condition'"])
+  })
+
+  test('Non-XML conditions need spaces around the operator; XML conditions are XPath', () => {
+    expect(errs([router([{ name: 'R1', condition: "${property.x}='A'" }, { name: 'R2', default: true }])])).toEqual([
+      'steps[0].routes[0].condition: put spaces around the operator, e.g. "${property.x} = \'A\'", not "${property.x}=\'A\'"'
+    ])
+    for (const ok of ["${property.x} != 'A'", '${header.n} >= 5', "${property.a} = 'x=y'"]) expect([ok, errs([router([{ name: 'R1', condition: ok }, { name: 'R2', default: true }])])]).toEqual([ok, []])
+    expect(errs([router([{ name: 'R1', condition: '${a} = 1' }, { name: 'R2', default: true }], 'XML')])).toEqual([expect.stringMatching(/^steps\[0\]\.routes\[0\]\.condition: an XML condition is an XPath/)])
+  })
+
+  test('if every route ends, the router is the last step and the main end is "none"', () => {
+    const allEnd = router([{ name: 'R1', condition: '${a} = 1', end: { event: 'message' } }, { name: 'R2', default: true, end: { event: 'error' } }])
+    expect(errs([allEnd])).toEqual([])
+    expect(errs([allEnd, cm('C')])).toEqual([expect.stringMatching(/^steps\[0\]: every route ends, so the steps after the router can never run/)])
+    expect(errs([allEnd], { type: 'httpReceiver', url: 'https://x.example.com', method: 'POST', authType: 'None' })).toEqual([
+      'end: every route of the last router ends, so the main flow has no end of its own — set "end": { "type": "none" }'
+    ])
+  })
+
+  test('routers only on the main line; route names unique; 50 steps counting routers and route steps', () => {
+    const nested = router([{ name: 'R1', condition: '${a} = 1', steps: [{ ...router([{ name: 'X', condition: '${b} = 1' }, { name: 'Y', default: true }]), name: 'Inner' }] }, { name: 'R2', default: true }])
+    expect(errs([nested])).toEqual([expect.stringMatching(/^steps\[0\]\.routes\[0\]\.steps\[0\]: a router inside a route is not supported/)])
+    expect(errs([router([{ name: 'R', condition: '${a} = 1' }, { name: 'R', default: true }])])).toEqual([
+      "steps[0].routes: route name 'R' is used more than once — route names must be unique within a router"
+    ])
+    const big = router([{ name: 'R1', condition: '${a} = 1', steps: Array.from({ length: 30 }, (_, i) => cm(`S${i}`)) }, { name: 'R2', default: true }])
+    const main = Array.from({ length: 20 }, (_, i) => cm(`M${i}`))
+    expect(errs([...main, big])).toEqual(['steps: 51 steps with the routers and the steps inside routes — at most 50; merge Content Modifiers or move logic into one Groovy script'])
+  })
+
+  test('end events: message, escalation or error; a receiver end is a Message End', () => {
+    expect(errorsOf(baseSpec({ end: { type: 'none', event: 'escalation' } }))).toEqual([])
+    expect(errorsOf(baseSpec({ exceptionSubprocess: { steps: [cm('E')], end: { event: 'escalation', name: 'Escalate' } } }))).toEqual([])
+    expect(errorsOf(baseSpec({ end: { type: 'none', event: 'terminate' } }))).toEqual(['end.event: must be one of message, escalation, error'])
+    expect(errorsOf(baseSpec({ end: { type: 'httpReceiver', url: 'https://x.example.com', method: 'POST', authType: 'None', event: 'error' } }))).toEqual([
+      "end: unknown field 'event'"
+    ])
+  })
+})
+
+describe('Escalation End category (phase 1b)', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: '1' }] })
+  test('Others (default) or RoutingConditionNotMet, only on an Escalation End', () => {
+    expect(errorsOf(baseSpec({ end: { type: 'none', event: 'escalation' } }))).toEqual([])
+    expect(errorsOf(baseSpec({ end: { type: 'none', event: 'escalation', category: 'RoutingConditionNotMet' } }))).toEqual([])
+    expect(errorsOf(baseSpec({ exceptionSubprocess: { steps: [cm('E')], end: { event: 'escalation', category: 'Others' } } }))).toEqual([])
+    expect(errorsOf(baseSpec({ end: { type: 'none', event: 'error', category: 'Others' } }))).toEqual([
+      'end.category: only an Escalation End has a category — remove it, or set "event": "escalation"'
+    ])
+    expect(errorsOf(baseSpec({ end: { type: 'none', event: 'escalation', category: 'ReceiverNotFound' } }))).toEqual(['end.category: must be one of Others, RoutingConditionNotMet'])
   })
 })

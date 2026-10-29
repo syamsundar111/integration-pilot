@@ -192,7 +192,13 @@ function walk(container, include = () => true) {
     if (el.localName === 'sequenceFlow') {
       ;(outgoing[el.getAttribute('sourceRef')] ||= []).push(el.getAttribute('targetRef'))
       const condition = text(child(el, 'conditionExpression')).trim() || props(el).expression || ''
-      ;(flows[el.getAttribute('sourceRef')] ||= []).push({ id: el.getAttribute('id'), name: el.getAttribute('name') || '', target: el.getAttribute('targetRef'), condition })
+      ;(flows[el.getAttribute('sourceRef')] ||= []).push({
+        id: el.getAttribute('id'),
+        name: el.getAttribute('name') || '',
+        target: el.getAttribute('targetRef'),
+        condition,
+        expressionType: props(el).expressionType || ''
+      })
     } else if (include(el)) nodes[el.getAttribute('id')] = el
   }
   const startNode = Object.values(nodes).find((n) => n.localName === 'startEvent')
@@ -282,7 +288,128 @@ function mainPath({ startNode, nodes, flows }) {
   return { path, branches }
 }
 
+/**
+ * A branching flow as the spec holds it: main-line steps, where a router's routes either end or continue
+ * with the step after the router (every continuing route joins there). Route steps are parsed steps, a
+ * router is { type: 'router', name, expressionType, routes: [{ name, condition, default, steps, end }] }
+ * with the default route last; end: { kind, name } of an ending route. When the flow does not fit (a
+ * router inside a route, a route that goes back or joins elsewhere, a fork that is not a router, a
+ * Terminate End): { unsupported: reason }.
+ * @returns {{ steps: object[], endNode: Element|null } | { unsupported: string }}
+ */
+function routedFlow({ startNode, nodes, flows }, adaptersBySource) {
+  const out = (id) => (flows[id] || []).filter((f) => nodes[f.target])
+  const label = (n) => n.getAttribute('name') || n.getAttribute('id')
+  const fail = (unsupported) => ({ unsupported })
+  if (!startNode) return fail('no start event')
+  const endOf = (n) => {
+    const kind = endKind(n)
+    if (kind === 'terminate') return null
+    return { kind, name: n.getAttribute('name') || null, ...(kind === 'escalation' && { category: escalationCategory(n) }) }
+  }
+  // the nodes of a route from its first node: until an end event, or a gateway (where it stops)
+  const follow = (first) => {
+    const seq = []
+    const seen = new Set()
+    for (let id = first; id; ) {
+      const n = nodes[id]
+      if (!n || seen.has(id)) return { seq, loop: true }
+      seen.add(id)
+      if (n.localName === 'endEvent') return { seq, endNode: n }
+      if (/Gateway$/.test(n.localName)) return { seq, stop: id }
+      seq.push(id)
+      const next = out(id)
+      if (next.length !== 1) return { seq, fork: n }
+      id = next[0].target
+    }
+    return { seq, loop: true }
+  }
+
+  const steps = []
+  const onMain = new Set()
+  let next = out(startNode.getAttribute('id'))
+  if (next.length !== 1) return fail(`the start event has ${next.length} outgoing flows`)
+  let id = next[0].target
+  let endNode = null
+  while (id) {
+    const n = nodes[id]
+    if (!n) return fail('a flow leads nowhere')
+    if (onMain.has(id)) return fail(`the flow goes back to ${label(n)}`)
+    onMain.add(id)
+    if (n.localName === 'endEvent') {
+      if (!endOf(n)) return fail(`${label(n)} is a Terminate End`)
+      endNode = n
+      break
+    }
+    if (n.localName === 'parallelGateway') return fail(`${label(n)} is a multicast or join`)
+    if (n.localName !== 'exclusiveGateway') {
+      steps.push(stepOf(n, adaptersBySource))
+      next = out(id)
+      if (next.length !== 1) return fail(`${label(n)} has ${next.length} outgoing flows without a router`)
+      id = next[0].target
+      continue
+    }
+    // a router: routes that share no node with another route end on their own; the others continue to the
+    // first node they share (the join), which must be the same for all of them
+    // in the router's outgoing order (CPI's evaluation order; the flows' XML order may differ)
+    const order = childrenNamed(n, 'outgoing').map((o) => text(o).trim())
+    const rank = (f) => (order.includes(f.id) ? order.indexOf(f.id) : order.length)
+    const routes = [...out(id)].sort((a, b) => rank(a) - rank(b)).map((f) => ({ f, ...follow(f.target) }))
+    for (const r of routes) {
+      if (r.loop) return fail(`route ${r.f.name || r.f.id} of ${label(n)} goes back`)
+      if (r.fork) return fail(`route ${r.f.name || r.f.id} of ${label(n)} forks at ${label(r.fork)}`)
+      if (r.endNode && !endOf(r.endNode)) return fail(`route ${r.f.name || r.f.id} of ${label(n)} ends with a Terminate End`)
+      r.path = [...r.seq, r.stop || r.endNode.getAttribute('id')]
+    }
+    const uses = {}
+    for (const r of routes) for (const x of new Set(r.path)) uses[x] = (uses[x] || 0) + 1
+    for (const r of routes) r.join = r.path.find((x) => uses[x] > 1) ?? (r.stop || null)
+    const continuing = routes.filter((r) => r.join)
+    const join = continuing[0]?.join || null
+    if (continuing.some((r) => r.join !== join)) return fail(`the routes of ${label(n)} do not join again at one step`)
+    for (const r of routes) {
+      r.own = r.join ? r.path.slice(0, r.path.indexOf(r.join)) : r.seq
+      if (r.own.some((x) => /Gateway$/.test(nodes[x].localName))) return fail(`a route of ${label(n)} contains another router`)
+    }
+    const defaultId = n.getAttribute('default')
+    // the condition type of the routes with a condition (CPI may store another one on the default route)
+    const types = [...new Set(routes.filter((r) => r.f.id !== defaultId).map((r) => r.f.expressionType).filter(Boolean))]
+    if (types.length > 1) return fail(`the routes of ${label(n)} mix expression types (${types.join(', ')})`)
+    const toRoute = (r) => ({
+      name: r.f.name || r.f.id,
+      condition: r.f.condition || '',
+      default: r.f.id === defaultId,
+      steps: r.own.map((x) => stepOf(nodes[x], adaptersBySource)),
+      end: r.join ? null : endOf(r.endNode)
+    })
+    // only one route continues: its steps are the main line after the router (same flow, easier to read)
+    const single = continuing.length === 1 ? continuing[0] : null
+    const mainAfter = single ? single.own : []
+    if (single) single.own = []
+    const parsed = routes.map(toRoute)
+    steps.push({
+      ...stepOf(n, adaptersBySource),
+      type: 'router',
+      expressionType: types[0] || null,
+      routes: [...parsed.filter((r) => !r.default), ...parsed.filter((r) => r.default)] // the default route last
+    })
+    for (const x of mainAfter) {
+      onMain.add(x)
+      steps.push(stepOf(nodes[x], adaptersBySource))
+    }
+    if (!join) break // every route ends: the router is the last step
+    id = join
+  }
+  return { steps, endNode }
+}
+
 /** 'escalation', 'error', 'terminate' or 'message' (a plain or message end) */
+/** The category of an Escalation End (stored as ErrorCode, e.g. Others, RoutingConditionNotMet), else null */
+function escalationCategory(node) {
+  const def = node && child(node, 'escalationEventDefinition')
+  return def ? props(def).ErrorCode || null : null
+}
+
 function endKind(node) {
   if (!node) return null
   if (child(node, 'escalationEventDefinition')) return 'escalation'
@@ -369,7 +496,9 @@ async function parse(input) {
         id: el.getAttribute('id'),
         name: el.getAttribute('name'),
         steps: inner.order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepOf(n, adaptersBySource)),
-        end: endKind(inner.order.find((n) => n.localName === 'endEvent'))
+        end: endKind(inner.order.find((n) => n.localName === 'endEvent')),
+        endName: inner.order.find((n) => n.localName === 'endEvent')?.getAttribute('name') || null,
+        endCategory: escalationCategory(inner.order.find((n) => n.localName === 'endEvent'))
       }
     })
 
@@ -407,6 +536,31 @@ async function parse(input) {
   const mainEndKind = endNodes.length === 1 ? endKind(endNodes[0]) : null
   if (mainEndKind && mainEndKind !== 'message') end.kind = mainEndKind
   if (endNodes.length > 1) linear = false
+
+  // Branching flows as the spec holds them: routers whose routes end or join again; end: the main end
+  // (null when every route of the last router ends), with its kind
+  let routed = null
+  if (!mainLinear || endNodes.length > 1) {
+    const r = routedFlow(mainWalk, adaptersBySource)
+    if (r.unsupported) routed = r
+    else {
+      const a = r.endNode && adaptersBySource[r.endNode.getAttribute('id')]
+      const routedEnd = !r.endNode
+        ? null
+        : !a
+          ? { type: 'none' }
+          : a.type === 'HTTP'
+            ? { type: 'httpReceiver', ...httpCall(a) }
+            : { type: 'receiver', adapter: a.type, system: a.system, address: a.address }
+      if (routedEnd)
+        Object.assign(routedEnd, {
+          kind: endKind(r.endNode),
+          name: r.endNode.getAttribute('name') || null,
+          ...(endKind(r.endNode) === 'escalation' && { category: escalationCategory(r.endNode) })
+        })
+      routed = { steps: r.steps, end: routedEnd }
+    }
+  }
 
   // Branching flows: the main path alone, with its end, and what the side branches do
   let branching = null
@@ -456,6 +610,8 @@ async function parse(input) {
     mappings,
     linear,
     mainPath: branching, // branching flows only: { steps (routers carry routes), end }
+    // branching flows only: the flow as the spec holds it ({ steps, end }), or { unsupported: reason }
+    routed,
     exceptionSubprocess: exceptionSubprocesses[0] || null,
     exceptionSubprocessCount: exceptionSubprocesses.length,
     // names of all processes that are not local (normally one: the main flow); more than one is in warnings

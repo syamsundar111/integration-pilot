@@ -139,21 +139,54 @@ describe('update blockers: JSON <-> XML converter settings (review: an update re
   })
 })
 
-describe('update blockers: Error / Escalation / Terminate ends (review: an update made them Message Ends)', () => {
+describe('end events on update: Message, Escalation and Error End are kept (phase 1b); a Terminate End is a blocker', () => {
   // end events of the built iFlow: the main end first, the exception subprocess end second
   const endDef = (which, def) => (xml) => {
     let i = 0
     return xml.replace(/<bpmn2:messageEventDefinition\/>(\s*<\/bpmn2:endEvent>)/g, (m, close) => (i++ === which ? `<bpmn2:${def}/>${close}` : m))
   }
 
-  test('an Error End in the exception subprocess is a blocker', async () => {
+  test('an Error End in the exception subprocess is kept as its end event', async () => {
     const r = await readBack(endDef(1, 'errorEventDefinition'))
-    expect(r.spec).toBeNull()
-    expect(r.blockers).toEqual(['the exception subprocess ends with an Error End; an update would make it a Message End (failed messages would show as COMPLETED)'])
+    expect(r.blockers).toEqual([])
+    expect(r.spec.exceptionSubprocess.end).toEqual({ event: 'error', name: 'End 1' })
   })
 
-  test('an Escalation End of the main flow is a blocker', async () => {
+  test('an Escalation End of the main flow is kept as end.event', async () => {
     const r = await readBack(endDef(0, 'escalationEventDefinition'))
-    expect(r.blockers).toEqual(['the main flow ends with an Escalation End; an update would make it a Message End'])
+    expect(r.blockers).toEqual([])
+    expect(r.spec.end).toEqual({ type: 'none', event: 'escalation' })
+  })
+
+  test('a Terminate End is a blocker', async () => {
+    const r = await readBack(endDef(0, 'terminateEventDefinition'))
+    expect(r.blockers).toEqual(['the main flow ends with a terminate end (only Message, Escalation or Error End)'])
+  })
+})
+
+describe('Escalation End category on update and import (phase 1b)', () => {
+  const { importIflow } = require('../srv/iflow-builder/import')
+  const escalate = (category) => (xml) => {
+    // the exception subprocess's Message End becomes an Escalation End with this category
+    let i = 0
+    return xml.replace(/<bpmn2:messageEventDefinition\/>(\s*<\/bpmn2:endEvent>)/g, (m, close) =>
+      i++ === 1
+        ? `<bpmn2:escalationEventDefinition><bpmn2:extensionElements><ifl:property><key>ErrorCode</key><value>${category}</value></ifl:property></bpmn2:extensionElements></bpmn2:escalationEventDefinition>${close}`
+        : m
+    )
+  }
+  test('an allowed category is kept; another one is a blocker', async () => {
+    expect((await readBack(escalate('RoutingConditionNotMet'))).spec.exceptionSubprocess.end).toEqual({ event: 'escalation', name: 'End 1', category: 'RoutingConditionNotMet' })
+    expect((await readBack(escalate('ReceiverNotFound'))).blockers).toEqual([
+      "the exception subprocess ends with an Escalation End of category 'ReceiverNotFound', which an update cannot keep"
+    ])
+  })
+  test('import: another category becomes Others, with a note', async () => {
+    const zip = await JSZip.loadAsync(Buffer.from((await build(spec)).zipBase64, 'base64'))
+    const file = Object.keys(zip.files).find((f) => IFLW.test(f))
+    zip.file(file, escalate('ReceiverNotFound')(await zip.file(file).async('string')))
+    const r = await importIflow(await zip.generateAsync({ type: 'nodebuffer' }), { fileName: 'x.zip', packageId: 'PilotReference' })
+    expect(r.spec.exceptionSubprocess.end).toMatchObject({ event: 'escalation', category: 'Others' })
+    expect(r.notes).toContain('Exception subprocess: the escalation category ReceiverNotFound became Others; set ReceiverNotFound in the CPI web editor')
   })
 })

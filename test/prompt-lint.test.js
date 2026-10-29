@@ -27,10 +27,16 @@ describe('prompt linter', () => {
     expect(lint('Create an iFlow that posts the order to https://example.org/orders')).toEqual([])
   })
 
+  test('a join of routes is no step; a Join step is (phase 1b)', () => {
+    expect(lint('Create an iFlow on a timer, package P, no auth: a router; both routes join again at CM_Join.')).toEqual([])
+    expect(keys(lint('Create an iFlow on a timer, package P, no auth: a multicast, then a join step and a gather.'))).toEqual(['unsupported'])
+    expect(lint('Create an iFlow on a timer, package P, no auth: a multicast, then a join step.')[0].message).toMatch(/Not supported yet: join, multicast\./)
+  })
+
   test('unsupported step kinds, ignoring quoted text', () => {
     const w = lint('Build an iFlow on a timer in package P: use a router, then a General Splitter, an XSLT, a message mapping and an SFTP receiver, a Write Variables step and a Process Call. No auth.')
     expect(keys(w)).toEqual(['unsupported'])
-    expect(w[0].message).toMatch(/router, splitter, XSLT, mapping, SFTP, process call/) // Write Variables is supported (phase 1a)
+    expect(w[0].message).toMatch(/Not supported yet: splitter, XSLT, mapping, SFTP, process call\./) // Write Variables (1a) and routers (1b) are supported
     expect(w[0].message).toMatch(/Attach the .xsl file/)
     expect(lint('Build an iFlow on a timer in package P that sets property Kind = "router mapping". No auth.')).toEqual([])
     expect(keys(lint('Add a multicast after step 2, then gather and join the branches'))).toEqual(['unsupported'])
@@ -78,7 +84,7 @@ describe('prompt linter', () => {
     ].join('\n')
     expect(lint(request)).toEqual([])
     // outside quotes they are still found
-    expect(keys(lint(`${request}\n5. Add a router after step 4. Set header X = {{Other}}.`))).toEqual(['unsupported', 'params'])
+    expect(keys(lint(`${request}\n5. Add a splitter after step 4. Set header X = {{Other}}.`))).toEqual(['unsupported', 'params'])
   })
 
   describe('follow-up messages (manual test 9)', () => {
@@ -97,7 +103,9 @@ describe('prompt linter', () => {
       // a new clause ends the negation
       const w = lint('Build an iFlow on a timer in package P without a router, but add a splitter. No auth.')
       expect(w.map((x) => x.message)).toEqual([expect.stringMatching(/Not supported yet: splitter\./)])
-      expect(keys(lint('Build an iFlow on a timer in package P, no authentication, use a router.'))).toEqual(['unsupported'])
+      expect(keys(lint('Build an iFlow on a timer in package P, no authentication, use a splitter.'))).toEqual(['unsupported'])
+      // routers are supported (phase 1b)
+      expect(lint('Build an iFlow on a timer in package P, no authentication, use a router.')).toEqual([])
     })
 
     test('the reply "skip them" does not repeat the warning of the first message', () => {
@@ -109,9 +117,9 @@ describe('prompt linter', () => {
     test('only warnings that are new compared with the first message are shown', () => {
       expect(lint('Also add a Content Modifier that sets header Source = SF.', { history: [first] })).toEqual([])
       // a step kind not named before is new; the ones already warned about are not repeated
-      const w = lint('Add a multicast after step 2 and a router.', { history: [first] })
+      const w = lint('Add a multicast after step 2 and a mapping step.', { history: [first] })
       expect(keys(w)).toEqual(['unsupported'])
-      expect(w[0].message).toMatch(/Not supported yet: router, multicast\./)
+      expect(w[0].message).toMatch(/Not supported yet: multicast, mapping\./)
       // new {{Param}} outside a URL
       expect(keys(lint('Add header Source = {{SourceSystem}}.', { history: [first] }))).toEqual(['params'])
     })

@@ -31,10 +31,10 @@ sap.ui.define([], () => {
 
   // Step kinds v1 does not build. Quoted text and code are ignored ("contains \"mapping\"" is data, not a step).
   const UNSUPPORTED = [
-    ['router', /\b(content[- ]based )?router\b/i],
     ['splitter', /\bsplitter\b/i],
     ['gather', /\bgather\b/i],
-    ['join', /\bjoin\b(?!\s+(to|with|on|by)\b)/i],
+    // a Join step (after a multicast); "the routes join again" is how a router's routes continue, not a step
+    ['join', /\b(a|an|the|add|use)\s+join\b(?!\s+(again|to|with|on|by)\b)|\bjoin\s+(step|gateway|component)\b/i],
     ['multicast', /\bmulticast\b/i],
     ['XSLT', /\bxslt\b|\bxsl (mapping|transformation)\b/i],
     ['mapping', /\b(message|graphical|operation|xml|edmx)\s+mapping\b|\bmapping\s+(step|artifact)\b|\b(an?|add|use|via|with)\s+(an?\s+)?mapping\b/i],
@@ -106,7 +106,7 @@ sap.ui.define([], () => {
 
   const WARNINGS = {
     unsupported: (found) =>
-      `Not supported yet: ${found.join(', ')}. Flows are linear (Content Modifier, Groovy Script, Write Variables, JSON/XML converters, HTTP request-reply). Use a Groovy script, or add the step in the CPI web editor after creation.` +
+      `Not supported yet: ${found.join(', ')}. Supported: Content Modifier, Groovy Script, Write Variables, JSON/XML converters, HTTP request-reply and routers. Use a Groovy script, or add the step in the CPI web editor after creation.` +
       (found.includes('XSLT') ? ' Attach the .xsl file to include it in the iFlow, ready for an XSLT Mapping step.' : ''),
     params: (names) =>
       `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, or as a constant value. Use literal values elsewhere.`,

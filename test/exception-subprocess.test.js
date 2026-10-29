@@ -125,12 +125,15 @@ describe('exception subprocess: builder', () => {
     }
   })
 
-  test('request-reply receivers move below the taller pool', async () => {
+  test('request-reply receivers sit above the pool, so their connectors never cross the subprocess below', async () => {
     const rr = { type: 'requestReplyHttp', url: 'https://example.org', method: 'GET', authType: 'None' }
     const { doc } = await built(orderSpec({ steps: [rr] }))
     const pool = bounds(shapeOf(doc, 'Participant_Process_1'))
+    const sub = bounds(shapeOf(doc, all(doc, 'subProcess')[0].getAttribute('id')))
     const receiver = all(doc, 'participant').find((p) => p.getAttribute('ifl:type') === 'EndpointRecevier')
-    expect(bounds(shapeOf(doc, receiver.getAttribute('id'))).y).toBeGreaterThan(pool.y + pool.height)
+    const box = bounds(shapeOf(doc, receiver.getAttribute('id')))
+    expect(box.y + box.height).toBeLessThan(pool.y)
+    expect(sub.y).toBeGreaterThan(pool.y)
   })
 
   test('Groovy scripts of the subprocess are bundled; without a subprocess nothing changes', async () => {

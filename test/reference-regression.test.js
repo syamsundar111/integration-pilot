@@ -230,3 +230,126 @@ describe('Ref_Router_Ends: Timer start every 15 minutes (phase 1a; the routers f
     expect(Object.keys(s1).sort()).toEqual(Object.keys(s2).sort())
   })
 })
+
+describe('Ref_Router_Ends: routers, routes, end events and the join (phase 1b)', () => {
+  // test/reference-prompts/Ref_Router_Ends.txt in the agreed branch format
+  const cm = (name, prop, value) => ({ type: 'contentModifier', name, properties: [{ name: prop, type: 'constant', value, datatype: 'java.lang.String' }] })
+  const spec = {
+    id: 'Ref_Router_Ends',
+    name: 'Ref_Router_Ends',
+    packageId: 'PilotReference',
+    trigger: { type: 'timer', mode: 'every', minutes: 15 },
+    steps: [
+      { ...cm('CM_SetInput', 'routeKey', 'A'), body: '<root><type>X</type></root>' },
+      {
+        type: 'router',
+        name: 'RT_NonXml',
+        expressionType: 'NonXML',
+        routes: [
+          { name: 'R_Continue', condition: "${property.routeKey} = 'A'" },
+          { name: 'R_Escalate', condition: "${property.routeKey} = 'B'", end: { event: 'escalation', name: 'EE_Route', category: 'RoutingConditionNotMet' } },
+          { name: 'R_Default', default: true, end: { event: 'error', name: 'ERR_Route' } }
+        ]
+      },
+      {
+        type: 'router',
+        name: 'RT_Xml',
+        expressionType: 'XML',
+        routes: [
+          { name: 'R_TypeX', condition: "/root/type = 'X'", steps: [cm('CM_RouteX', 'route', 'X')] },
+          { name: 'R_Other', default: true, steps: [cm('CM_RouteOther', 'route', 'OTHER')] }
+        ]
+      },
+      cm('CM_Join', 'joined', 'true')
+    ],
+    end: { type: 'none' },
+    exceptionSubprocess: {
+      name: 'ESP_Errors',
+      steps: [{ type: 'contentModifier', name: 'CM_ErrorInfo', properties: [{ name: 'errorText', type: 'expression', value: '${exception.message}', datatype: 'java.lang.String' }] }],
+      end: { event: 'escalation', name: 'EE_Exception', category: 'Others' }
+    }
+  }
+  const IGLOW = ['Set log headers'] // iGlow's extra step in the reference (CLAUDE.md: ignore)
+
+  let builtZip, built, reference
+  beforeAll(async () => {
+    builtZip = Buffer.from((await build(spec)).zipBase64, 'base64')
+    built = await parse(builtZip)
+    reference = await parse(readRef('Ref_Router_Ends.zip'))
+  })
+
+  /** The routed structure without ids and iGlow extras, routes in evaluation order */
+  const structure = (p) => JSON.parse(JSON.stringify(p.routed.steps.filter((s) => !IGLOW.includes(s.name)), (k, v) => (k === 'id' ? undefined : v)))
+
+  test('routes keep their order: the spec order in the built router, the prompt order in the reference (default last)', async () => {
+    const order = (p) => p.routed.steps.filter((s) => s.routes).map((s) => s.routes.map((r) => r.name))
+    expect(order(reference)).toEqual([
+      ['R_Continue', 'R_Escalate', 'R_Default'],
+      ['R_TypeX', 'R_Other']
+    ])
+    expect(order(built)).toEqual(spec.steps.filter((s) => s.routes).map((s) => s.routes.map((r) => r.name)))
+    // the built router lists its routes in the spec order twice: its outgoing flows and the flows themselves
+    const zip = await JSZip.loadAsync(builtZip)
+    const xml = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+    const flowName = (id) => xml.match(new RegExp(`<bpmn2:sequenceFlow id="${id}" name="([^"]+)"`))[1]
+    for (const [, id, body] of xml.matchAll(/<bpmn2:exclusiveGateway[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/bpmn2:exclusiveGateway>/g)) {
+      const outgoing = [...body.matchAll(/<bpmn2:outgoing>([^<]+)</g)].map((m) => flowName(m[1]))
+      const flows = [...xml.matchAll(new RegExp(`<bpmn2:sequenceFlow id="[^"]+" name="([^"]+)" sourceRef="${id}"`, 'g'))].map((m) => m[1])
+      expect(flows).toEqual(outgoing)
+      expect(order(built)).toContainEqual(outgoing)
+    }
+  })
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('the same routers, routes, conditions, defaults, route steps, ends and join as the reference', () => {
+    expect(structure(built)).toEqual(structure(reference))
+    expect(built.routed.end).toEqual({ ...reference.routed.end, name: 'End' })
+  })
+
+  test('the exception subprocess ends with the Escalation End EE_Exception, category Others', () => {
+    expect(built.exceptionSubprocess).toMatchObject({ end: 'escalation', endName: 'EE_Exception', endCategory: 'Others', steps: [{ name: 'CM_ErrorInfo' }] })
+    expect(reference.exceptionSubprocess).toMatchObject({ end: 'escalation', endName: 'EE_Exception', endCategory: 'Others' })
+  })
+
+  test('escalation categories: RoutingConditionNotMet on EE_Route, as stored in the reference', () => {
+    const route = (p) => p.routed.steps.find((s) => s.name === 'RT_NonXml').routes.find((r) => r.name === 'R_Escalate')
+    expect(route(built).end).toEqual({ kind: 'escalation', name: 'EE_Route', category: 'RoutingConditionNotMet' })
+    expect(route(reference).end).toEqual(route(built).end)
+  })
+
+  /** Properties of every gateway, route and end event, by name (ids, versions and the empty iGlow default route aside) */
+  async function branchProps(zipBuffer) {
+    const zip = await JSZip.loadAsync(zipBuffer)
+    const iflw = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+    const out = {}
+    for (const [el, tag, name] of iflw.matchAll(/<bpmn2:(exclusiveGateway|sequenceFlow|endEvent)\b[^>]*\bname="([^"]+)"[^>]*[^/]>[\s\S]*?<\/bpmn2:\1>/g)) {
+      if (tag === 'sequenceFlow' && !/GatewayRoute/.test(el)) continue
+      const props = Object.fromEntries([...el.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
+      const definition = el.match(/<bpmn2:(\w+EventDefinition)/)?.[1] || null
+      const condition = el.match(/<bpmn2:conditionExpression[^>]*>([^<]*)</)?.[1] ?? null
+      out[`${tag} ${name}`] = { props, definition, condition, isDefault: tag === 'exclusiveGateway' ? !!el.match(/default="/) : undefined }
+    }
+    return out
+  }
+
+  test('every property of the routers, routes and end events is as in the reference', async () => {
+    const want = await branchProps(readRef('Ref_Router_Ends.zip'))
+    // decision 1b/1: the expression type is written on every route, as on R_Other; iGlow left it empty on R_Default
+    expect(want['sequenceFlow R_Default'].props.expressionType).toBe('')
+    want['sequenceFlow R_Default'].props.expressionType = 'NonXML'
+    expect(await branchProps(builtZip)).toEqual(want)
+  })
+
+  test('an update of the reference gives the same spec back (no blockers)', () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const r = specFromParsed(reference, { packageId: 'PilotReference' })
+    expect(r.blockers).toEqual([])
+    const withoutIglow = { ...r.spec, steps: r.spec.steps.filter((s) => !IGLOW.includes(s.name)) }
+    expect(withoutIglow.steps).toEqual(spec.steps) // routes in the same order
+    expect(withoutIglow.exceptionSubprocess).toEqual({ ...spec.exceptionSubprocess, name: 'Exception Subprocess 1' })
+  })
+})

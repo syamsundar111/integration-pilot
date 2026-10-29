@@ -249,22 +249,32 @@ describe('import', () => {
       return importIflow(await zip.generateAsync({ type: 'nodebuffer' }), { fileName: 'Branchy.zip', packageId: 'PilotReference' })
     }
 
-    test('only the main path is imported; side branches are described in the router placeholder', async () => {
+    test('routers are imported with their routes: a route that ends, and one that joins the next step (phase 1b)', async () => {
       const r = await branchy()
       expect(r.spec.steps.map((s) => s.name)).toEqual(['CM_SetProperties', 'Router 3', 'Main_A', 'Router 5', 'Main_B'])
       const [, router3, , router5] = r.spec.steps
-      expect(router3.description).toBe("REPLACE WITH Router 'Router 3': Route 1 (${property.Empty} = 'false') continues; Route 2 (default) -> CM_SetProperty 2 -> PayloadLogging -> End 10")
-      expect(router5.description).toBe("REPLACE WITH Router 'Router 5': Route 1 (${property.Count} > {{Limit}}) continues; Route 2 (default) -> Retry_CM -> back to Main_B")
-      // the side-branch step does not run on the main path any more
-      expect(r.spec.steps.some((s) => s.name === 'CM_SetProperty 2')).toBe(false)
-      expect(r.notes).toContain('The flow branches: only the main path was imported (at each router, the route with a condition). 3 step(s) of other routes are described in the 2 router placeholder(s)')
-      expect(r.placeholders).toBe(3) // 2 routers + the missing script in error handling
+      expect(router3).toMatchObject({
+        type: 'router',
+        expressionType: 'NonXML',
+        routes: [
+          { name: 'Route 1', condition: "${property.Empty} = 'false'" },
+          { name: 'Route 2', default: true, steps: [{ name: 'CM_SetProperty 2' }, { name: 'PayloadLogging' }], end: { event: 'message', name: 'End 10' } }
+        ]
+      })
+      // Retry_CM runs back into Main_B, the step after the router: a join, not a loop
+      expect(router5.routes).toMatchObject([
+        { name: 'Route 1', condition: '${property.Count} > 5' }, // {{Limit}} became its default
+        { name: 'Route 2', default: true, steps: [{ name: 'Retry_CM' }] }
+      ])
+      expect(router5.routes[1].end).toBeUndefined()
+      expect(r.notes).toContain('The flow branches: 2 router(s) were imported with their routes')
+      expect(r.placeholders).toBe(1) // the missing script in error handling
       expect(r).toMatchObject({ valid: true, errors: [] })
     })
 
     test('{{Param}} stays as a whole constant value; elsewhere it becomes its default; placeholder text is not a parameter value', async () => {
       const r = await branchy()
-      const [setProps, , mainA, router5] = r.spec.steps
+      const [setProps, , mainA] = r.spec.steps
       expect(setProps.properties).toEqual([
         { name: 'Source', type: 'constant', value: '{{SourceSystem}}' }, // an externalized constant (phase 1a)
         { name: 'QueryDate', type: 'localVariable', value: 'lastModifiedDateTime' }, // CPI type "persisted variables"
@@ -275,9 +285,7 @@ describe('import', () => {
       expect(setProps.description).toBe('Parameter defaults used: KeyProperty = IncidentNumber (was {{KeyProperty}})')
       expect(mainA.headers).toEqual([{ name: 'Client', type: 'expression', value: 'client=100' }])
       expect(mainA.description).toBe('Parameter defaults used: SAP Client = 100 (was {{SAP Client}})')
-      // the router's REPLACE_WITH value keeps the condition without {{ }}; the description keeps it as it was
-      expect(router5.properties[0].value).toContain('${property.Count} > {Limit}')
-      expect(router5.description).toContain('{{Limit}}')
+      // a router condition takes the parameter's default (Router 5: covered above)
     })
 
     test('a Content Modifier with a row the spec cannot hold stays a real step with that row noted', async () => {
@@ -308,12 +316,10 @@ describe('import', () => {
       expect(r.notes.join('\n')).not.toMatch(/Local integration processes are not imported/)
     })
 
-    test('an Escalation End in error handling is noted (v1 ends with a Message End)', async () => {
+    test('an Escalation End in error handling is kept as the subprocess end (phase 1b)', async () => {
       const r = await branchy()
-      expect(r.spec.exceptionSubprocess.steps.at(-1).description).toMatch(/Add in the CPI web editor: Escalation End after this step/)
-      expect(r.notes).toContain(
-        'Exception subprocess: the original ends with an Escalation End; v1 uses a Message End, so failed messages show as Completed in monitoring. Add in the CPI web editor: Escalation End'
-      )
+      expect(r.spec.exceptionSubprocess.end).toMatchObject({ event: 'escalation' })
+      expect(r.spec.exceptionSubprocess.steps.at(-1).description).not.toMatch(/Escalation End/)
     })
   })
 })

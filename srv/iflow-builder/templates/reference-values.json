@@ -230,6 +230,44 @@
       }
     }
   },
+  "Router": {
+    "expressionType": {
+      "NonXML": {
+        "references": [
+          "Ref_Router_Ends",
+          "Ref_Router_Ends"
+        ]
+      },
+      "": {
+        "references": [
+          "Ref_Router_Ends"
+        ]
+      },
+      "XML": {
+        "references": [
+          "Ref_Router_Ends",
+          "Ref_Router_Ends"
+        ],
+        "confirmed": "re-selected in Ref_Router_Ends (R_Other, the default route of RT_Xml, stored with its expression type), 2026-10-29"
+      }
+    }
+  },
+  "Escalation End": {
+    "category": {
+      "Others": {
+        "references": [
+          "Ref_Router_Ends"
+        ],
+        "confirmed": "Others - not further qualified, set in Ref_Router_Ends (EE_Exception) in the CPI editor, 2026-10-29"
+      },
+      "RoutingConditionNotMet": {
+        "references": [
+          "Ref_Router_Ends"
+        ],
+        "confirmed": "Routing condition not met, set in Ref_Router_Ends (EE_Route) in the CPI editor, 2026-10-29"
+      }
+    }
+  },
   "Timer": {
     "repeat": {
       "NONE": {

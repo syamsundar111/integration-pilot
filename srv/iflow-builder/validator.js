@@ -7,18 +7,20 @@ const Ajv = require('ajv')
 const schema = require('./spec-schema.json')
 const { AUTH_TYPES, PROXY_TYPES, checkAgainstReferences } = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
+const specSteps = require('./spec-steps')
 
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'writeVariables']
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'writeVariables', 'router'] // router: main line only
 // Steps allowed in the exception subprocess (no receivers there; Write Variables only in the main flow so far)
 const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'timer']
+const MAX_MAIN_STEPS = 50 // main-flow steps, routers and the steps inside routes together
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
 
 // Step kinds people (and LLMs) ask for that v1 deliberately does not build
-const NOT_IN_V1 = /router|gateway|split|mapping|multicast|join|gather|aggregat|filter|sequential|parallel|loop|localprocess|xslt/i
+const NOT_IN_V1 = /gateway|split|mapping|multicast|join|gather|aggregat|filter|sequential|parallel|loop|localprocess|xslt/i
 // Error handling is supported, but as the top-level exceptionSubprocess field, not as a step
 const EXCEPTION_STEP = /exception|error|subprocess|catch/i
 // Start and end events are not steps: the trigger and the end are top-level fields
@@ -54,7 +56,8 @@ function effectiveNames(spec) {
   const counters = {}
   const main = spec.steps || []
   const sub = exceptionSteps(spec)
-  const explicit = new Set([...main, ...sub].map((s) => s.name).filter(Boolean))
+  const flatMain = specSteps.mainSteps(spec).filter((x) => x.step && typeof x.step === 'object') // main flow with the steps inside routes
+  const explicit = new Set([...flatMain.map((x) => x.step), ...sub].map((s) => s?.name).filter(Boolean))
   // Defaults count per type across the main flow and the exception subprocess ("Content Modifier 1", "… 2")
   // and skip names given explicitly
   const name = (s) => {
@@ -64,13 +67,18 @@ function effectiveNames(spec) {
     while (explicit.has(n))
     return n
   }
-  const steps = main.map(name)
+  // names in flow order (a router's route steps right after it), so defaults count as the flow reads
+  const named = new Map(flatMain.map((x) => [x.step, name(x.step)]))
+  const steps = main.map((s) => named.get(s))
   const exception = sub.map(name)
   let rr = 0
-  const systems = main.map((s) => (s.type === 'requestReplyHttp' ? s.system || `Receiver${++rr}` : null))
+  const systemOf = new Map(flatMain.map((x) => [x.step, x.step.type === 'requestReplyHttp' ? x.step.system || `Receiver${++rr}` : null]))
+  const systems = main.map((s) => systemOf.get(s))
+  // every main-flow step with its path, name and receiver: [{ step, where, name, system }]
+  const flat = flatMain.map((x) => ({ ...x, name: named.get(x.step), system: systemOf.get(x.step) }))
   const endSystem = spec.end?.type === 'httpReceiver' ? spec.end.system || 'Receiver' : null
   const exceptionSubprocess = spec.exceptionSubprocess ? spec.exceptionSubprocess.name || DEFAULT_EXCEPTION_SUBPROCESS_NAME : null
-  return { steps, systems, endSystem, exceptionSubprocess, exceptionSteps: exception }
+  return { steps, systems, flat, endSystem, exceptionSubprocess, exceptionSteps: exception }
 }
 
 const label = (path) =>
@@ -141,7 +149,8 @@ function walkStrings(node, path, fn) {
  * and the value of a constant header or property (an externalized value; the other sources name a header,
  * property, variable or XPath)
  */
-const PARAM_FIELDS = /^((steps\[\d+\]|end)\.(url|credentialName|locationId)|(steps|exceptionSubprocess\.steps)\[\d+\]\.(headers|properties)\[\d+\]\.value)$/
+const STEP_PATH = String.raw`(steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\])`
+const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
 
 /**
  * @param {object} spec
@@ -158,23 +167,30 @@ function validate(spec, { attachments = [] } = {}) {
 
   // Unsupported step/trigger/end types get one clear message instead of schema noise
   const supportedList = SUPPORTED_STEPS.join(', ')
-  ;(Array.isArray(spec.steps) ? spec.steps : []).forEach((s, i) => {
+  for (const { step: s, where, ptr, route } of specSteps.mainSteps(spec)) {
     const type = s?.type
-    if (!type || SUPPORTED_STEPS.includes(type)) return
-    skip.push(`/steps/${i}`)
-    if (END_STEP.test(type))
-      err('END_AS_STEP', `steps[${i}]: '${type}' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end', e.g. { "type": "none" }`)
+    if (route && type === 'router') {
+      skip.push(ptr)
+      err('NESTED_ROUTER', `${where}: a router inside a route is not supported — routers sit on the main line only; put the routing on the main line, or decide it in a groovyScript that sets a property for the next router`)
+      continue
+    }
+    if (!type || SUPPORTED_STEPS.includes(type)) continue
+    skip.push(ptr)
+    if (/router|gateway/i.test(type))
+      err('USE_ROUTER', `${where}: '${type}' — a router is { "type": "router", "expressionType": "XML"|"NonXML", "routes": [{ "name", "condition", "steps"?, "end"? }, ..., { "name", "default": true }] }`)
+    else if (END_STEP.test(type))
+      err('END_AS_STEP', `${where}: '${type}' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end' (or a route's 'end'), e.g. { "type": "none" }`)
     else if (TRIGGER_STEP.test(type))
-      err('TRIGGER_AS_STEP', `steps[${i}]: '${type}' is the trigger, not a step — remove it from steps; the trigger is the top-level 'trigger', e.g. { "type": "timer", "mode": "once" }`)
+      err('TRIGGER_AS_STEP', `${where}: '${type}' is the trigger, not a step — remove it from steps; the trigger is the top-level 'trigger', e.g. { "type": "timer", "mode": "once" }`)
     else if (EXCEPTION_STEP.test(type))
-      err('EXCEPTION_AS_STEP', `steps[${i}]: error handling is not a step — remove '${type}' from steps and put the error handling steps into the top-level 'exceptionSubprocess': { "steps": [...] }`)
+      err('EXCEPTION_AS_STEP', `${where}: error handling is not a step — remove '${type}' from steps and put the error handling steps into the top-level 'exceptionSubprocess': { "steps": [...] }`)
     else if (NOT_IN_V1.test(type))
       err(
         'STEP_NOT_IN_V1',
-        `steps[${i}]: '${type}' is not supported in v1 — flows must be linear (no router, splitter, mapping). Supported step types: ${supportedList}. Routing or mapping logic can often be done in a groovyScript step.`
+        `${where}: '${type}' is not supported yet (no splitter, multicast, join or mapping). Supported step types: ${supportedList}. Mapping logic can often be done in a groovyScript step.`
       )
-    else err('UNKNOWN_STEP', `steps[${i}]: unknown step type '${type}'. Supported step types: ${supportedList}.`)
-  })
+    else err('UNKNOWN_STEP', `${where}: unknown step type '${type}'. Supported step types: ${supportedList}.`)
+  }
   const exceptionList = SUPPORTED_EXCEPTION_STEPS.join(', ')
   exceptionSteps(spec).forEach((s, i) => {
     const type = s?.type
@@ -197,7 +213,10 @@ function validate(spec, { attachments = [] } = {}) {
   }
 
   // Receiver authentication, proxy and timeout: one actionable message per problem instead of schema noise
-  const calls = (Array.isArray(spec.steps) ? spec.steps : []).map((s, i) => [s, `steps[${i}]`, `/steps/${i}`]).filter(([s]) => s?.type === 'requestReplyHttp')
+  const calls = specSteps
+    .mainSteps(spec)
+    .filter((x) => x.step?.type === 'requestReplyHttp')
+    .map((x) => [x.step, x.where, x.ptr])
   if (spec.end?.type === 'httpReceiver') calls.push([spec.end, 'end', '/end'])
   const referenceWarnings = []
   const valueCheck = (component, stored, where) => {
@@ -238,13 +257,13 @@ function validate(spec, { attachments = [] } = {}) {
     steps: steps.filter(isObj),
     ...(isObj(spec.exceptionSubprocess) && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: subSteps.filter(isObj) } })
   })
-  // [step, path] of the main flow and the exception subprocess
-  const allSteps = [...steps.map((s, i) => [s, `steps[${i}]`]), ...subSteps.map((s, i) => [s, `exceptionSubprocess.steps[${i}]`])]
+  // [step, path] of the main flow (with the steps inside routes) and the exception subprocess
+  const allSteps = specSteps.allSteps(spec).map((x) => [x.step, x.where])
 
   const dupes = (list) => [...new Set(list.filter((v, i) => v && list.indexOf(v) !== i))]
   // where a duplicate is, and what to do: the model cannot fix "used more than once" without the positions
   const namedAt = [
-    ...names.steps.map((n, i) => [n, `steps[${i}]`, steps[i]]),
+    ...names.flat.map((x) => [x.name, x.where, x.step]),
     ...names.exceptionSteps.map((n, i) => [n, `exceptionSubprocess.steps[${i}]`, subSteps[i]]),
     [names.exceptionSubprocess, 'exceptionSubprocess.name', null]
   ]
@@ -252,21 +271,68 @@ function validate(spec, { attachments = [] } = {}) {
     const same = hits.length > 1 && hits.every(([, , st]) => st && JSON.stringify(st) === JSON.stringify(hits[0][2]))
     const last = hits.at(-1)[1]
     const remove = (path) => {
-      const m = path.match(/^(exceptionSubprocess\.)?steps\[(\d+)\]$/)
+      const m = path.match(/^(exceptionSubprocess\.)?steps\[(\d+)\]$/) // route steps: no editDraftSpec op, "remove <path>"
       return m ? `editDraftSpec {"op":"removeStep","index":${m[2]}${m[1] ? ',"exception":true' : ''}}` : `remove ${path}`
     }
     return same ? `the same step was added twice: remove ${last} (${remove(last)})` : `rename all but one, or remove the extra step (${remove(last)})`
   }
-  for (const d of dupes([...names.steps, ...names.exceptionSteps, names.exceptionSubprocess])) {
+  for (const d of dupes([...names.flat.map((x) => x.name), ...names.exceptionSteps, names.exceptionSubprocess])) {
     const hits = namedAt.filter(([n]) => n === d)
-    err('DUPLICATE_STEP_NAME', `steps: step name '${d}' is used more than once, at ${hits.map(([, p]) => p).join(' and ')} — step names must be unique (main flow and exception subprocess together); ${fix(hits)}`)
+    err('DUPLICATE_STEP_NAME', `steps: step name '${d}' is used more than once, at ${hits.map(([, p]) => p).join(' and ')} — step names must be unique (main flow, routes and exception subprocess together); ${fix(hits)}`)
   }
-  for (const d of dupes([...names.systems, names.endSystem]))
+  for (const d of dupes([...names.flat.map((x) => x.system), names.endSystem]))
     err('DUPLICATE_SYSTEM', `receiver system name '${d}' is used more than once — give each receiver a unique 'system'`)
   for (const d of dupes(allSteps.filter(([s]) => s?.type === 'groovyScript').map(([s]) => s.fileName))) {
     const hits = allSteps.filter(([s]) => s?.type === 'groovyScript' && s.fileName === d).map(([st, p]) => [d, p, st])
     err('DUPLICATE_FILENAME', `steps: Groovy fileName '${d}' is used more than once, at ${hits.map(([, p]) => p).join(' and ')} — each script needs its own file; ${fix(hits)}`)
   }
+
+  // --- end events: an escalation category only on an Escalation End, and one the references contain ---
+  const ends = [
+    ['end', spec.end],
+    ['exceptionSubprocess.end', spec.exceptionSubprocess?.end],
+    ...steps.flatMap((r, i) => (r?.type === 'router' && Array.isArray(r.routes) ? r.routes.map((x, j) => [`steps[${i}].routes[${j}].end`, x?.end]) : []))
+  ].filter(([, e]) => isObj(e))
+  for (const [where, e] of ends) {
+    if (e.category != null && e.event !== 'escalation') err('CATEGORY_WITHOUT_ESCALATION', `${where}.category: only an Escalation End has a category — remove it, or set "event": "escalation"`)
+    else if (e.event === 'escalation' && (e.category == null || schema.definitions.endEvent.properties.category.enum.includes(e.category)))
+      valueCheck('Escalation End', [['category', e.category || cpiValues.DEFAULT_ESCALATION_CATEGORY]], where) // other values: the schema says which
+  }
+
+  // --- routers, ends, size ------------------------------------------------------------
+  // Steps count together: main-flow steps, routers and the steps inside routes (route ends do not count)
+  const total = names.flat.length
+  if (total > MAX_MAIN_STEPS && steps.length <= MAX_MAIN_STEPS) err('TOO_MANY_STEPS', `steps: ${total} steps with the routers and the steps inside routes — at most ${MAX_MAIN_STEPS}; merge Content Modifiers or move logic into one Groovy script`)
+  steps.forEach((r, i) => {
+    if (r?.type !== 'router' || !Array.isArray(r.routes)) return
+    const where = `steps[${i}]`
+    const routes = r.routes.filter(isObj)
+    if (['XML', 'NonXML'].includes(r.expressionType)) valueCheck('Router', [['expressionType', r.expressionType]], where) // written on every route
+    const defaults = routes.filter((x) => x.default === true)
+    if (defaults.length !== 1) err('ROUTER_DEFAULT', `${where}.routes: exactly one route needs "default": true (found ${defaults.length}) — the default route takes every message no other condition matches`)
+    else if (routes.at(-1) !== defaults[0]) err('ROUTER_DEFAULT_LAST', `${where}.routes: list the default route '${defaults[0].name}' last — CPI evaluates it last`)
+    for (const d of dupes(routes.map((x) => x.name))) err('DUPLICATE_ROUTE_NAME', `${where}.routes: route name '${d}' is used more than once — route names must be unique within a router`)
+    routes.forEach((route, j) => {
+      const at = `${where}.routes[${j}]`
+      if (route.default === true && route.condition != null) err('DEFAULT_WITH_CONDITION', `${at}: the default route has no condition — remove 'condition'`)
+      if (route.default !== true && !(typeof route.condition === 'string' && route.condition.trim())) err('CONDITION_MISSING', `${at}: a route that is not the default needs a 'condition'`)
+      if (typeof route.condition !== 'string' || !route.condition.trim()) return
+      const c = route.condition
+      if (r.expressionType === 'NonXML') {
+        if (!c.includes('${')) err('CONDITION_FORMAT', `${at}.condition: a NonXML condition reads a header or property with \${...}, e.g. "\${property.routeKey} = 'A'"`)
+        // operators need spaces on both sides: ${property.x} = 'A', not ${property.x}='A'
+        else if (/\S(=|!=|<=|>=|<|>|=~)\S/.test(c.replace(/\$\{[^}]*\}/g, (m) => m.replace(/[=<>!~]/g, '_')).replace(/'[^']*'/g, "''")))
+          err('CONDITION_FORMAT', `${at}.condition: put spaces around the operator, e.g. "\${property.x} = 'A'", not "\${property.x}='A'"`)
+      }
+      if (r.expressionType === 'XML' && c.includes('${')) err('CONDITION_FORMAT', `${at}.condition: an XML condition is an XPath, e.g. "/root/type = 'X'"; for \${...} set expressionType "NonXML"`)
+    })
+    // a router whose routes all end must be the last step, and the main flow has no end of its own
+    if (routes.length && routes.every((x) => x.end)) {
+      if (i < steps.length - 1) err('ROUTER_ALL_END', `${where}: every route ends, so the steps after the router can never run — make the router the last step, or let a route continue (no 'end')`)
+      if (spec.end && (spec.end.type !== 'none' || (spec.end.event && spec.end.event !== 'message')))
+        err('ROUTER_ALL_END', `end: every route of the last router ends, so the main flow has no end of its own — set "end": { "type": "none" }`)
+    }
+  })
 
   // --- attached files: scripts without code, XSLT resources --------------------------
   const attached = new Set(attachments)
@@ -364,8 +430,8 @@ function validate(spec, { attachments = [] } = {}) {
     if (!refs.length) return
     // Groovy code, body and descriptions (documentation, not configuration) may contain {{ }} text
     if (/\.(code|body|description)$/.test(path)) return
-    const row = path.match(/^(steps|exceptionSubprocess\.steps)\[(\d+)\]\.(headers|properties)\[(\d+)\]\.value$/)
-    const rowType = row && (row[1] === 'steps' ? steps : subSteps)[row[2]]?.[row[3]]?.[row[4]]?.type
+    const row = /\.(headers|properties)\[\d+\]\.value$/.test(path)
+    const rowType = row && specSteps.valueAt(spec, path.replace(/\.value$/, ''))?.type
     if (!PARAM_FIELDS.test(path) || (row && rowType !== 'constant')) {
       err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, or as a constant value`)
       return
@@ -401,7 +467,14 @@ function normalizeTypes(spec) {
   const fixStep = (s, i, prefix) =>
     s?.type === 'contentModifier'
       ? { ...s, ...(s.headers && { headers: fixRows(s.headers, `${s.name || `${prefix}[${i}]`}: header`) }), ...(s.properties && { properties: fixRows(s.properties, `${s.name || `${prefix}[${i}]`}: property`) }) }
-      : s
+      : s?.type === 'router' && Array.isArray(s.routes)
+        ? {
+            ...s,
+            routes: s.routes.map((r, j) =>
+              Array.isArray(r?.steps) ? { ...r, steps: r.steps.map((x, k) => fixStep(x, k, `${prefix}[${i}].routes[${j}].steps`)) } : r
+            )
+          }
+        : s
   const out = {
     ...spec,
     ...(Array.isArray(spec.steps) && { steps: spec.steps.map((s, i) => fixStep(s, i, 'steps')) }),

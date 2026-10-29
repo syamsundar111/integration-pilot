@@ -15,15 +15,25 @@ turns into extra questions.
 | | Supported | Not supported |
 |---|---|---|
 | Trigger | HTTPS sender (with a path), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, SOAP, other senders |
-| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP request-reply | Router, splitter, gather, join, multicast, mapping, XSLT step, process call |
-| End | HTTP receiver, or no receiver | Mail, SFTP and other receivers |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP request-reply, Router (on the main line) | Router inside a route, splitter, gather, join step, multicast, mapping, XSLT step, process call |
+| End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
-| Error handling | One exception subprocess (Content Modifier, Groovy, converters) | Request-reply inside the exception subprocess |
+| Error handling | One exception subprocess (Content Modifier, Groovy, converters), ending with a Message, Escalation or Error End | Request-reply inside the exception subprocess |
 
 Hard limits:
 
-- At most **50 steps** in the main flow (10 in the exception subprocess). Large flows are written
-  and checked in parts of up to 8 steps, so their size does not cause timeouts.
+- At most **50 steps** in the main flow, counting routers and the steps inside routes (route ends do
+  not count); 10 in the exception subprocess. Large flows are written and checked in parts of up to
+  8 steps, so their size does not cause timeouts.
+- A router: routes are evaluated in order; each has a condition (XML: an XPath; Non-XML:
+  `${property.x} = 'A'` with spaces around the operator), except one **default route**, listed last.
+  A route either ends (Message, Escalation or Error End) or continues with the step after the router,
+  where the continuing routes join again. If every route ends, the router is the last step.
+  An Escalation End has a category shown in monitoring: "Others - not further qualified" (the default)
+  or "Routing condition not met"; the receiver categories are not supported yet.
+  An XML router right after a Content Modifier or Groovy script gets CPI's notice "may not pass XML
+  message to Sequence Flow. Sequence Flow supports XML input only" on its routes: CPI cannot tell that
+  the step produces XML. It is not an error; make sure the body is XML there.
 - Step names, receiver names and Groovy file names must be **unique**.
 - `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver,
   or as a whole **constant** header or property value. "Default" for a parameter means its value
@@ -55,7 +65,7 @@ Error handling: <exception subprocess: what to set, log or return when a step fa
 
 Before sending, the chat checks the request without calling the model. It warns about:
 
-- steps v1 cannot build (router, splitter, gather, join, multicast, XSLT, mapping, SFTP, process call)
+- steps v1 cannot build (splitter, gather, join step, multicast, XSLT, mapping, SFTP, process call)
 - more than 25 numbered steps
 - `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID
 - template fields that are still unfilled
@@ -72,6 +82,9 @@ proposal says which:
   proposal panel before approving.
 - **Trigger**: an HTTPS sender with a path made from the iFlow name ("Order Intake" ->
   `/order-intake`). Write "timer, run once" or another path to change it.
+- **End of error handling**: an exception subprocess ends with an **Escalation End**, so a failed
+  message shows as escalated in monitoring. Ask for an Error End, or for "return the error to the
+  caller" (a Message End: the sender gets the response, but the message looks completed).
 - **Authentication**: none, unless the request names a method and credential name per receiver
   ("Basic, credential ERP_BASIC_USER"). A method v1 does not set (e.g. client certificate) is set
   in the CPI web editor after creation.
@@ -102,15 +115,16 @@ spec:
 - Steps v1 cannot build become placeholder Content Modifiers whose description says
   *REPLACE WITH …*, one per CPI component. Only if the flow would exceed 50 steps are consecutive
   placeholders merged.
-- A branching flow keeps its main path (at each router, the route with a condition); the other
-  routes are described in the router's placeholder.
+- Routers on the main line are kept with their routes, route steps and end events. A flow whose
+  routes go back, join somewhere else or contain another router keeps its main path instead (at each
+  router, the route with a condition), and the other routes are described in the router's placeholder.
 - `{{Param}}` values outside receiver URLs, credential names, location IDs and constant values become
   the parameter's default; a receiver URL combined from parameters becomes one `<Receiver>_URL` parameter.
 - A Process Call in the exception subprocess is replaced by the steps of the local process it calls,
   if they are Content Modifiers and Groovy scripts.
 - The import gets a new iFlow id (`<original>_Imported`); duplicate names are made unique.
-- Content Modifier sources (header, property, XPath, global and local variables), Write Variables and a
-  timer every N minutes are kept as they are.
+- Content Modifier sources (header, property, XPath, global and local variables), Write Variables, a
+  timer every N minutes and the end event of the exception subprocess are kept as they are.
 - Scripts and XSLT files become attachments.
 
 Then ask *Propose the imported iFlow as a new iFlow* and replace the placeholders in the CPI web

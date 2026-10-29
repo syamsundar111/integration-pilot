@@ -10,6 +10,8 @@ const path = require('path')
 const { validate, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS } = require('./validator')
 const { AUTH_TYPES } = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
+const schema = require('./spec-schema.json')
+const ESCALATION_CATEGORIES = schema.definitions.endEvent.properties.category.enum
 
 const RESOURCES = 'src/main/resources/'
 
@@ -155,7 +157,9 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     }
   }
 
-  if (!parsed.linear) blockers.push('the flow branches (router, multicast or several paths)')
+  // a branching flow: routers whose routes end or join again (parser: routed); anything else is a blocker
+  const routed = !parsed.linear ? parsed.routed : null
+  if (!parsed.linear && (!routed || routed.unsupported)) blockers.push(`the flow branches in a way the spec cannot hold${routed?.unsupported ? `: ${routed.unsupported}` : ''}`)
   if (parsed.localProcesses?.length) blockers.push(`local integration processes: ${parsed.localProcesses.join(', ')}`)
   if ((parsed.integrationProcesses?.length || 0) > 1) blockers.push(`${parsed.integrationProcesses.length} integration processes: ${parsed.integrationProcesses.join(', ')} (the spec holds one)`)
 
@@ -169,8 +173,37 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   for (const a of parsed.adapters || [])
     if (!(a.type === 'HTTPS' && a.direction === 'Sender') && !(a.type === 'HTTP' && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
 
-  const steps = (parsed.steps || []).map((s, i) =>
-    SUPPORTED_STEPS.includes(s.type) ? attempt(() => toStep(s, parsed.scripts || [], `step ${i + 1}`)) : (blockers.push(`step ${i + 1} '${s.name}': ${s.activityType || s.type} is not supported by the spec`), null)
+  const stepFrom = (s, where) =>
+    SUPPORTED_STEPS.includes(s.type) && s.type !== 'router'
+      ? attempt(() => toStep(s, parsed.scripts || [], where))
+      : (blockers.push(`${where} '${s.name}': ${s.activityType || s.type} is not supported by the spec`), null)
+  const END_EVENTS = { message: 'message', escalation: 'escalation', error: 'error' } // terminate: not in the spec
+  // an Escalation End's category must be one the spec allows; another (e.g. ReceiverNotFound) would be reset
+  const categoryOf = (category, what) => {
+    if (category && !ESCALATION_CATEGORIES.includes(category)) blockers.push(`${what} ends with an Escalation End of category '${category}', which an update cannot keep`)
+    return category || undefined
+  }
+  const endFrom = (end, what) => ({
+    event: END_EVENTS[end.kind] || 'message',
+    ...(end.name && { name: end.name }),
+    ...(end.kind === 'escalation' && end.category && { category: categoryOf(end.category, what) })
+  })
+  const routerFrom = (r, where) => ({
+    type: 'router',
+    ...(r.name && { name: r.name }),
+    expressionType: r.expressionType,
+    routes: r.routes.map((route, j) => {
+      if (route.end && !END_EVENTS[route.end.kind]) blockers.push(`${where} '${r.name}': route ${route.name} ends with a ${route.end.kind} end`)
+      return {
+        name: route.name,
+        ...(route.default ? { default: true } : { condition: route.condition }),
+        ...(route.steps.length && { steps: route.steps.map((x, k) => stepFrom(x, `${where} route ${j + 1} step ${k + 1}`)) }),
+        ...(route.end && { end: endFrom(route.end, `${where} '${r.name}': route ${route.name}`) })
+      }
+    })
+  })
+  const steps = (routed && !routed.unsupported ? routed.steps : parsed.steps || []).map((s, i) =>
+    s.type === 'router' && routed && !routed.unsupported ? routerFrom(s, `step ${i + 1}`) : stepFrom(s, `step ${i + 1}`)
   )
 
   // An empty exception subprocess that ends with an Error End (Error Start -> Error End, as the iGlow extension
@@ -185,25 +218,33 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
         : (blockers.push(`exception subprocess step ${i + 1} '${s.name}': ${s.activityType || s.type} is not supported there`), null)
     )
     if (!subSteps.length) blockers.push('the exception subprocess has no steps (the spec needs at least one)')
-    exceptionSubprocess = { ...(sub.name && { name: sub.name }), steps: subSteps }
+    const subEnd = END_EVENTS[sub.end] || null
+    if (sub.end && !subEnd) blockers.push(`the exception subprocess ends with a ${sub.end} end (only Message, Escalation or Error End)`)
+    exceptionSubprocess = {
+      ...(sub.name && { name: sub.name }),
+      steps: subSteps,
+      ...(subEnd && subEnd !== 'message' && { end: endFrom({ kind: subEnd, name: sub.endName, category: sub.endCategory }, 'the exception subprocess') })
+    }
   }
 
-  // the builder writes Message Ends: another end kind would change how failed messages are reported
-  const END_KINDS = { error: 'an Error End', escalation: 'an Escalation End', terminate: 'a Terminate End' }
-  if (END_KINDS[parsed.end?.kind]) blockers.push(`the main flow ends with ${END_KINDS[parsed.end.kind]}; an update would make it a Message End`)
-  if (END_KINDS[parsed.exceptionSubprocess?.end] && !emptyErrorSubprocess)
-    blockers.push(`the exception subprocess ends with ${END_KINDS[parsed.exceptionSubprocess.end]}; an update would make it a Message End (failed messages would show as COMPLETED)`)
-
-  const e = parsed.end || {}
+  // the main end: Message, Escalation or Error End (a receiver only with a Message End); none when every
+  // route of the last router ends
+  const e = routed && !routed.unsupported ? routed.end : parsed.end || {}
   let end = null
-  if (e.type === 'none') end = { type: 'none' }
+  if (!e) end = { type: 'none' }
+  else if (e.kind && !END_EVENTS[e.kind]) blockers.push(`the main flow ends with a ${e.kind} end (only Message, Escalation or Error End)`)
+  else if (e.type === 'none') end = { type: 'none', ...(e.kind && e.kind !== 'message' && { event: e.kind }), ...(e.kind === 'escalation' && e.category && { category: categoryOf(e.category, 'the main flow') }) }
   else if (e.type === 'httpReceiver') {
-    attempt(() => (end = { type: 'httpReceiver', ...callFields(e, `end receiver ${e.system}`) }))
+    if (e.kind && e.kind !== 'message') blockers.push(`the main flow ends with an ${e.kind} end and a receiver (a receiver needs a Message End)`)
+    else attempt(() => (end = { type: 'httpReceiver', ...callFields(e, `end receiver ${e.system}`) }))
   } else blockers.push(`end: ${e.adapter || e.type} receiver (only HTTP receiver or none)`)
 
   // Resources the builder does not write (mappings, schemas, other scripts) would be deleted
   // XSLT files are kept as spec.resources (their content comes back in `resources`)
-  const scripts = new Set([...(parsed.steps || []), ...(parsed.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript').map((s) => `script/${s.fileName}.groovy`))
+  const routeSteps = (routed?.steps || []).filter((s) => s.type === 'router').flatMap((r) => r.routes.flatMap((x) => x.steps))
+  const scripts = new Set(
+    [...(parsed.steps || []), ...routeSteps, ...(parsed.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript').map((s) => `script/${s.fileName}.groovy`)
+  )
   const mappings = Object.fromEntries((parsed.mappings || []).filter((m) => /^[A-Za-z][A-Za-z0-9_.-]*\.xslt?$/.test(m.fileName)).map((m) => [`mapping/${m.fileName}`, m]))
   for (const f of parsed.files || []) {
     if (!f.startsWith(RESOURCES)) continue
@@ -235,7 +276,8 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     rejoined.add(m[1])
     return { ...call, url: `{{${m[1]}}}` }
   }
-  for (const list of [steps, exceptionSubprocess?.steps]) if (list) list.forEach((s, i) => (list[i] = s.type === 'requestReplyHttp' ? rejoin(s) : s))
+  const routeLists = steps.filter((s) => s?.type === 'router').flatMap((r) => r.routes.map((x) => x.steps).filter(Boolean))
+  for (const list of [steps, ...routeLists, exceptionSubprocess?.steps]) if (list) list.forEach((s, i) => (list[i] = s?.type === 'requestReplyHttp' ? rejoin(s) : s))
   if (end?.type === 'httpReceiver') end = rejoin(end)
 
   const spec = {

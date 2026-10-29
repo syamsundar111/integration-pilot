@@ -8,7 +8,7 @@ Main integration process:
 3. RT_NonXml - Router; all routes use expression type Non-XML:
    - Route R_Continue: condition ${property.routeKey} = 'A' -> RT_Xml
    - Route R_Escalate: condition ${property.routeKey} = 'B'
-     -> Escalation End EE_Route
+     -> Escalation End EE_Route, category Routing condition not met
    - Route R_Default: default route -> Error End ERR_Route
 4. RT_Xml - Router; all routes use expression type XML:
    - Route R_TypeX: condition /root/type = 'X' -> CM_RouteX
@@ -21,4 +21,5 @@ Main integration process:
 
 Exception subprocess ESP_Errors:
 Error Start -> CM_ErrorInfo (Content Modifier, property errorText =
-expression ${exception.message}) -> Escalation End EE_Exception.
+expression ${exception.message}) -> Escalation End EE_Exception, category Others - not further
+qualified.

@@ -55,14 +55,16 @@ step is safe to re-run (`retry`). Updates keep a backup zip for `restore`. All w
 Because turns and approvals live in the process, the backend must stay at **`instances: 1`** (enforced by `test/repo-hygiene.test.js`).
 
 **iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender |
-timer once | timer every N minutes), linear steps (contentModifier, groovyScript, writeVariables, jsonToXml, xmlToJson,
-requestReplyHttp) and an end (httpReceiver | none). Spec values that CPI stores differently are mapped in `cpi-values.js`
-(Content Modifier sources, Write Variables, timer schedules) and `receiver-settings.js` (HTTP receivers).
+timer once | timer every N minutes), steps (contentModifier, groovyScript, writeVariables, jsonToXml, xmlToJson,
+requestReplyHttp, router) and an end (httpReceiver | none, with a Message/Escalation/Error End). A router sits on the main
+line; its routes end or continue with the step after it (`spec-steps.js` lists all steps with their paths). Spec values
+that CPI stores differently are mapped in `cpi-values.js` (Content Modifier sources, Write Variables, timer schedules) and
+`receiver-settings.js` (HTTP receivers).
 - `validator.js`: the schema plus rules. It returns human-readable errors meant for the LLM to fix.
 - `builder.js`: spec → CPI zip, using `templates/`. The templates are derived by `derive-templates.js` from the exported zips in
   `reference/`, which are the **source of truth**. Never hand-write or guess CPI XML; extend the reference exports and re-derive.
-- `parser.js`: zip → structure (Explain, the flow diagram). `to-spec.js` gives an exact parsed → spec mapping for updates, and refuses
-  with blockers when it would lose content. `import.js` gives an approximate import of any iFlow, with placeholder steps for what the
+- `parser.js`: zip → structure (Explain, the flow diagram); for a branching flow also `routed`, the routers as the spec
+  holds them. `to-spec.js` gives an exact parsed → spec mapping for updates, and refuses with blockers when it would lose content. `import.js` gives an approximate import of any iFlow, with placeholder steps for what the
   spec can't express.
 - Groovy scripts are suggestions: not compiled or tested by the app (the developer tests them in CPI); the validator only
   requires the CPI entry point (import + processData) and refuses hard-coded secrets.

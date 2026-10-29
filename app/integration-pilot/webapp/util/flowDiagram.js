@@ -38,6 +38,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     xmlToJson: 'sap-icon://switch-views',
     requestReplyHttp: 'sap-icon://outbox',
     writeVariables: 'sap-icon://save',
+    router: 'sap-icon://split',
     unknown: 'sap-icon://puzzle'
   }
 
@@ -65,16 +66,40 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           return { type: s.type, name, detail: [n ? `${n} value${n === 1 ? '' : 's'}` : null, s.body ? 'body' : null].filter(Boolean).join(' · ') || undefined }
         }
         if (s.type === 'writeVariables') return { type: s.type, name, detail: (s.variables || []).map((v) => v.name).join(', ') || undefined }
+        if (s.type === 'router')
+          return {
+            type: s.type,
+            name,
+            detail: s.expressionType === 'XML' ? 'XML (XPath)' : 'Non-XML',
+            routes: (s.routes || []).map((r) => ({
+              name: r.name,
+              condition: r.default ? null : r.condition,
+              steps: (r.steps || []).map((x) => {
+                counters[x.type] = (counters[x.type] || 0) + 1
+                return x.name || `${DEFAULT_NAMES[x.type] || x.type} ${counters[x.type]}`
+              }),
+              end: r.end ? r.end.event || 'message' : null
+            }))
+          }
         return { type: s.type, name }
       }),
-      end: spec.end.type === 'httpReceiver' ? { receiver: { name: spec.end.system || 'Receiver', detail: `${spec.end.method} ${spec.end.url}` } } : {},
+      end: {
+        ...(spec.end.type === 'httpReceiver' && { receiver: { name: spec.end.system || 'Receiver', detail: `${spec.end.method} ${spec.end.url}` } }),
+        event: spec.end.event || 'message',
+        // every route of the last router ends: the main flow has no end of its own
+        none: (() => {
+          const last = spec.steps[spec.steps.length - 1]
+          return !!last && last.type === 'router' && (last.routes || []).every((r) => r.end)
+        })()
+      },
       exception: spec.exceptionSubprocess
         ? {
             name: spec.exceptionSubprocess.name || 'Exception Subprocess 1',
             steps: (spec.exceptionSubprocess.steps || []).map((s) => {
               counters[s.type] = (counters[s.type] || 0) + 1
               return s.name || `${DEFAULT_NAMES[s.type] || s.type} ${counters[s.type]}`
-            })
+            }),
+            end: (spec.exceptionSubprocess.end && spec.exceptionSubprocess.end.event) || 'message'
           }
         : null
     }
@@ -91,34 +116,66 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           : t.type === 'sender'
             ? { kind: 'other', label: t.adapter || 'Sender', detail: t.address }
             : { kind: 'none', label: 'Start' }
-    const e = p.end || {}
+    // a branching flow the spec can hold: its routers with their routes (else the steps in processing order)
+    const routed = p.routed && !p.routed.unsupported ? p.routed : null
+    const e = (routed ? routed.end : p.end) || {}
+    const parsedStep = (s) => ({
+      type: s.type,
+      name: s.name,
+      detail:
+        s.type === 'groovyScript'
+          ? s.script || `${s.fileName}.groovy`
+          : s.type === 'requestReplyHttp'
+            ? s.method
+            : s.type === 'writeVariables'
+              ? (s.variables || []).map((v) => v.name).join(', ') || undefined
+              : s.type === 'router' && s.routes
+                ? s.expressionType === 'XML'
+                  ? 'XML (XPath)'
+                  : 'Non-XML'
+                : undefined,
+      receiver: s.type === 'requestReplyHttp' ? { name: s.system || 'Receiver', detail: s.url } : undefined,
+      routes:
+        routed && s.type === 'router'
+          ? s.routes.map((r) => ({ name: r.name, condition: r.default ? null : r.condition, steps: r.steps.map((x) => x.name), end: r.end ? r.end.kind : null }))
+          : undefined
+    })
     return {
       trigger,
-      steps: (p.steps || []).map((s) => ({
-        type: s.type,
-        name: s.name,
-        detail:
-          s.type === 'groovyScript'
-            ? s.script || `${s.fileName}.groovy`
-            : s.type === 'requestReplyHttp'
-              ? s.method
-              : s.type === 'writeVariables'
-                ? (s.variables || []).map((v) => v.name).join(', ') || undefined
-                : undefined,
-        receiver: s.type === 'requestReplyHttp' ? { name: s.system || 'Receiver', detail: s.url } : undefined
-      })),
-      end:
-        e.type === 'httpReceiver'
+      steps: (routed ? routed.steps : p.steps || []).map(parsedStep),
+      end: {
+        ...(e.type === 'httpReceiver'
           ? { receiver: { name: e.system || 'Receiver', detail: `${e.method || ''} ${e.url || ''}`.trim() } }
           : e.type === 'receiver'
             ? { receiver: { name: e.adapter || 'Receiver', detail: e.address } }
-            : {},
-      exception: p.exceptionSubprocess ? { name: p.exceptionSubprocess.name, steps: (p.exceptionSubprocess.steps || []).map((s) => s.name) } : null,
-      linear: p.linear
+            : {}),
+        event: e.kind || 'message',
+        none: !!routed && !routed.end
+      },
+      exception: p.exceptionSubprocess ? { name: p.exceptionSubprocess.name, steps: (p.exceptionSubprocess.steps || []).map((s) => s.name), end: p.exceptionSubprocess.end || 'message' } : null,
+      linear: routed ? true : p.linear
     }
   }
 
   const arrow = '<div class="ipFlowArrow" aria-hidden="true"></div>'
+
+  const END_LABELS = { message: 'End', escalation: 'Escalation End', error: 'Error End', terminate: 'Terminate End' }
+  // the exception subprocess's end: a Message End answers the sender and the message looks completed
+  const EXCEPTION_END_LABELS = { message: 'End (response to sender; shown as completed)', escalation: 'Escalation End (escalated)', error: 'Error End (failed)', terminate: 'Terminate End' }
+
+  /** The routes of a router, one line each: name, condition (or default), its steps, how it ends */
+  const routesHtml = (routes) =>
+    `<div class="ipFlowRoutes">${routes
+      .map(
+        (r) =>
+          `<div class="ipFlowRoute"><span class="ipFlowRouteName">${esc(r.name)}</span> ${esc(r.condition ? r.condition : 'default')}: ${[
+            ...r.steps,
+            r.end ? END_LABELS[r.end] || 'End' : 'continues'
+          ]
+            .map(esc)
+            .join(' → ')}</div>`
+      )
+      .join('')}</div>`
 
   function receiver(r) {
     return `<div class="ipFlowReceiver" title="${esc(r.detail || '')}">${icon('receiver')}<div><div class="ipFlowReceiverName">${esc(r.name)}</div>${
@@ -141,18 +198,22 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           s.name
         )}">${esc(s.name)}</div><div class="ipFlowStepType">${esc(STEP_LABELS[s.type] || s.type)}</div></div></div>${s.detail ? `<div class="ipFlowMono">${esc(s.detail)}</div>` : ''}</div>${
           s.receiver ? `<div class="ipFlowDash"></div>${receiver(s.receiver)}` : ''
-        }</div>`
+        }${s.routes ? routesHtml(s.routes) : ''}</div>`
       )
     }
-    parts.push(arrow)
-    parts.push(`<div class="ipFlowEvent ipFlowEnd"><div class="ipFlowCircle">${icon('end')}</div><div class="ipFlowEventLabel">End</div></div>`)
+    if (!model.end.none) {
+      parts.push(arrow)
+      parts.push(`<div class="ipFlowEvent ipFlowEnd"><div class="ipFlowCircle">${icon('end')}</div><div class="ipFlowEventLabel">${esc(END_LABELS[model.end.event] || 'End')}</div></div>`)
+    }
     if (model.end.receiver) {
       parts.push(arrow)
       parts.push(`<div class="ipFlowEndReceiver">${receiver(model.end.receiver)}</div>`)
     }
     const note = model.linear === false ? '<div class="ipFlowNote">This flow branches; steps are shown in processing order.</div>' : ''
     const exception = model.exception
-      ? `<div class="ipFlowNote">On error: ${esc(model.exception.name)} — ${['Error Start', ...model.exception.steps, 'End (response to sender)'].map(esc).join(' → ')}</div>`
+      ? `<div class="ipFlowNote">On error: ${esc(model.exception.name)} — ${['Error Start', ...model.exception.steps, EXCEPTION_END_LABELS[model.exception.end || 'message']]
+          .map(esc)
+          .join(' → ')}</div>`
       : ''
     return `<div class="ipFlow" role="img" aria-label="${esc(label)}"><div class="ipFlowRow">${parts.join('')}</div>${exception}${note}</div>`
   }

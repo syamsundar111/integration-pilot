@@ -12,6 +12,7 @@ const JSZip = require('jszip')
 const { validate, effectiveNames } = require('./validator')
 const receiverSettings = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
+const specSteps = require('./spec-steps')
 
 const TEMPLATE_DIR = path.join(__dirname, 'templates')
 
@@ -106,7 +107,7 @@ function splitUrl(url, params = {}) {
 
 /** Parameters used as the whole URL of an HTTP receiver ({{P}}) */
 function receiverParams(spec) {
-  const calls = [...(spec?.steps || []).filter((s) => s?.type === 'requestReplyHttp'), ...(spec?.end?.type === 'httpReceiver' ? [spec.end] : [])]
+  const calls = [...specSteps.mainSteps(spec).map((x) => x.step).filter((s) => s?.type === 'requestReplyHttp'), ...(spec?.end?.type === 'httpReceiver' ? [spec.end] : [])]
   return calls.map((c) => String(c.url ?? '').match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]).filter(Boolean)
 }
 
@@ -144,14 +145,15 @@ const L = {
   PART_H: 140,
   SENDER_X: 37,
   RECEIVER_GAP: 80, // pool -> end receiver
-  BELOW_GAP: 60, // pool -> request-reply receivers below their step
+  ABOVE_GAP: 60, // request-reply receivers above the pool -> pool
+  GATEWAY: 40, // router
+  LANE: 100, // main line -> route lanes below it, one per route with steps or an end
   MIN_POOL_W: 400,
   SUB_GAP: 30, // main flow -> exception subprocess below it
   SUB_H: 140,
   SUB_PAD: 40, // subprocess border -> its first/last element
   POOL_PAD: 30 // exception subprocess -> pool bottom
 }
-L.CY = L.POOL_Y + L.POOL_H / 2
 
 const num = (n) => (Number.isInteger(n) ? n.toFixed(1) : String(n))
 
@@ -195,7 +197,12 @@ function chain(nodes, nextId) {
 
 /** Copy of the spec with the code of attached scripts filled in (groovyScript steps without code) */
 function injectAttachments(spec, attachments = {}) {
-  const fillCode = (s) => (s?.type === 'groovyScript' && s.code == null && attachments[`${s.fileName}.groovy`] != null ? { ...s, code: attachments[`${s.fileName}.groovy`] } : s)
+  const fillCode = (s) =>
+    s?.type === 'groovyScript' && s.code == null && attachments[`${s.fileName}.groovy`] != null
+      ? { ...s, code: attachments[`${s.fileName}.groovy`] }
+      : s?.type === 'router' && Array.isArray(s.routes)
+        ? { ...s, routes: s.routes.map((r) => (Array.isArray(r?.steps) ? { ...r, steps: r.steps.map(fillCode) } : r)) }
+        : s
   return {
     ...spec,
     ...(Array.isArray(spec.steps) && { steps: spec.steps.map(fillCode) }),
@@ -222,42 +229,107 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   let counter = 0
   const nextId = (prefix) => `${prefix}_${++counter}`
 
-  // Flow nodes in order: start, steps, end
+  // --- flow graph ------------------------------------------------------------------
+  // Nodes in column order: every node gets its own column, so a receiver connector straight up never
+  // crosses another step; lanes: 0 is the main line, each route with steps or an end gets a lane below.
+  // A router's routes either end (their end event) or stay open: the next main-line element (or the main
+  // end) takes up every open route, which is how routes join again.
+  const named = new Map(names.flat.map((x) => [x.step, x]))
   const nodes = []
-  const start = { id: nextId('StartEvent'), kind: 'start', w: L.EVENT, h: L.EVENT }
+  const flows = []
+  const addNode = (n, lane) => {
+    Object.assign(n, { id: nextId(n.prefix), lane, col: nodes.length, incoming: [], outgoing: [] })
+    nodes.push(n)
+    return n
+  }
+  // target may come later: a route that continues without steps gets its flow now, so the router's routes keep
+  // the spec's order (CPI evaluates them in order), and the next main-line element becomes its target
+  const connect = (source, target, route) => {
+    const f = { id: nextId('SequenceFlow'), source, target, route }
+    source.outgoing.push(f.id)
+    if (target) target.incoming.push(f.id)
+    flows.push(f)
+    return f
+  }
+  const reach = (o, target) => {
+    if (o.pending) {
+      o.pending.target = target
+      target.incoming.push(o.pending.id)
+    } else connect(o.node, target, o.route)
+  }
+  let endCount = 1 // End, End 2, End 3, ... (names given in the spec win)
+  const endNode = (end, fallback) => ({
+    kind: 'end',
+    event: end?.event || 'message',
+    category: end?.category || cpiValues.DEFAULT_ESCALATION_CATEGORY, // Escalation End only
+    name: end?.name || fallback || `End ${++endCount}`,
+    prefix: 'EndEvent',
+    w: L.EVENT,
+    h: L.EVENT
+  })
+
+  const start = addNode({ kind: 'start', prefix: 'StartEvent', w: L.EVENT, h: L.EVENT }, 0)
   if (spec.trigger.type === 'timer') Object.assign(start, { name: 'Start Timer 1', timerId: nextId('TimerEventDefinition'), schedule: cpiValues.scheduleOf(spec.trigger) })
   else start.name = 'Start'
-  nodes.push(start)
 
-  spec.steps.forEach((step, i) => {
-    const n = stepNode(step, names.steps[i], names.systems[i])
-    nodes.push({ ...n, id: nextId(n.prefix) })
-  })
-  const end = { id: nextId('EndEvent'), kind: 'end', name: 'End', w: L.EVENT, h: L.EVENT }
-  nodes.push(end)
+  let open = [{ node: start }] // where the next element connects from (and the route, for a flow that leaves a router)
+  let lanes = 0
+  const stepOn = (step, lane) => addNode(stepNode(step, named.get(step).name, named.get(step).system), lane)
+  for (const step of spec.steps) {
+    if (step.type !== 'router') {
+      const n = stepOn(step, 0)
+      for (const o of open) reach(o, n)
+      open = [{ node: n }]
+      continue
+    }
+    const gateway = addNode({ kind: 'router', step, name: named.get(step).name, prefix: 'ExclusiveGateway', w: L.GATEWAY, h: L.GATEWAY }, 0)
+    for (const o of open) reach(o, gateway)
+    open = []
+    for (const route of step.routes) {
+      const lane = route.steps?.length || route.end ? ++lanes : 0
+      let from = { node: gateway, route: { route, router: step } }
+      for (const s of route.steps || []) {
+        const n = stepOn(s, lane)
+        connect(from.node, n, from.route)
+        from = { node: n }
+      }
+      if (route.end) connect(from.node, addNode(endNode(route.end), lane), from.route)
+      else if (from.node === gateway) open.push({ pending: connect(gateway, null, from.route) }) // continues at once: its flow now
+      else open.push(from)
+    }
+  }
+  // the main end: none when every route of the last router ends (the validator requires end "none" then)
+  const end = open.length ? addNode(endNode(spec.end, 'End'), 0) : null
+  for (const o of open) reach(o, end)
+  for (const g of nodes.filter((n) => n.kind === 'router')) g.defaultFlow = flows.find((f) => f.source === g && f.route?.route.default)?.id
 
-  // Left-to-right layout on one center line
-  let poolW = Math.max(layoutRow(nodes, L.START_X, L.CY) - L.POOL_X, L.MIN_POOL_W)
-  let poolH = L.POOL_H
+  // --- layout ------------------------------------------------------------------------
+  // receivers of request-reply steps sit above the pool, in their step's column; the end receiver right of it
+  const receiversAbove = nodes.some((n) => n.step?.type === 'requestReplyHttp')
+  const poolY = L.POOL_Y + (receiversAbove ? L.PART_H + L.ABOVE_GAP : 0)
+  const laneCy = (k) => poolY + L.POOL_H / 2 + k * L.LANE
+  const cy0 = laneCy(0)
+  const colCx = (col) => L.START_X + col * (L.TASK_W + L.GAP) + L.TASK_W / 2
+  for (const n of nodes) Object.assign(n, { x: colCx(n.col) - n.w / 2, y: laneCy(n.lane) - n.h / 2 })
+  let poolW = Math.max(colCx(nodes.length - 1) + L.TASK_W / 2 + L.GAP - L.POOL_X, L.MIN_POOL_W)
+  const lanesBottom = laneCy(lanes) + L.TASK_H / 2
+  let poolH = Math.max(L.POOL_H, lanesBottom + L.POOL_PAD - poolY)
 
-  // Sequence flows
-  const flows = chain(nodes, nextId)
-
-  // Exception subprocess: a box inside the pool, below the main flow (error start -> steps -> message end)
+  // Exception subprocess: a box inside the pool, below the last lane (error start -> steps -> its end event)
   let sub = null
   if (spec.exceptionSubprocess) {
-    sub = { id: nextId('SubProcess'), name: names.exceptionSubprocess, x: L.START_X, y: L.CY + L.TASK_H / 2 + L.SUB_GAP, h: L.SUB_H, nodes: [] }
+    sub = { id: nextId('SubProcess'), name: names.exceptionSubprocess, x: L.START_X, y: lanesBottom + L.SUB_GAP, h: L.SUB_H, nodes: [] }
     sub.nodes.push({ id: nextId('StartEvent'), kind: 'errorStart', name: 'Error Start 1', w: L.EVENT, h: L.EVENT })
     spec.exceptionSubprocess.steps.forEach((step, i) => {
       const n = stepNode(step, names.exceptionSteps[i], null)
       sub.nodes.push({ ...n, id: nextId(n.prefix) })
     })
-    sub.nodes.push({ id: nextId('EndEvent'), kind: 'end', name: 'End 1', w: L.EVENT, h: L.EVENT })
+    sub.nodes.push({ ...endNode(spec.exceptionSubprocess.end, 'End 1'), id: nextId('EndEvent') })
     const afterLast = layoutRow(sub.nodes, sub.x + L.SUB_PAD, sub.y + L.SUB_H / 2)
     sub.w = afterLast - L.GAP + L.SUB_PAD - sub.x
     sub.flows = chain(sub.nodes, nextId)
     poolW = Math.max(poolW, sub.x + sub.w + L.SUB_PAD - L.POOL_X)
-    poolH = sub.y + sub.h + L.POOL_PAD - L.POOL_Y
+    poolH = sub.y + sub.h + L.POOL_PAD - poolY
   }
 
   // Participants + adapters (message flows)
@@ -267,7 +339,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const adapters = []
 
   if (spec.trigger.type === 'httpsSender') {
-    const p = { id: nextId('Participant'), kind: 'sender', name: 'Sender', x: L.SENDER_X, y: L.CY - L.PART_H / 2 }
+    const p = { id: nextId('Participant'), kind: 'sender', name: 'Sender', x: L.SENDER_X, y: cy0 - L.PART_H / 2 }
     participants.push(p)
     const id = nextId('MessageFlow')
     messageFlows.push({
@@ -279,8 +351,8 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
         ADDRESS_VALUE: val(spec.trigger.address),
         SYSTEM_VALUE: val(p.name)
       }),
-      from: [p.x + L.PART_W / 2, L.CY],
-      to: [start.x + L.EVENT / 2, L.CY],
+      from: [p.x + L.PART_W / 2, cy0],
+      to: [start.x + L.EVENT / 2, cy0],
       sourceShape: p.id,
       targetShape: start.id
     })
@@ -319,16 +391,17 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     return { p, mf }
   }
 
-  // Request-reply receivers sit below their step; the end receiver right of the pool
+  // Request-reply receivers sit above the pool in their step's column (a straight connector up that crosses
+  // no other step and never the exception subprocess below); the end receiver right of the pool
   for (const n of nodes.filter((n) => n.step?.type === 'requestReplyHttp')) {
-    const { p, mf } = addReceiver(n, n.step, n.system, { x: n.x, y: L.POOL_Y + poolH + L.BELOW_GAP })
-    mf.from = [n.x + L.TASK_W / 2, L.CY]
-    mf.to = [p.x + L.PART_W / 2, p.y]
+    const { p, mf } = addReceiver(n, n.step, n.system, { x: n.x, y: poolY - L.ABOVE_GAP - L.PART_H })
+    mf.from = [n.x + L.TASK_W / 2, n.y]
+    mf.to = [p.x + L.PART_W / 2, p.y + L.PART_H]
   }
   if (spec.end.type === 'httpReceiver') {
-    const { p, mf } = addReceiver(end, spec.end, names.endSystem, { x: L.POOL_X + poolW + L.RECEIVER_GAP, y: L.CY - L.PART_H / 2 })
-    mf.from = [end.x + L.EVENT / 2, L.CY]
-    mf.to = [p.x, L.CY]
+    const { p, mf } = addReceiver(end, spec.end, names.endSystem, { x: L.POOL_X + poolW + L.RECEIVER_GAP, y: cy0 - L.PART_H / 2 })
+    mf.from = [end.x + L.EVENT / 2, cy0]
+    mf.to = [p.x, cy0]
   }
   for (const mf of messageFlows) if (mf.vars) mf.xml = fill('iflw/messageflow-http-receiver.xml', { ID: mf.id, ...mf.vars })
 
@@ -337,7 +410,17 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     .map((p) => fill(p.kind === 'sender' ? 'iflw/participant-sender.xml' : 'iflw/participant-receiver.xml', { ID: p.id, NAME: escAttr(p.name) }))
     .join('')
 
-  const flowsXml = (list) => list.map((f) => fill('iflw/sequence-flow.xml', { ID: f.id, SOURCE: f.source.id, TARGET: f.target.id })).join('')
+  // a flow that leaves a router is a route: its name, expression type and condition (none on the default route)
+  const flowXml_ = (f) => {
+    const io = { ID: f.id, SOURCE: f.source.id, TARGET: f.target.id }
+    if (!f.route) return fill('iflw/sequence-flow.xml', io)
+    const { route, router } = f.route
+    const common = { ...io, NAME: escAttr(route.name), EXPRESSION_TYPE_VALUE: val(router.expressionType) }
+    return route.default
+      ? fill('iflw/route-default.xml', common)
+      : fill('iflw/route-condition.xml', { ...common, CONDITION_ID: `FormalExpression_${f.id}`, CONDITION: escText(route.condition) })
+  }
+  const flowsXml = (list) => list.map(flowXml_).join('')
   const subXml = sub
     ? fill('iflw/subprocess-exception.xml', { ID: sub.id, NAME: escAttr(sub.name), ELEMENTS: indent(sub.nodes.map((n) => nodeToXml(n)).join('') + flowsXml(sub.flows)) })
     : ''
@@ -350,7 +433,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const shapes =
     nodes.map((n) => shape(n.id, n.w, n.h, n.x, n.y)).join('') +
     (sub ? shape(sub.id, sub.w, sub.h, sub.x, sub.y) + subNodes.map((n) => shape(n.id, n.w, n.h, n.x, n.y)).join('') : '') +
-    shape('Participant_Process_1', poolW, poolH, L.POOL_X, L.POOL_Y) +
+    shape('Participant_Process_1', poolW, poolH, L.POOL_X, poolY) +
     participants.map((p) => shape(p.id, L.PART_W, L.PART_H, p.x, p.y)).join('')
 
   const edge = (element, source, target, points) =>
@@ -362,8 +445,14 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       WAYPOINTS: points.map(([px, py]) => fill('iflw/waypoint.xml', { X: num(px), Y: num(py) })).join('')
     })
   const center = (n) => [n.x + n.w / 2, n.y + n.h / 2]
+  // straight within a lane; down into a route lane at the source's column, back up at the target's column
+  const waypoints = ({ source, target }) => {
+    const [a, b] = [center(source), center(target)]
+    if (a[1] === b[1]) return [a, b]
+    return b[1] > a[1] ? [a, [a[0], b[1]], b] : [a, [b[0], a[1]], b]
+  }
   const edges =
-    [...flows, ...(sub ? sub.flows : [])].map((f) => edge(f.id, f.source.id, f.target.id, [center(f.source), center(f.target)])).join('') +
+    [...flows, ...(sub ? sub.flows : [])].map((f) => edge(f.id, f.source.id, f.target.id, waypoints(f))).join('') +
     messageFlows.map((mf) => edge(mf.id, mf.sourceShape, mf.targetShape, [mf.from, mf.to])).join('')
 
   const iflw = fill('iflw/definitions.xml', {
@@ -385,7 +474,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
 
   add(`src/main/resources/scenarioflows/integrationflow/${spec.id}.iflw`, iflw)
   const withCode = injectAttachments(spec, attachments)
-  for (const s of [...withCode.steps, ...(withCode.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript'))
+  for (const s of specSteps.allSteps(withCode).map((x) => x.step).filter((s) => s.type === 'groovyScript'))
     add(`src/main/resources/script/${s.fileName}.groovy`, s.code)
   for (const r of spec.resources || []) add(`src/main/resources/mapping/${r}`, attachments[r])
   add(
@@ -430,7 +519,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       spec.trigger.type === 'httpsSender'
         ? { type: 'httpsSender', address: spec.trigger.address }
         : { type: 'timer', mode: spec.trigger.mode, ...(spec.trigger.mode === 'every' && { minutes: spec.trigger.minutes }) },
-    steps: nodes.filter((n) => n.kind === 'step').map((n) => ({ id: n.id, type: n.step.type, name: n.name })),
+    steps: nodes.filter((n) => n.kind === 'step' || n.kind === 'router').map((n) => ({ id: n.id, type: n.step.type, name: n.name, ...(n.lane && { route: true }) })),
     end: spec.end.type === 'httpReceiver' ? { type: 'httpReceiver', system: names.endSystem, url: spec.end.url } : { type: 'none' },
     exceptionSubprocess: sub
       ? { id: sub.id, name: sub.name, steps: subNodes.filter((n) => n.kind === 'step').map((n) => ({ id: n.id, type: n.step.type, name: n.name })) }
@@ -444,16 +533,28 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   return { zipBase64: buffer.toString('base64'), files, summary }
 }
 
+// End event templates by event: Message End completes the message, Escalation End escalates it, Error End fails it
+const END_TEMPLATES = { message: 'iflw/end-message.xml', escalation: 'iflw/end-escalation.xml', error: 'iflw/end-error.xml' }
+
+/**
+ * Flow ids for a template's single <bpmn2:incoming>/<bpmn2:outgoing> line: a join step has several incoming
+ * flows, a router several outgoing ones (one element per flow, as CPI writes them)
+ */
+const multi = (ids, tag) => [].concat(ids).join(`</bpmn2:${tag}>\n            <bpmn2:${tag}>`)
+
 function nodeToXml(n) {
   const common = { ID: n.id, NAME: escAttr(n.name) }
+  const incoming = multi(n.incoming, 'incoming')
+  const outgoing = multi(n.outgoing, 'outgoing')
   if (n.kind === 'start')
     return n.timerId
-      ? fill('iflw/start-timer.xml', { ...common, OUTGOING: n.outgoing, TIMER_ID: n.timerId, SCHEDULE: n.schedule })
-      : fill('iflw/start-message.xml', { ...common, OUTGOING: n.outgoing })
-  if (n.kind === 'errorStart') return fill('iflw/start-error.xml', { ...common, OUTGOING: n.outgoing })
-  if (n.kind === 'end') return fill('iflw/end-message.xml', { ...common, INCOMING: n.incoming })
+      ? fill('iflw/start-timer.xml', { ...common, OUTGOING: outgoing, TIMER_ID: n.timerId, SCHEDULE: n.schedule })
+      : fill('iflw/start-message.xml', { ...common, OUTGOING: outgoing })
+  if (n.kind === 'errorStart') return fill('iflw/start-error.xml', { ...common, OUTGOING: outgoing })
+  if (n.kind === 'end') return fill(END_TEMPLATES[n.event || 'message'], { ...common, INCOMING: incoming, CATEGORY_VALUE: val(n.category || 'Others') })
+  if (n.kind === 'router') return fill('iflw/router.xml', { ...common, DEFAULT: n.defaultFlow, INCOMING: incoming, OUTGOING: outgoing })
 
-  const io = { ...common, INCOMING: n.incoming, OUTGOING: n.outgoing }
+  const io = { ...common, INCOMING: incoming, OUTGOING: outgoing }
   const s = n.step
   switch (s.type) {
     case 'contentModifier': {

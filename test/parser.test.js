@@ -147,3 +147,55 @@ describe('round trip: build -> parse', () => {
       })
     ))
 })
+
+describe('routed flows (phase 1b): what the spec can hold, and what not', () => {
+  const JSZip = require('jszip')
+  const { importIflow } = require('../srv/iflow-builder/import')
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: name }] })
+  const spec = baseSpec({
+    steps: [
+      cm('Prepare'),
+      {
+        type: 'router',
+        name: 'Check',
+        expressionType: 'NonXML',
+        routes: [
+          { name: 'Again', condition: "${property.x} = 'a'", steps: [cm('Retry')] },
+          { name: 'Stop', condition: "${property.x} = 's'", end: { event: 'escalation' } },
+          { name: 'Done', default: true }
+        ]
+      },
+      cm('After')
+    ]
+  })
+
+  test('a built router parses back to the same routes', async () => {
+    const r = await parse((await build(spec)).zipBase64)
+    expect(r.routed.steps.map((s) => s.name)).toEqual(['Prepare', 'Check', 'After'])
+    expect(r.routed.steps[1].routes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'Again', condition: "${property.x} = 'a'", default: false, steps: [expect.objectContaining({ name: 'Retry' })], end: null }),
+        expect.objectContaining({ name: 'Stop', default: false, steps: [], end: expect.objectContaining({ kind: 'escalation' }) }),
+        expect.objectContaining({ name: 'Done', default: true, steps: [], end: null })
+      ])
+    )
+    expect(r.routed.steps[1].routes.at(-1).name).toBe('Done') // the default route last
+  })
+
+  test('a route that goes back to an earlier step is not held: Import keeps the main path and says why', async () => {
+    const zip = await JSZip.loadAsync(Buffer.from((await build(spec)).zipBase64, 'base64'))
+    const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+    let xml = await zip.file(file).async('string')
+    // Retry's outgoing flow goes back to Prepare instead of to After
+    const id = (name) => xml.match(new RegExp(`id="([^"]+)" name="${name}"`))[1]
+    const retryOut = xml.match(new RegExp(`<bpmn2:sequenceFlow id="([^"]+)" sourceRef="${id('Retry')}" targetRef="${id('After')}"`))
+    xml = xml.replace(retryOut[0], retryOut[0].replace(`targetRef="${id('After')}"`, `targetRef="${id('Prepare')}"`))
+    zip.file(file, xml)
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' })
+    const r = await parse(buffer)
+    expect(r.routed).toEqual({ unsupported: expect.stringMatching(/goes back/) })
+    const imported = await importIflow(buffer, { fileName: 'loop.zip', packageId: 'PilotReference' })
+    expect(imported.notes.join('\n')).toMatch(/The routers could not be imported as routers: .*goes back/)
+    expect(imported.spec.steps.find((s) => s.name === 'Check').description).toMatch(/^REPLACE WITH Router 'Check'/)
+  })
+})

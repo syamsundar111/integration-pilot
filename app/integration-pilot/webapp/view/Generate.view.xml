@@ -314,6 +314,7 @@
                   <MessageStrip text="{chat>/active/resourcesText}" type="Information" showIcon="true" visible="{= !!${chat>/active/resourcesText} }" />
 
                   <MessageStrip text="{chat>/active/receiversText}" type="Information" showIcon="true" visible="{= !!${chat>/active/receiversText} }" />
+                  <MessageStrip text="{chat>/active/xmlRouterText}" type="Information" showIcon="true" visible="{= !!${chat>/active/xmlRouterText} }" />
                 </VBox>
 
                 <!-- package proposal -->
