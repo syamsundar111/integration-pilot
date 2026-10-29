@@ -1706,6 +1706,26 @@ describe('stuck turns (one instance; review: a RUNNING turn blocked its conversa
   })
 })
 
+describe('notes from the validator never make the model change a value', () => {
+  test('specNotes come with the instruction that they are for the user and the proposal stays as it is', async () => {
+    const spec = {
+      ...sample,
+      id: 'Notes_Flow',
+      name: 'Notes Flow',
+      steps: [{ type: 'requestReplyHttp', name: 'Call Shop', url: 'https://shop.example.com/api/orders?$top=5', method: 'GET', authType: 'Basic', credentialName: 'SHOP_BASIC' }],
+      end: { type: 'none' }
+    }
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec })).mockResolvedValueOnce(answer('ready'))
+    const turn = await chat({ message: 'create it' })
+    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(turn.proposals).toHaveLength(1)
+    expect(result.specNotes).toEqual([expect.stringMatching(/the query "\$top=5" is written to the receiver's Query field/)])
+    expect(result.specNotesUse).toBe(
+      'Information for the user, at most one line in your answer. The proposal is stored as it is: never change a value the user asked for because of these notes.'
+    )
+  })
+})
+
 describe('an iFlow that exists already: ask the user, do not rename silently (review: it proposed "…2" and said nothing)', () => {
   const lastTool = () => JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
   afterEach(() => {

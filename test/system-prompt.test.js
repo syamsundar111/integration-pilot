@@ -86,7 +86,7 @@ describe('system prompt: calling another iFlow (manual test 16)', () => {
 
   test('authentication is required: OAuth2 Client Credentials from a Process Integration Runtime service key (integration-flow)', () => {
     expect(flat).toMatch(/\*\*Authentication is required\*\*, not optional/)
-    expect(flat).toMatch(/\*\*OAuth2 Client Credentials\*\*.*\*\*Process Integration Runtime\*\* instance with plan \*\*integration-flow\*\*/)
+    expect(flat).toMatch(/`authType: "OAuth2 Client Credentials"` and the `credentialName` the user gives.*\*\*Process Integration Runtime\*\* instance with plan \*\*integration-flow\*\*/)
     expect(flat).toMatch(/Never write "if the target requires it"/)
     // the role the prompt names is the one the template requires
     expect(value('senderAuthType')).toBe('RoleBased')

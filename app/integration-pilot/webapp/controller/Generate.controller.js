@@ -31,6 +31,35 @@ sap.ui.define(
       requestReplyHttp: 'Request Reply (HTTP)'
     }
 
+    /** "Basic, credential ERP_USER · On-Premise, location ERP_LOC · timeout 30000 ms"; '' for the defaults */
+    const receiverSettingsText = (c) =>
+      [
+        c.authType && c.authType !== 'None' ? `${c.authType}, credential ${c.credentialName}` : '',
+        c.proxyType === 'On-Premise' ? `On-Premise${c.locationId ? `, location ${c.locationId}` : ''}` : '',
+        c.timeout ? `timeout ${c.timeout} ms` : ''
+      ]
+        .filter(Boolean)
+        .join(' · ')
+
+    /** The note under a proposal with HTTP receivers: credentials to deploy, receivers without authentication */
+    function receiversNote(spec) {
+      const calls = [...spec.steps.filter((s) => s.type === 'requestReplyHttp'), ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])]
+      if (!calls.length) return ''
+      const label = (c) => c.system || c.name || 'Receiver'
+      const withAuth = calls.filter((c) => c.authType && c.authType !== 'None')
+      const without = calls.filter((c) => !c.authType || c.authType === 'None')
+      return [
+        withAuth.length
+          ? `Before deploying, the credentials must exist as security material on the tenant: ${withAuth.map((c) => `${c.credentialName} (${c.authType}, ${label(c)})`).join(', ')}.`
+          : '',
+        without.length
+          ? `Without authentication: ${without.map(label).join(', ')}. For a method v1 does not set (e.g. client certificate), set it on the receiver adapter in the CPI web editor.`
+          : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
+    }
+
     const esc = markdown.escape
 
     /** Update proposals: whether the script differs from the current iFlow (from the stored diff) */
@@ -776,7 +805,7 @@ sap.ui.define(
           scripts: [],
           resourcesText: '',
           scriptsText: '',
-          hasHttpReceiver: false
+          receiversText: ''
         }
 
         const stepCard = (s, prefix) => ({
@@ -793,7 +822,7 @@ sap.ui.define(
                   .filter(Boolean)
                   .join('\n')
               : s.type === 'requestReplyHttp'
-                ? `${s.method} ${s.url}`
+                ? [`${s.method} ${s.url}`, receiverSettingsText(s)].filter(Boolean).join('\n')
                 : s.type === 'groovyScript'
                   ? `script/${s.fileName}.groovy${s.code == null ? ' (attached file)' : ''}`
                   : ''
@@ -804,7 +833,11 @@ sap.ui.define(
           active.stepCards = [
             { title: 'Trigger', type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : 'Timer', lines: spec.trigger.type === 'httpsSender' ? spec.trigger.address : 'Runs once after deployment' },
             ...spec.steps.map((s, i) => stepCard(s, `${i + 1}.`)),
-            { title: 'End', type: spec.end.type === 'httpReceiver' ? 'HTTP receiver' : 'No receiver', lines: spec.end.type === 'httpReceiver' ? `${spec.end.method} ${spec.end.url}` : '' },
+            {
+              title: 'End',
+              type: spec.end.type === 'httpReceiver' ? 'HTTP receiver' : 'No receiver',
+              lines: spec.end.type === 'httpReceiver' ? [`${spec.end.method} ${spec.end.url}`, receiverSettingsText(spec.end)].filter(Boolean).join('\n') : ''
+            },
             ...(spec.exceptionSubprocess
               ? [
                   { title: spec.exceptionSubprocess.name || 'Exception Subprocess 1', type: 'Exception Subprocess', lines: 'Runs when a step fails; its result is returned to the sender' },
@@ -832,7 +865,7 @@ sap.ui.define(
           active.resourcesText = (spec.resources || []).length
             ? `XSLT files added as src/main/resources/mapping/: ${spec.resources.join(', ')}. v1 has no XSLT step — add an XSLT Mapping step for them in the CPI web editor.`
             : ''
-          active.hasHttpReceiver = spec.end.type === 'httpReceiver' || spec.steps.some((s) => s.type === 'requestReplyHttp')
+          active.receiversText = receiversNote(spec)
         }
 
         // package editor defaults: closest existing package, else create under the requested id

@@ -11,7 +11,9 @@ more adapters. Work happens on branch `builder-v2`. Rules for the work itself ar
    corrected and saved in the CPI editor, dummy data only), with its request in
    `test/reference-prompts/<name>.txt`.
 2. Its XML becomes a template (`npm run templates:derive`); its dropdown values become the allowed
-   values (`templates/reference-values.json`).
+   values (`templates/reference-values.json`). When the phase starts, the values the user re-selected
+   in the CPI editor for it go into `reference/confirmed-values.json` (then a value seen in only one
+   reference does not warn).
 3. Spec schema, validator, builder, parser, update (`to-spec.js`) and import support it; the AI
    instructions, the pre-send check and [prompt-guide.md](prompt-guide.md) say so.
 4. **Offline regression test:** a spec written from the reference's prompt is built, parsed and
@@ -28,7 +30,7 @@ prompt and the tokens used reported per prompt.
 |---|---|---|---|
 | a | Commit the open work on `main`, branch `builder-v2`, references and prompts | all | done |
 | b | Parser: the main process is the process that is not local | Ref_Structure | done |
-| c | HTTP receiver: authentication (None, Basic, OAuth2 Client Credentials) with credential name, proxy Internet / On-Premise with location ID, timeout | Ref_Receivers | waiting for the tenant check |
+| c | HTTP receiver: authentication (None, Basic, OAuth2 Client Credentials) with credential name, proxy Internet / On-Premise with location ID, timeout | Ref_Receivers | done |
 | c2 | Credential name and location ID as externalized parameters, with the regression test update | Ref_Receivers (new version: RR_OAuth's credential name and RR_OnPrem's location ID externalized) | after c |
 | 1 | Router with conditions and default route; Message, Escalation and Error End; Write Variables; Content Modifier sources (Global/Local Variable, Header, Property, XPath); Timer start with a schedule (every N minutes) | Ref_Router_Ends, Ref_Variables | open |
 | 2 | General and Iterating Splitter, Gather; local integration process with Process Call and Looping Process Call | Ref_Structure | open |
@@ -42,6 +44,10 @@ prompt and the tokens used reported per prompt.
 
 ## Open before a step can start
 
+- **Confirmed values per phase** (add to `reference/confirmed-values.json` when the phase starts):
+  phase 1: Ref_Variables (Global/Local Variable source types, Write Variables types and scopes) and
+  Ref_Router_Ends (timer, `R_Other` default route); phase 3: the Mail values in Ref_Receivers.
+  Step c's (OAuth2 Client Credentials, On-Premise) are in.
 - **Step c2:** the new Ref_Receivers (the user replaces it after step c is committed); until then a
   credential name or location ID must be literal.
 - **Phase 2:** re-select the Gather values of `GA_Orders` in Ref_Structure in the CPI editor

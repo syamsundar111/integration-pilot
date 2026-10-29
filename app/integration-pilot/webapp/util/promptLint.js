@@ -4,7 +4,8 @@ sap.ui.define([], () => {
   /**
    * Client-side checks of an iFlow request before it is sent (no LLM call): step kinds v1 cannot
    * build, too many steps, unfilled template fields, a package name without a valid ID, and {{Param}}
-   * references outside URLs (a missing package, trigger or authentication gets a default instead). Each finding costs the user a clarification round or a failed
+   * references outside URLs, and passwords or secrets (credential names only); a missing package, trigger or
+   * authentication gets a default instead. Each finding costs the user a clarification round or a failed
    * proposal, so they are shown as warnings with "Send anyway" / "Edit". A follow-up message is
    * checked together with the earlier ones and shows only what is new since the first message.
    */
@@ -18,7 +19,7 @@ sap.ui.define([], () => {
     'Steps (in order, at most 50):',
     '1. <step type and name, e.g. Content Modifier "Set Properties": property Source = constant Shop>',
     '2. <…>',
-    'Receivers: <name, method and URL of each HTTP call; externalize a URL as {{Name}} with a default>',
+    'Receivers: <name, method and URL of each HTTP call; externalize a URL as {{Name}} with a default; authentication None, or Basic / OAuth2 Client Credentials with the credential name; On-Premise with the location ID if needed>',
     'Error handling: <exception subprocess: what to set, log or return when a step fails>'
   ].join('\n')
 
@@ -40,6 +41,14 @@ sap.ui.define([], () => {
     ['SFTP', /\bsftp\b/i],
     ['write variables', /\bwrite variables?\b/i],
     ['process call', /\b(local )?process call\b/i]
+  ]
+
+  // A password, secret or token value in the message (a credential *name* is fine: "credential ERP_BASIC_USER")
+  const SECRET_VALUE = [
+    /\b(password|passwd|pwd|passcode)\s*[:=]\s*\S+/i,
+    /\b(client[ _-]?secret|api[ _-]?key|access[ _-]?token|token|secret)\s*[:=]\s*\S{6,}/i,
+    /\bBearer\s+[A-Za-z0-9._~+/-]{12,}/,
+    /\bhttps?:\/\/[^/\s:@]+:[^/\s@]+@/i
   ]
 
   // Quoted text is data or a description, not a step: "REPLACE WITH Router ..." may span lines (up to 600 characters)
@@ -90,7 +99,9 @@ sap.ui.define([], () => {
     unsupported: (found) =>
       `Not supported in v1: ${found.join(', ')}. Flows are linear (Content Modifier, Groovy Script, JSON/XML converters, HTTP request-reply). Use a Groovy script, or add the step in the CPI web editor after creation.` +
       (found.includes('XSLT') ? ' Attach the .xsl file to include it in the iFlow, ready for an XSLT Mapping step.' : ''),
-    params: (names) => `${names.join(', ')}: parameters work only as the whole URL of an HTTP receiver. Use literal values elsewhere.`
+    params: (names) => `${names.join(', ')}: parameters work only as the whole URL of an HTTP receiver. Use literal values elsewhere.`,
+    secret:
+      'This looks like a password, secret or token. Never send credentials: deploy them as security material in CPI (User Credentials or OAuth2 Client Credentials) and give only its name, e.g. "Basic, credential ERP_BASIC_USER".'
   }
 
   /**
@@ -110,6 +121,7 @@ sap.ui.define([], () => {
     }
 
     if (PLACEHOLDER.test(message)) warn('template', 'Some template fields are still unfilled (text in <…>). Fill them in or delete those lines.')
+    if (SECRET_VALUE.some((re) => re.test(message))) warn('secret', WARNINGS.secret)
 
     // a missing package, trigger or authentication is no warning: the assistant uses defaults
     // (first package on the tenant, HTTPS trigger, no authentication) and says so

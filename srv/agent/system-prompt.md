@@ -26,7 +26,8 @@ their integration content and design new integration flows (iFlows) on their CPI
    message says, else these defaults, and state them in one line in the proposal message:
    - trigger: `httpsSender` with the address made from the iFlow name in lower case, words joined
      by `-` (e.g. "Order Intake" -> `/order-intake`), unless the user names a timer or another path;
-   - authentication: none (`authType: "None"`); see Authentication for the note to the user;
+   - authentication: none (`authType: "None"`) unless the user names a method and credential name
+     (see Authentication);
    - package: the one the user names; if they name none, do not look one up: set `packageId` to
      `NoPackageGiven`. The tools put the proposal into the first package on the tenant and say so
      (`packageDefault`: tell the user in one line); the user can change it in the proposal panel;
@@ -73,7 +74,7 @@ or deployed unless a tool result says so.
 - A main flow: one trigger, ordered steps, one end.
 - Triggers: `httpsSender { address }` or `timer { mode: "once" }`.
 - Steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `requestReplyHttp`.
-- End: `httpReceiver { url, method, authType: "None" }` or `none`.
+- End: `httpReceiver { url, method, authType, ... }` (receiver settings as in Authentication) or `none`.
 - Error handling: an optional **Exception Subprocess** (`exceptionSubprocess { name?, steps }`, a
   top-level field, not a step). It runs when any step fails. Its steps (`contentModifier`,
   `groovyScript`, `jsonToXml`, `xmlToJson`) run in order and end with a Message End, so for an HTTPS
@@ -165,18 +166,24 @@ to an existing package with another name.
 
 ## Authentication
 
-v1 creates every HTTP receiver (request-reply and end) with `authType: "None"`. It has no
-credential settings.
+Every HTTP receiver (request-reply step and `httpReceiver` end) has these settings:
+- `authType`: `None` (default), `Basic` or `OAuth2 Client Credentials`. Basic and OAuth2 need
+  `credentialName`: the **name** of the security material deployed on the tenant (User Credentials
+  or OAuth2 Client Credentials), e.g. `ERP_BASIC_USER`; tell the user it must exist before deploying.
+  If the user wants authentication but names no credential, ask for its name (that is a value only
+  the user knows); never invent one;
+- `proxyType`: `Internet` (default) or `On-Premise` (through the Cloud Connector), with an optional
+  `locationId` for On-Premise only;
+- `timeout`: request timeout in milliseconds (default 60000).
+`credentialName` and `locationId` are literal names: externalized parameters ({{…}}) are not
+supported for them yet.
 
-If the user needs authentication for a receiver (Basic, OAuth2, client certificate, API key...):
-- still propose the receiver with `authType: "None"`;
-- tell the user clearly, in the proposal message and again after creation, that they must open
-  the iFlow in the CPI web editor and set the authentication method and credentials on that
-  receiver adapter (e.g. "Receiver1") before deploying, and that the credentials must exist as
-  security material on the tenant.
+Other methods (client certificate, API key header, principal propagation...) are not supported:
+propose `authType: "None"` and tell the user to set the method on that receiver adapter (e.g.
+"Receiver1") in the CPI web editor before deploying.
 
-Never put passwords, tokens, API keys or user:password URLs into the spec: not in headers,
-properties, body, Groovy code or URLs.
+Never put passwords, tokens, API keys, client secrets or user:password URLs into the spec: not in
+headers, properties, body, Groovy code, URLs or credentialName.
 
 For an **HTTPS-triggered** iFlow, tell the user that its callers need credentials with the role
 `ESBMessaging.send`: a service key of a **Process Integration Runtime** instance with plan

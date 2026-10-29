@@ -69,18 +69,53 @@ describe('validator', () => {
     expect(effectiveNames(spec).steps).toEqual(['JSON to XML Converter 1', 'JSON to XML Converter 2'])
   })
 
-  test('receiver auth is None only; authentication is set in the CPI web editor', () => {
+  describe('HTTP receivers: authentication, proxy and timeout', () => {
     const end = (e) => baseSpec({ end: { type: 'httpReceiver', url: 'https://x.org', method: 'POST', ...e } })
-    expect(errorsOf(end({ authType: 'None' }))).toEqual([])
-    for (const authType of ['Basic', 'OAuth2ClientCredentials']) {
-      const errors = errorsOf(end({ authType }))
-      expect(errors).toEqual([
-        `end.authType: '${authType}' is not supported in v1 — create the receiver with authType None, then set authentication and credentials in the CPI web editor after creation`
-      ])
-    }
-    const rr = baseSpec({ steps: [{ type: 'requestReplyHttp', url: 'https://x.org', method: 'GET', authType: 'None', credentialAlias: 'A' }] })
-    expect(errorsOf(rr)).toEqual([expect.stringMatching(/^steps\[0\]: credentialAlias is not supported in v1 — create the receiver with authType None/)])
-    expectError(end({ authType: 'None', url: 'https://user:secret@x.org/api' }), /end\.url: contains user:password/)
+    const rr = (e) => baseSpec({ steps: [{ type: 'requestReplyHttp', url: 'https://x.org', method: 'GET', ...e }] })
+
+    test('None, Basic and OAuth2 Client Credentials with a credential name; Internet or On-Premise with a location ID; a timeout', () => {
+      expect(errorsOf(end({ authType: 'None' }))).toEqual([])
+      expect(errorsOf(end({ authType: 'Basic', credentialName: 'ERP_BASIC_USER' }))).toEqual([])
+      expect(errorsOf(rr({ authType: 'OAuth2 Client Credentials', credentialName: 'OAUTH.CLIENT-1', proxyType: 'On-Premise', locationId: 'LOC_1', timeout: 30000 }))).toEqual([])
+      expect(errorsOf(rr({ authType: 'None', proxyType: 'Internet', timeout: 1 }))).toEqual([])
+    })
+
+    test('a credential name is required with Basic and OAuth2, and only used with them', () => {
+      expect(errorsOf(end({ authType: 'Basic' }))).toEqual([expect.stringMatching(/^end\.credentialName: required with authType Basic — give the name of the security material deployed in CPI/)])
+      expect(errorsOf(end({ authType: 'None', credentialName: 'X' }))).toEqual([expect.stringMatching(/^end\.credentialName: only used with authType Basic or OAuth2 Client Credentials/)])
+      expect(errorsOf(rr({ authType: 'Basic', credentialAlias: 'A' }))).toEqual([expect.stringMatching(/^steps\[0\]: unknown field 'credentialAlias' — use credentialName/)])
+    })
+
+    test('other methods and proxy types, and a location ID without On-Premise, are refused', () => {
+      expect(errorsOf(end({ authType: 'Client Certificate' }))).toEqual(['end.authType: must be one of None, Basic, OAuth2 Client Credentials'])
+      expect(errorsOf(end({ authType: 'None', proxyType: 'Manual' }))).toEqual(['end.proxyType: must be one of Internet, On-Premise'])
+      expect(errorsOf(end({ authType: 'None', locationId: 'LOC' }))).toEqual([expect.stringMatching(/^end\.locationId: only used with proxyType On-Premise/)])
+      expectError(end({ authType: 'None', timeout: 0 }), /end\.timeout/)
+    })
+
+    test('credentials never go into the spec: passwords, secrets, user:password URLs; parameters only as URLs', () => {
+      const secret = errorsOf(rr({ authType: 'Basic', credentialName: 'C', password: 'hunter2', clientSecret: 'abc' }))
+      expect(secret).toEqual([expect.stringMatching(/^steps\[0\]\.password: never put credentials into the spec/), expect.stringMatching(/^steps\[0\]\.clientSecret: never put credentials into the spec/)])
+      expectError(end({ authType: 'None', url: 'https://user:secret@x.org/api' }), /end\.url: contains user:password/)
+      expect(errorsOf(rr({ authType: 'Basic', credentialName: '{{Cred}}' }))).toEqual(['steps[0].credentialName: an externalized parameter is not supported here yet — use the literal credential name'])
+      expect(errorsOf(rr({ authType: 'None', proxyType: 'On-Premise', locationId: '{{Loc}}' }))).toEqual(['steps[0].locationId: an externalized parameter is not supported here yet — use the literal location ID'])
+    })
+
+    test('a value seen in only one reference export warns unless it is confirmed (re-selected in the CPI editor)', () => {
+      // OAuth2 Client Credentials and On-Premise are each in one reference, both confirmed
+      expect(validate(rr({ authType: 'OAuth2 Client Credentials', credentialName: 'C', proxyType: 'On-Premise' })).warnings).toEqual([])
+      const { checkAgainstReferences } = require('../srv/iflow-builder/receiver-settings')
+      const values = { 'HTTP Receiver': { proxyType: { default: { references: ['A', 'B'] }, sapcc: { references: ['A'] } }, authenticationMethod: { Basic: { references: ['A'] } } } }
+      expect(checkAgainstReferences({ authType: 'Basic', credentialName: 'C', proxyType: 'On-Premise' }, 'end', values)).toEqual({
+        errors: [],
+        warnings: [
+          "end: proxyType 'sapcc' is seen in only one reference export (A) and not yet confirmed in the CPI editor",
+          "end: authenticationMethod 'Basic' is seen in only one reference export (A) and not yet confirmed in the CPI editor"
+        ]
+      })
+      values['HTTP Receiver'].proxyType.sapcc.confirmed = 'test'
+      expect(checkAgainstReferences({ authType: 'None', proxyType: 'On-Premise' }, 'end', values).errors).toEqual(["end: authenticationMethod 'None' is in no reference export (known: Basic)"])
+    })
   })
 
   test('rejects plaintext secrets in headers, body and Groovy', () => {
@@ -120,11 +155,11 @@ describe('validator', () => {
         { type: 'router' },
         ...Array.from({ length: 49 }, () => ({ type: 'jsonToXml' }))
       ],
-      end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'Basic' }
+      end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'Basic' } // no credentialName
     })
     const { issues, errors } = validate(spec)
     expect(issues.map((i) => i.message)).toEqual(errors)
-    expect(new Set(issues.map((i) => i.code))).toEqual(new Set(['STEP_NOT_IN_V1', 'AUTH_UNSUPPORTED', 'BAD_VALUE', 'TOO_MANY', 'DUPLICATE_STEP_NAME', 'PARAM_UNDEFINED']))
+    expect(new Set(issues.map((i) => i.code))).toEqual(new Set(['STEP_NOT_IN_V1', 'CREDENTIAL_MISSING', 'BAD_VALUE', 'TOO_MANY', 'DUPLICATE_STEP_NAME', 'PARAM_UNDEFINED']))
   })
 
   test('start and end events listed as steps point to the top-level fields', () => {

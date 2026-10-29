@@ -1,0 +1,40 @@
+{
+  "HTTP Receiver": {
+    "authenticationMethod": {
+      "OAuth2 Client Credentials": {
+        "references": [
+          "Ref_Receivers"
+        ],
+        "confirmed": "re-selected in Ref_Receivers (RR_OAuth), 2026-10-29"
+      },
+      "Basic": {
+        "references": [
+          "Ref_Receivers",
+          "Ref_Receivers"
+        ]
+      },
+      "None": {
+        "references": [
+          "Reference_AllSteps",
+          "Reference_AllSteps"
+        ]
+      }
+    },
+    "proxyType": {
+      "default": {
+        "references": [
+          "Ref_Receivers",
+          "Ref_Receivers",
+          "Reference_AllSteps",
+          "Reference_AllSteps"
+        ]
+      },
+      "sapcc": {
+        "references": [
+          "Ref_Receivers"
+        ],
+        "confirmed": "On-Premise, re-selected in Ref_Receivers (RR_OnPrem), 2026-10-29"
+      }
+    }
+  }
+}

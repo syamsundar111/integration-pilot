@@ -1,0 +1,11 @@
+{
+  "_about": "Dropdown values the user re-selected in the CPI editor, per adapter and property, with where and when. npm run templates:derive merges them into templates/reference-values.json; a confirmed value seen in only one reference export gives no warning. Add a value only after re-selecting it in the editor.",
+  "HTTP Receiver": {
+    "authenticationMethod": {
+      "OAuth2 Client Credentials": "re-selected in Ref_Receivers (RR_OAuth), 2026-10-29"
+    },
+    "proxyType": {
+      "sapcc": "On-Premise, re-selected in Ref_Receivers (RR_OnPrem), 2026-10-29"
+    }
+  }
+}

@@ -92,7 +92,9 @@ Extends the builder beyond the linear spec v1; phases, status and open items: [d
   wrote invalid source types, Write Variables types and proxy types).
 - Allowed dropdown values come only from the references, per adapter and field (e.g. On-Premise =
   `sapcc`; Internet = `default` in HTTP/OData/SOAP but `none` in SFTP/Mail). A value seen in only one
-  reference is a warning, not an error.
+  reference is a warning, not an error, unless it is listed in `reference/confirmed-values.json` (re-selected
+  in the editor). `npm run templates:derive` merges both into `templates/reference-values.json` (a test fails
+  when it is out of date); HTTP receiver settings map between spec and CPI in `receiver-settings.js`.
 - Ignore iGlow extras in references: empty exception subprocesses (Error Start -> Error End) and
   "Set log headers" steps.
 - Each scheduler is the template for its own component (Timer start event != SFTP adapter scheduler).

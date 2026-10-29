@@ -99,6 +99,30 @@ async function importIflow(buffer, { fileName, packageId }) {
   /** {{Param}} in notes and descriptions -> its default, so the user reads the real value */
   const withDefaults = (text) => String(text ?? '').replace(PARAM_REF, (m, p) => (defaults[p] ? defaults[p] : m))
   /**
+   * Authentication, proxy and timeout of a parsed HTTP receiver call, as the spec holds them. A
+   * credential name or location ID given as {{Parameter}} becomes the parameter's default (noted);
+   * settings the spec cannot hold (unsupportedSettings) are left at their defaults and noted by the caller.
+   */
+  const receiverFields = (s, system) => {
+    const literal = (v, what) => {
+      if (!/\{\{/.test(v || '')) return v
+      const value = withDefaults(v)
+      if (/\{\{/.test(value)) return undefined // no default: left out, the validator asks for it
+      notes.push(`${system}: the ${what} ${v} became its value ${value} (externalized ${what}s are not supported yet)`)
+      return value
+    }
+    const auth = s.authType && s.authType !== 'None' && !s.unsupportedSettings?.some((u) => u.startsWith('authentication')) ? s.authType : 'None'
+    const credentialName = auth !== 'None' ? literal(s.credentialAlias, 'credential name') : undefined
+    const locationId = s.proxyType === 'On-Premise' ? literal(s.locationId, 'location ID') : undefined
+    return {
+      authType: auth,
+      ...(credentialName && { credentialName }),
+      ...(s.proxyType && { proxyType: s.proxyType }),
+      ...(locationId && { locationId }),
+      ...(s.timeout && { timeout: s.timeout })
+    }
+  }
+  /**
    * A URL the spec accepts, or null: a literal http(s) URL stays literal, a whole {{Param}} stays, and a
    * URL combined from parameters ({{HTTP_Address}}?{{HTTP_Query}}) becomes one new parameter
    * <System>_URL whose default is the combined value, so the receiver URL stays externalized.
@@ -244,9 +268,8 @@ async function importIflow(buffer, { fileName, packageId }) {
         const system = uniqueSystem(identifier(s.system, 'Receiver'), 50)
         const url = httpUrl(s.url, system)
         if (!url) return [placeholder(name, `HTTP request-reply ${label} to ${s.url || '?'} (the URL could not be converted)`)]
-        const step = { type: 'requestReplyHttp', ...(name && { name }), system, url, method: METHODS.includes(s.method) ? s.method : 'GET', authType: 'None' }
-        if (s.authType && s.authType !== 'None')
-          step.description = `Set authentication ${withDefaults(s.authType)}${s.credentialAlias ? ` with credential ${withDefaults(s.credentialAlias)}` : ''} on ${step.system} in the CPI web editor.`
+        const step = { type: 'requestReplyHttp', ...(name && { name }), system, url, method: METHODS.includes(s.method) ? s.method : 'GET', ...receiverFields(s, system) }
+        if (s.unsupportedSettings?.length) step.description = `Set ${s.unsupportedSettings.map(withDefaults).join(', ')} on ${system} in the CPI web editor.`
         return [step]
       }
       case 'requestReply': {
@@ -311,8 +334,9 @@ async function importIflow(buffer, { fileName, packageId }) {
     const system = identifier(e.system, 'Receiver')
     const url = httpUrl(e.url, system)
     if (url) {
-      end = { type: 'httpReceiver', system: uniqueSystem(system, 50), url, method: METHODS.includes(e.method) ? e.method : 'POST', authType: 'None' }
-      if (e.authType && e.authType !== 'None') notes.push(`End receiver ${end.system}: set authentication ${withDefaults(e.authType)}${e.credentialAlias ? ` with credential ${withDefaults(e.credentialAlias)}` : ''} in the CPI web editor`)
+      const endSystem = uniqueSystem(system, 50)
+      end = { type: 'httpReceiver', system: endSystem, url, method: METHODS.includes(e.method) ? e.method : 'POST', ...receiverFields(e, endSystem) }
+      if (e.unsupportedSettings?.length) notes.push(`End receiver ${endSystem}: set ${e.unsupportedSettings.map(withDefaults).join(', ')} in the CPI web editor`)
     } else steps.push(placeholder(undefined, `the HTTP receiver ${e.system || ''} at ${e.url || '?'} (the URL could not be converted)`))
   } else if (e.type === 'receiver') steps.push(placeholder(undefined, `the ${e.adapter} receiver${e.system ? ` ${e.system}` : ''}${e.address ? ` (${e.address})` : ''}`))
 

@@ -110,9 +110,10 @@ const SPEC_FORMAT = {
     groovyScript: '{ type, name?, description?, fileName } — code written with writeScript (or attached), never in the spec',
     jsonToXml: '{ type, name?, description? }',
     xmlToJson: '{ type, name?, description? }',
-    requestReplyHttp: '{ type, name?, description?, system?, url: "https://…" | "{{Param}}", method: GET|POST|PUT|PATCH|DELETE, authType: "None" }'
+    requestReplyHttp:
+      '{ type, name?, description?, system?, url: "https://…" | "{{Param}}", method: GET|POST|PUT|PATCH|DELETE, authType: None|Basic|"OAuth2 Client Credentials", credentialName? (deployed credential name, never a secret; required unless None), proxyType?: Internet|On-Premise, locationId? (On-Premise only), timeout? (ms, default 60000) }'
   },
-  end: ['{ "type": "none" }', '{ "type": "httpReceiver", system?, url, method, authType: "None" }'],
+  end: ['{ "type": "none" }', '{ "type": "httpReceiver", system?, url, method, authType, credentialName?, proxyType?, locationId?, timeout? } (as requestReplyHttp)'],
   exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson }',
   parameters: '{ "Name": "default value" } — used only as a whole receiver url "{{Name}}"',
   resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
@@ -468,7 +469,7 @@ const handlers = {
         'Flows are linear: trigger -> steps in order -> end. Error handling goes into the optional top-level exceptionSubprocess (not into steps).',
         'exceptionSubprocess runs when a step fails; its result is returned to the HTTPS sender. ${exception.message} holds the error text; set header CamelHttpResponseCode to return an HTTP error status.',
         'To change an existing iFlow: getIflowSpec, change the spec, proposeIflowUpdate. Never use proposeIflow with an existing id.',
-        'HTTP receivers always use authType "None". If authentication is needed, say the user must set it in the CPI web editor after creation.',
+        'HTTP receivers: authType None, Basic or OAuth2 Client Credentials with credentialName (the name of deployed security material, never a password); proxyType Internet or On-Premise (locationId optional); timeout in ms.',
         'Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs; define each in "parameters".',
         'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).',
         'Write every Groovy script with writeScript (plain code), then reference it in the spec by fileName without code; never put Groovy code into a spec.',
@@ -687,7 +688,11 @@ const handlers = {
       ...(pkg.note && { packageIdNote: `${pkg.note} Tell the user exactly this, in one line; do not ask about it.` }),
       ...(chosen && { packageDefault: chosen.note }),
       ...autoFixes(typed.fixes),
-      ...(specNotes?.length && { specNotes }),
+      // notes for the user: the proposal is stored as it is, a note is never a reason to change a value
+      ...(specNotes?.length && {
+        specNotes,
+        specNotesUse: 'Information for the user, at most one line in your answer. The proposal is stored as it is: never change a value the user asked for because of these notes.'
+      }),
       summary: { trigger: summary.trigger, steps: summary.steps.map((s) => `${s.name} (${s.type})`), end: summary.end, exceptionSubprocess: summary.exceptionSubprocess, parameters: summary.parameters },
       ...(!pkgExists &&
         (pkg.name

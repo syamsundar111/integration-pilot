@@ -30,14 +30,42 @@ describe('update blockers', () => {
     expect((await readBack()).blockers).toEqual([])
   })
 
-  test('a Cloud Connector receiver with location ID and a longer timeout is a blocker, not silently reset', async () => {
-    const r = await readBack((x) => setting(setting(setting(x, 'proxyType', 'sapcc'), 'locationID', 'LOC1'), 'httpRequestTimeout', '600000'))
-    expect(r.spec).toBeNull()
-    expect(r.blockers).toEqual([
-      "receiver ERP: proxy type is 'sapcc'; an update would reset it to 'default' (Cloud Connector -> Internet)",
-      "receiver ERP: Cloud Connector location ID is 'LOC1'; an update would reset it to '(empty)'",
-      "receiver ERP: request timeout is '600000'; an update would reset it to '60000'"
-    ])
+  test('a Cloud Connector receiver with location ID, authentication and a longer timeout is kept by an update', async () => {
+    const r = await readBack((x) =>
+      [
+        ['proxyType', 'sapcc'],
+        ['locationID', 'LOC1'],
+        ['httpRequestTimeout', '600000'],
+        ['authenticationMethod', 'Basic'],
+        ['credentialName', 'ERP_BASIC_USER']
+      ].reduce((xml, [k, v]) => setting(xml, k, v), x)
+    )
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps[0]).toEqual({
+      type: 'requestReplyHttp',
+      name: 'Call ERP',
+      system: 'ERP',
+      url: 'https://erp.example.com/api',
+      method: 'GET',
+      authType: 'Basic',
+      credentialName: 'ERP_BASIC_USER',
+      proxyType: 'On-Premise',
+      locationId: 'LOC1',
+      timeout: 600000
+    })
+  })
+
+  test('receiver settings the spec cannot hold are blockers, not silently reset', async () => {
+    for (const [patch, blocker] of [
+      [(x) => setting(x, 'proxyType', 'manual'), "receiver ERP uses proxy type 'manual', which an update cannot keep"],
+      [(x) => setting(x, 'authenticationMethod', 'Client Certificate'), "receiver ERP uses authentication 'Client Certificate', which an update cannot keep"],
+      [(x) => setting(setting(x, 'authenticationMethod', 'Basic'), 'credentialName', '{{ErpCredential}}'), "receiver ERP uses the externalized credential name '{{ErpCredential}}', which an update cannot keep"],
+      [(x) => setting(setting(x, 'proxyType', 'sapcc'), 'locationID', '{{ErpLocation}}'), "receiver ERP uses the externalized location ID '{{ErpLocation}}', which an update cannot keep"]
+    ]) {
+      const r = await readBack(patch)
+      expect(r.spec).toBeNull()
+      expect(r.blockers).toEqual([expect.stringContaining(blocker)])
+    }
   })
 
   test('sender settings that the update would change are blockers (e.g. CSRF protection on)', async () => {

@@ -70,6 +70,42 @@ function apply(text, label, { attrs = {}, props = {}, texts = [] } = {}) {
   return text
 }
 
+// Dropdown fields whose values the builder writes: per adapter (matched by its cmdVariantUri), the
+// property keys. Only values seen in the reference exports are allowed (validator), see referenceValues().
+const VALUE_FIELDS = {
+  'HTTP Receiver': { variant: /cname::(?:sap:)?HTTP\/tp::HTTP\/mp::None\/direction::Receiver\//, keys: ['authenticationMethod', 'proxyType'] }
+}
+
+/**
+ * The values of VALUE_FIELDS in all reference exports:
+ * { adapter: { key: { value: { references: [reference, ...], confirmed?: note } } } }, one reference
+ * entry per message flow that uses the value. confirmed comes from reference/confirmed-values.json
+ * (re-selected in the CPI editor); an unconfirmed value seen once is a warning in the validator.
+ */
+async function referenceValues() {
+  const out = Object.fromEntries(Object.entries(VALUE_FIELDS).map(([a, { keys }]) => [a, Object.fromEntries(keys.map((k) => [k, {}]))]))
+  for (const file of fs.readdirSync(REF_DIR).filter((f) => f.endsWith('.zip')).sort()) {
+    const { iflw } = await readZip(file)
+    if (!iflw) continue // e.g. a Message Mapping artifact
+    for (const [flow] of iflw.matchAll(/<bpmn2:messageFlow\b[\s\S]*?<\/bpmn2:messageFlow>/g)) {
+      const values = Object.fromEntries([...flow.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
+      for (const [adapter, { variant, keys }] of Object.entries(VALUE_FIELDS)) {
+        if (!variant.test(values.cmdVariantUri || '')) continue
+        for (const k of keys) if (k in values) (out[adapter][k][values[k]] ??= { references: [] }).references.push(file.replace(/\.zip$/, ''))
+      }
+    }
+  }
+  const confirmed = JSON.parse(fs.readFileSync(path.join(REF_DIR, 'confirmed-values.json'), 'utf8'))
+  for (const [adapter, keys] of Object.entries(confirmed).filter(([a]) => !a.startsWith('_')))
+    for (const [k, values] of Object.entries(keys))
+      for (const [value, note] of Object.entries(values)) {
+        const entry = out[adapter]?.[k]?.[value]
+        if (!entry) throw new Error(`confirmed-values.json: ${adapter} ${k} '${value}' is in no reference export`)
+        entry.confirmed = note
+      }
+  return out
+}
+
 async function main() {
   const all = await readZip('Reference_AllSteps.zip')
   const timer = await readZip('Reference_Timer.zip')
@@ -117,7 +153,10 @@ async function main() {
       httpAddressWithoutQuery: 'ADDRESS_VALUE',
       httpAddressQuery: 'ADDRESS_QUERY_VALUE',
       authenticationMethod: 'AUTH_METHOD_VALUE',
-      credentialName: 'CREDENTIAL_NAME_VALUE'
+      credentialName: 'CREDENTIAL_NAME_VALUE',
+      proxyType: 'PROXY_TYPE_VALUE',
+      locationID: 'LOCATION_ID_VALUE',
+      httpRequestTimeout: 'TIMEOUT_VALUE'
     }
   })
 
@@ -221,6 +260,9 @@ async function main() {
   // attribute_id of an HTTP receiver address, as used in the reference propdef
   t['propdef-attribute-http-address.txt'] = firstRef.match(/attribute_id="([^"]+)"/)[1]
 
+  // --- allowed values -----------------------------------------------------------------
+  t['reference-values.json'] = JSON.stringify(await referenceValues(), null, 2) + '\n'
+
   // --- not in the reference exports yet ---------------------------------------------
   // Exception subprocess and its error start event are written by hand (CPI's export format).
   // Replace them with block() cuts once a reference export contains an exception subprocess.
@@ -235,7 +277,10 @@ async function main() {
   console.log(`Derived ${Object.keys(t).length} templates into ${path.relative(process.cwd(), OUT_DIR)}`)
 }
 
-main().catch((e) => {
-  console.error(e.message)
-  process.exit(1)
-})
+if (require.main === module)
+  main().catch((e) => {
+    console.error(e.message)
+    process.exit(1)
+  })
+
+module.exports = { referenceValues }

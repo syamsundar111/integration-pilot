@@ -5,6 +5,7 @@
  */
 const JSZip = require('jszip')
 const { DOMParser } = require('@xmldom/xmldom')
+const receiverSettings = require('./receiver-settings')
 
 const IFLOW_DIR = 'src/main/resources/scenarioflows/integrationflow/'
 const TEXT_EXT = /\.(iflw|groovy|gsh|js|xml|xsd|wsdl|xsl|xslt|mmap|json|edmx|prop|propdef|MF|project|txt)$/i
@@ -101,6 +102,24 @@ function adapterOf(flow) {
   return adapter
 }
 
+/**
+ * An HTTP receiver call: what the spec holds (authentication as configured, the credential name, and
+ * proxy, location ID and timeout when not the defaults), plus unsupportedSettings: what it cannot hold
+ */
+function httpCall(adapter) {
+  const { settings, unsupported } = receiverSettings.fromCpi(adapter.settings)
+  const { authType, credentialName, ...connection } = settings // proxyType, locationId, timeout
+  return {
+    system: adapter.system,
+    url: adapter.address,
+    method: adapter.method,
+    authType: adapter.authType,
+    credentialAlias: adapter.credentialAlias,
+    ...connection,
+    ...(unsupported.length && { unsupportedSettings: unsupported })
+  }
+}
+
 // --- steps ---------------------------------------------------------------------------
 
 function stepOf(node, adaptersBySource) {
@@ -131,8 +150,7 @@ function stepOf(node, adaptersBySource) {
     }
     case 'ExternalCall': {
       const adapter = adaptersBySource[base.id]
-      if (adapter?.type === 'HTTP')
-        return { ...base, type: 'requestReplyHttp', system: adapter.system, url: adapter.address, method: adapter.method, authType: adapter.authType, credentialAlias: adapter.credentialAlias }
+      if (adapter?.type === 'HTTP') return { ...base, type: 'requestReplyHttp', ...httpCall(adapter) }
       return { ...base, type: 'requestReply', adapter: adapter || null }
     }
     default:
@@ -357,7 +375,7 @@ async function parse(input) {
   const end = !endAdapter
     ? { type: 'none' }
     : endAdapter.type === 'HTTP'
-      ? { type: 'httpReceiver', system: endAdapter.system, url: endAdapter.address, method: endAdapter.method, authType: endAdapter.authType, credentialAlias: endAdapter.credentialAlias }
+      ? { type: 'httpReceiver', ...httpCall(endAdapter) }
       : { type: 'receiver', adapter: endAdapter.type, system: endAdapter.system, address: endAdapter.address }
   // an Error, Escalation or Terminate end (not a plain/message end): kept for update checks
   const mainEndKind = endNodes.length === 1 ? endKind(endNodes[0]) : null
@@ -375,7 +393,7 @@ async function parse(input) {
       end: !a
         ? { type: 'none' }
         : a.type === 'HTTP'
-          ? { type: 'httpReceiver', system: a.system, url: a.address, method: a.method, authType: a.authType, credentialAlias: a.credentialAlias }
+          ? { type: 'httpReceiver', ...httpCall(a) }
           : { type: 'receiver', adapter: a.type, system: a.system, address: a.address }
     }
   }

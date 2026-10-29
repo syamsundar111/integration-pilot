@@ -17,6 +17,7 @@ turns into extra questions.
 | Trigger | HTTPS sender (with a path), timer that runs once after deployment | Schedules, SFTP, SOAP, other senders |
 | Steps | Content Modifier, Groovy Script, JSON to XML, XML to JSON, HTTP request-reply | Router, splitter, gather, join, multicast, mapping, XSLT step, write variables, process call |
 | End | HTTP receiver, or no receiver | Mail, SFTP and other receivers |
+| HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID; timeout | Client certificate and other methods; credential name or location ID as a parameter; manual proxy |
 | Error handling | One exception subprocess (Content Modifier, Groovy, converters) | Request-reply inside the exception subprocess |
 
 Hard limits:
@@ -27,8 +28,9 @@ Hard limits:
 - `{{Parameter}}` only as the **whole URL** of an HTTP receiver.
 - Header and property values are **constant** or **expression** only. Read XML values with XPath in a
   Groovy script.
-- Receivers are created with **no authentication**. You set the method and credential in the CPI
-  web editor after creation.
+- Receivers take credential **names** only: the security material deployed on the tenant (User
+  Credentials or OAuth2 Client Credentials). Never put a password, secret or token into a request.
+  The credential must exist before you deploy the iFlow.
 
 ## Start from the template
 
@@ -42,7 +44,7 @@ Steps (in order, at most 50):
 1. <step type and name, e.g. Content Modifier "Set Properties": property Source = constant Shop>
 2. <…>
 Receivers: <name, method and URL of each HTTP call; externalize a URL as {{Name}} with a default>
-Authentication: <None, or method and credential name per receiver>
+Authentication: <None, or Basic / OAuth2 Client Credentials with the credential name, per receiver; On-Premise with the location ID>
 Package: <existing package id, or a new id (letters, digits, dots) and name>
 Error handling: <exception subprocess: what to set, log or return when a step fails>
 ```
@@ -53,6 +55,7 @@ Before sending, the chat checks the request without calling the model. It warns 
 - more than 25 numbered steps
 - `{{…}}` used anywhere other than a URL
 - template fields that are still unfilled
+- a password, secret or token in the message (give the credential name instead)
 
 Choose **Edit** to fix the request, or **Send anyway**.
 
@@ -65,8 +68,9 @@ proposal says which:
   proposal panel before approving.
 - **Trigger**: an HTTPS sender with a path made from the iFlow name ("Order Intake" ->
   `/order-intake`). Write "timer, run once" or another path to change it.
-- **Authentication**: none. Receivers are created without authentication; set it up in the CPI web
-  editor after creation if a target system needs it.
+- **Authentication**: none, unless the request names a method and credential name per receiver
+  ("Basic, credential ERP_BASIC_USER"). A method v1 does not set (e.g. client certificate) is set
+  in the CPI web editor after creation.
 
 ## Attach scripts instead of describing them
 
@@ -325,7 +329,9 @@ Code: same logic as step 11.
 What to expect:
 
 - 25 main-flow steps: 17 real steps and 8 placeholders, plus a 2-step exception subprocess.
-- Every receiver is created with authentication None; the step descriptions name the credentials to
-  set in the CPI web editor.
+- Every receiver is created with authentication None, because the request asks for it; the step
+  descriptions name the credentials to set in the CPI web editor. Receivers can now carry them
+  directly: write "OAuth2 Client Credentials, credential SOURCE_OAUTH_CLIENT" on the step instead.
+  The SOAP receiver stays a placeholder.
 - Importing the original iFlow (**Import iFlow**) gives a similar draft, with one placeholder per
   unsupported component instead of combined ones.

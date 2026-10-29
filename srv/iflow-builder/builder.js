@@ -10,6 +10,7 @@ const fs = require('fs')
 const path = require('path')
 const JSZip = require('jszip')
 const { validate, effectiveNames } = require('./validator')
+const receiverSettings = require('./receiver-settings')
 
 const TEMPLATE_DIR = path.join(__dirname, 'templates')
 
@@ -91,10 +92,6 @@ function manifestHeader(name, value) {
 
 // --- adapter mapping -------------------------------------------------------------
 
-// HTTP receivers are always created with authenticationMethod 'None' and no credential —
-// the only configuration verified by the reference exports. Users set authentication
-// in the CPI web editor after creation.
-const RECEIVER_AUTH_METHOD = 'None'
 const HTTP_ADDRESS_ATTRIBUTE = () => tpl('propdef-attribute-http-address.txt').trim()
 
 function splitUrl(url, params = {}) {
@@ -294,6 +291,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     const { address, query } = splitUrl(call.url, spec.parameters)
     if (address.includes('?')) throw Object.assign(new Error(`receiver ${system}: the address still contains '?'`), { errors: [`receiver ${system}: the address must not contain '?'; the query belongs in the Query field`] })
     const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id }
+    const cpiSettings = receiverSettings.toCpi(call) // authentication, proxy, timeout as CPI stores them
     mf.vars = {
       SOURCE: sourceNode.id,
       TARGET: p.id,
@@ -301,13 +299,16 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       SYSTEM_VALUE: val(system),
       ADDRESS_VALUE: val(address),
       ADDRESS_QUERY_VALUE: val(query),
-      AUTH_METHOD_VALUE: val(RECEIVER_AUTH_METHOD),
-      CREDENTIAL_NAME_VALUE: val('')
+      AUTH_METHOD_VALUE: val(cpiSettings.authenticationMethod),
+      CREDENTIAL_NAME_VALUE: val(cpiSettings.credentialName),
+      PROXY_TYPE_VALUE: val(cpiSettings.proxyType),
+      LOCATION_ID_VALUE: val(cpiSettings.locationID),
+      TIMEOUT_VALUE: val(cpiSettings.httpRequestTimeout)
     }
     messageFlows.push(mf)
     const param = address.match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
     if (param) paramRefs.push({ category: system, attributeId: HTTP_ADDRESS_ATTRIBUTE(), uilabel: 'Address', key: param })
-    adapters.push({ type: 'HTTP', direction: 'Receiver', system, address: call.url, method: call.method, authType: RECEIVER_AUTH_METHOD })
+    adapters.push({ type: 'HTTP', direction: 'Receiver', system, address: call.url, method: call.method, authType: cpiSettings.authenticationMethod })
     return { p, mf }
   }
 

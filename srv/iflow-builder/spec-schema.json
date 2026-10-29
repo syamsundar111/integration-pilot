@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://iflow-pilot/spec-schema.json",
   "title": "iFlow spec v1",
-  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Router, splitter and mapping are not supported in v1. Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs. HTTP receivers use authType None; authentication is configured in the CPI web editor after creation.",
+  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Router, splitter and mapping are not supported in v1. Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
   "type": "object",
   "required": [
     "id",
@@ -189,9 +189,11 @@
     },
     "authType": {
       "enum": [
-        "None"
+        "None",
+        "Basic",
+        "OAuth2 Client Credentials"
       ],
-      "description": "Only 'None' in v1 (the only value verified by the reference exports). If the receiver needs authentication, create it with None and set authentication and credentials in the CPI web editor after creation."
+      "description": "Receiver authentication. Basic and OAuth2 Client Credentials need credentialName: the name of security material deployed in CPI (never the password or secret itself)."
     },
     "httpsSender": {
       "type": "object",
@@ -350,6 +352,28 @@
         },
         "authType": {
           "$ref": "#/definitions/authType"
+        },
+        "credentialName": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,150}$",
+          "description": "Name of the deployed security material (User Credentials or OAuth2 Client Credentials) in CPI. A name only, never a password or secret. Required unless authType is None."
+        },
+        "proxyType": {
+          "enum": [
+            "Internet",
+            "On-Premise"
+          ],
+          "description": "Internet (default) or On-Premise (through the Cloud Connector)"
+        },
+        "locationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,100}$",
+          "description": "Cloud Connector location ID; only with proxyType On-Premise, optional (empty: the default location)"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Request timeout in milliseconds (default 60000)"
         }
       }
     },
@@ -380,7 +404,11 @@
         "system": true,
         "url": true,
         "method": true,
-        "authType": true
+        "authType": true,
+        "credentialName": true,
+        "proxyType": true,
+        "locationId": true,
+        "timeout": true
       }
     },
     "httpReceiver": {
@@ -404,7 +432,11 @@
         "system": true,
         "url": true,
         "method": true,
-        "authType": true
+        "authType": true,
+        "credentialName": true,
+        "proxyType": true,
+        "locationId": true,
+        "timeout": true
       }
     },
     "noEnd": {

@@ -7,11 +7,11 @@ that calls another on the same tenant:
   caller calls that endpoint with `requestReplyHttp` (or the `httpReceiver` end). The difference
   matters: ProcessDirect stays inside the tenant and needs no authentication; an HTTPS endpoint is
   public and every call to it must be authenticated.
-- **Authentication is required**, not optional. Create the caller's receiver with `authType: "None"`
-  as always, and tell the user they must set **OAuth2 Client Credentials** on it before deploying,
-  with a credential from a service key of a **Process Integration Runtime** instance with plan
-  **integration-flow** (it grants the role `ESBMessaging.send` that the HTTPS sender built by v1
-  requires). Never write "if the target requires it".
+- **Authentication is required**, not optional. Create the caller's receiver with
+  `authType: "OAuth2 Client Credentials"` and the `credentialName` the user gives (ask for it if they
+  name none), and tell them it must be deployed from a service key of a **Process Integration
+  Runtime** instance with plan **integration-flow** (it grants the role `ESBMessaging.send` that the
+  HTTPS sender built by v1 requires). Never write "if the target requires it".
 - **URL:** the endpoint is on the tenant's **runtime host** (the host name contains `-rt`), path
   `/http/<address>`, e.g. `https://<tenant>.it-cpi<nn>-rt.cfapps.<region>.hana.ondemand.com/http/pilot/notify`.
   The exact URL of a deployed iFlow is in *Monitor → Integrations and APIs → Manage Integration

@@ -8,6 +8,7 @@
 const fs = require('fs')
 const path = require('path')
 const { validate, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS } = require('./validator')
+const { AUTH_TYPES } = require('./receiver-settings')
 
 const RESOURCES = 'src/main/resources/'
 
@@ -17,7 +18,8 @@ const RESOURCES = 'src/main/resources/'
  * e.g. a Cloud Connector receiver would become an Internet one. Version and name keys are left out.
  */
 const SIGNIFICANT = {
-  Receiver: ['proxyType', 'locationID', 'proxyHost', 'proxyPort', 'internetProxyType', 'httpRequestTimeout', 'httpShouldSendBody', 'throwExceptionOnFailure', 'httpErrorResponseCodes', 'allowedRequestHeaders', 'allowedResponseHeaders', 'retryOnConnectionFailure', 'retryOnException', 'retryIteration', 'retryInterval', 'streaming', 'privateKeyAlias'],
+  // authentication, proxy type, location ID and timeout are in the spec (callFields); the rest is not
+  Receiver: ['proxyHost', 'proxyPort', 'internetProxyType', 'httpShouldSendBody', 'throwExceptionOnFailure', 'httpErrorResponseCodes', 'allowedRequestHeaders', 'allowedResponseHeaders', 'retryOnConnectionFailure', 'retryOnException', 'retryIteration', 'retryInterval', 'streaming', 'privateKeyAlias'],
   Sender: ['senderAuthType', 'userRole', 'xsrfProtection', 'clientCertificates', 'maximumBodySize']
 }
 const TEMPLATE_DEFAULTS = (() => {
@@ -36,7 +38,7 @@ const CONVERTER_DEFAULTS = (() => {
     )
   return { jsonToXml: values(read('step-json-to-xml.xml')), xmlToJson: values(read('step-xml-to-json.xml')) }
 })()
-const LABELS = { proxyType: 'proxy type', locationID: 'Cloud Connector location ID', httpRequestTimeout: 'request timeout', senderAuthType: 'sender authentication', xsrfProtection: 'CSRF protection' }
+const LABELS = { senderAuthType: 'sender authentication', xsrfProtection: 'CSRF protection' }
 
 /** Blockers for adapter settings an update would reset */
 function adapterBlockers(adapters = []) {
@@ -49,10 +51,34 @@ function adapterBlockers(adapters = []) {
       const have = String(a.settings[key] ?? '')
       const would = TEMPLATE_DEFAULTS[kind][key]
       if (have !== would)
-        out.push(`${kind === 'Receiver' ? 'receiver' : 'sender'} ${a.system || a.name}: ${LABELS[key] || key} is '${have}'; an update would reset it to '${would || '(empty)'}'${key === 'proxyType' && have === 'sapcc' ? ' (Cloud Connector -> Internet)' : ''}`)
+        out.push(`${kind === 'Receiver' ? 'receiver' : 'sender'} ${a.system || a.name}: ${LABELS[key] || key} is '${have}'; an update would reset it to '${would || '(empty)'}'`)
     }
   }
   return out
+}
+
+/**
+ * Spec fields of a parsed HTTP receiver call (request-reply step or end): authentication with its
+ * credential name, proxy type, location ID and timeout. Throws a blocker text for settings the spec
+ * cannot hold (parser: unsupportedSettings), so an update never resets them silently.
+ */
+function callFields(s, what) {
+  if (s.unsupportedSettings?.length) throw `${what} uses ${s.unsupportedSettings.join(', ')}, which an update cannot keep`
+  const auth = s.authType || 'None'
+  if (!AUTH_TYPES.includes(auth)) throw `${what} uses authentication '${auth}', which an update cannot keep`
+  // externalized: the spec has no parameter here yet (no reference export with one)
+  if (auth !== 'None' && /\{\{/.test(s.credentialAlias || '')) throw `${what} uses the externalized credential name '${s.credentialAlias}', which an update cannot keep`
+  if (/\{\{/.test(s.locationId || '')) throw `${what} uses the externalized location ID '${s.locationId}', which an update cannot keep`
+  return {
+    ...(s.system && { system: s.system }),
+    url: s.url,
+    method: s.method,
+    authType: auth,
+    ...(auth !== 'None' && { credentialName: s.credentialAlias }),
+    ...(s.proxyType && { proxyType: s.proxyType }),
+    ...(s.locationId && { locationId: s.locationId }),
+    ...(s.timeout && { timeout: s.timeout })
+  }
 }
 
 /** Spec step from a parsed step, or a blocker text */
@@ -90,8 +116,7 @@ function toStep(s, scripts, where) {
       return base
     }
     case 'requestReplyHttp':
-      if (s.authType && s.authType !== 'None') throw `${where} '${s.name}': receiver ${s.system} uses authentication '${s.authType}', which an update would reset to None`
-      return { ...base, ...(s.system && { system: s.system }), url: s.url, method: s.method, authType: 'None' }
+      return { ...base, ...callFields(s, `${where} '${s.name}': receiver ${s.system}`) }
     default:
       throw `${where} '${s.name}': step type '${s.activityType || s.type}' is not supported by the spec`
   }
@@ -154,8 +179,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   let end = null
   if (e.type === 'none') end = { type: 'none' }
   else if (e.type === 'httpReceiver') {
-    if (e.authType && e.authType !== 'None') blockers.push(`end receiver ${e.system} uses authentication '${e.authType}', which an update would reset to None`)
-    else end = { type: 'httpReceiver', ...(e.system && { system: e.system }), url: e.url, method: e.method, authType: 'None' }
+    attempt(() => (end = { type: 'httpReceiver', ...callFields(e, `end receiver ${e.system}`) }))
   } else blockers.push(`end: ${e.adapter || e.type} receiver (only HTTP receiver or none)`)
 
   // Resources the builder does not write (mappings, schemas, other scripts) would be deleted

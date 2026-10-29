@@ -41,6 +41,19 @@ describe('prompt linter', () => {
     expect(keys(lint(many))).toEqual(['steps'])
   })
 
+  test('a password, secret or token is flagged; a credential name is not', () => {
+    const keys = (t) => lint(t).map((w) => w.key)
+    expect(keys('Create an iFlow that calls https://erp.example.com/api with Basic, credential ERP_BASIC_USER, On-Premise location ERP_LOC')).toEqual([])
+    for (const t of [
+      'Create an iFlow calling the ERP with user admin password: Welcome1',
+      'Create an iFlow with OAuth2, client secret = abc123XYZ987',
+      'Create an iFlow calling https://admin:pw123@erp.example.com/api',
+      'Create an iFlow, header Authorization = Bearer eyJhbGciOiJIUzI1NiJ9.abc'
+    ])
+      expect(keys(t)).toEqual(['secret'])
+    expect(lint('password: x1').map((w) => w.message)).toEqual([expect.stringMatching(/^This looks like a password, secret or token\. Never send credentials/)])
+  })
+
   test('{{Param}} outside a URL', () => {
     const w = lint('Create an iFlow on a timer in package P. Set header Source = {{SourceSystem}}. No auth.')
     expect(keys(w)).toEqual(['params'])

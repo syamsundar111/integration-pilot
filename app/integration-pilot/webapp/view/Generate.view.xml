@@ -313,12 +313,7 @@
 
                   <MessageStrip text="{chat>/active/resourcesText}" type="Information" showIcon="true" visible="{= !!${chat>/active/resourcesText} }" />
 
-                  <MessageStrip
-                    text="Receivers are created without authentication. If a target system needs authentication, open the iFlow in the CPI web editor after creation and set the authentication method and credentials on its receiver adapter before deploying."
-                    type="Information"
-                    showIcon="true"
-                    visible="{chat>/active/hasHttpReceiver}"
-                  />
+                  <MessageStrip text="{chat>/active/receiversText}" type="Information" showIcon="true" visible="{= !!${chat>/active/receiversText} }" />
                 </VBox>
 
                 <!-- package proposal -->

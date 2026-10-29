@@ -5,6 +5,7 @@
  */
 const Ajv = require('ajv')
 const schema = require('./spec-schema.json')
+const { AUTH_TYPES, PROXY_TYPES, checkAgainstReferences } = require('./receiver-settings')
 
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
@@ -37,7 +38,7 @@ const GROOVY_ENTRY = /def\s+Message\s+processData\s*\(\s*Message\s+message\s*\)/
 const PARAM_REF = /\{\{\s*([^}]*?)\s*\}\}/g
 const WHOLE_PARAM = /^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/
 // v1 creates HTTP receivers with authentication None only (the only value in the reference exports)
-const AUTH_HINT = 'create the receiver with authType None, then set authentication and credentials in the CPI web editor after creation'
+const CREDENTIAL_HINT = 'give the name of the security material deployed in CPI (User Credentials or OAuth2 Client Credentials), never a password or secret'
 
 const SECRET_NAME = /pass(word|wd)?|pwd|secret|api[-_]?key|token|authorization|client[-_]?secret/i
 /** A Groovy script with a hard-coded password, token or Basic credentials (inline code and writeScript) */
@@ -93,7 +94,9 @@ function schemaErrors(errors, skipPaths) {
   for (const e of errors) {
     if (e.keyword === 'if') continue // the specific error of the "then" branch is reported separately
     if (skipPaths.some((p) => e.instancePath === p || e.instancePath.startsWith(p + '/'))) continue
-    if (e.keyword === 'additionalProperties' && e.params.additionalProperty === 'credentialAlias') continue // reported with AUTH_HINT
+    // credential fields on a receiver: reported with CREDENTIAL_HINT by the receiver rules
+    const field_ = e.params?.additionalProperty
+    if (e.keyword === 'additionalProperties' && /^\/(steps\/\d+|end)$/.test(e.instancePath) && (/^(credentialAlias|user(name)?|clientId)$/i.test(field_) || SECRET_NAME.test(field_))) continue
     const where = label(e.instancePath)
     const field = e.instancePath.split('/').pop()
     switch (e.keyword) {
@@ -185,15 +188,34 @@ function validate(spec, { attachments = [] } = {}) {
     err('END_UNSUPPORTED', `end: '${spec.end.type}' is not supported in v1. Use httpReceiver { url, method, authType } or none.`)
   }
 
-  // Receiver authentication: only None in v1; one actionable message instead of an enum error
+  // Receiver authentication, proxy and timeout: one actionable message per problem instead of schema noise
   const calls = (Array.isArray(spec.steps) ? spec.steps : []).map((s, i) => [s, `steps[${i}]`, `/steps/${i}`]).filter(([s]) => s?.type === 'requestReplyHttp')
   if (spec.end?.type === 'httpReceiver') calls.push([spec.end, 'end', '/end'])
+  const referenceWarnings = []
   for (const [call, where, ptr] of calls) {
-    if (call.authType != null && call.authType !== 'None') {
-      skip.push(`${ptr}/authType`)
-      err('AUTH_UNSUPPORTED', `${where}.authType: '${call.authType}' is not supported in v1 — ${AUTH_HINT}`)
+    const auth = call.authType ?? 'None'
+    if (AUTH_TYPES.includes(auth)) {
+      if (auth !== 'None' && !call.credentialName && !('credentialAlias' in call)) err('CREDENTIAL_MISSING', `${where}.credentialName: required with authType ${auth} — ${CREDENTIAL_HINT}`)
+      if (auth === 'None' && call.credentialName) err('CREDENTIAL_UNUSED', `${where}.credentialName: only used with authType Basic or OAuth2 Client Credentials — remove it, or set authType`)
     }
-    if ('credentialAlias' in call) err('AUTH_UNSUPPORTED', `${where}: credentialAlias is not supported in v1 — ${AUTH_HINT}`)
+    if ('credentialAlias' in call) err('UNKNOWN_FIELD', `${where}: unknown field 'credentialAlias' — use credentialName (${CREDENTIAL_HINT})`)
+    for (const key of Object.keys(call).filter((k) => SECRET_NAME.test(k) || /^(user(name)?|clientId)$/i.test(k))) {
+      skip.push(`${ptr}/${key}`)
+      err('SECRET', `${where}.${key}: never put credentials into the spec — ${CREDENTIAL_HINT}`)
+    }
+    for (const key of ['credentialName', 'locationId'].filter((k) => typeof call[k] === 'string' && PARAM_REF.test(call[k]))) {
+      PARAM_REF.lastIndex = 0
+      skip.push(`${ptr}/${key}`)
+      err('PARAM_NOT_SUPPORTED', `${where}.${key}: an externalized parameter is not supported here yet — use the literal ${key === 'locationId' ? 'location ID' : 'credential name'}`)
+    }
+    PARAM_REF.lastIndex = 0
+    if (call.locationId && call.proxyType !== 'On-Premise') err('LOCATION_WITHOUT_PROXY', `${where}.locationId: only used with proxyType On-Premise — remove it, or set proxyType "On-Premise"`)
+    // the stored values must be ones the reference exports contain (a value seen once is a warning)
+    if (AUTH_TYPES.includes(auth) && (call.proxyType == null || call.proxyType in PROXY_TYPES)) {
+      const r = checkAgainstReferences(call, where)
+      r.errors.forEach((m) => err('NOT_IN_REFERENCES', m))
+      referenceWarnings.push(...r.warnings)
+    }
   }
 
   if (!checkSchema(spec)) issues.push(...schemaErrors(checkSchema.errors, skip))
@@ -262,10 +284,10 @@ function validate(spec, { attachments = [] } = {}) {
 
   const httpCalls = steps.map((s, i) => [s, `steps[${i}]`]).filter(([s]) => s?.type === 'requestReplyHttp')
   if (spec.end?.type === 'httpReceiver') httpCalls.push([spec.end, 'end'])
-  const warnings = []
+  const warnings = [...referenceWarnings]
   for (const [call, where] of httpCalls) {
     if (typeof call.url === 'string' && /^https?:\/\/[^/@\s]+:[^/@\s]+@/.test(call.url))
-      err('URL_CREDENTIALS', `${where}.url: contains user:password — remove it; ${AUTH_HINT}`)
+      err('URL_CREDENTIALS', `${where}.url: contains user:password — remove it; set authType and credentialName instead (${CREDENTIAL_HINT})`)
     // CPI keeps the query in the receiver's Query field; the builder splits it off the address
     const param = typeof call.url === 'string' && call.url.match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
     const full = param ? String(spec.parameters?.[param] ?? '') : String(call.url ?? '')
@@ -310,6 +332,7 @@ function validate(spec, { attachments = [] } = {}) {
     if (!refs.length) return
     // Groovy code, body and descriptions (documentation, not configuration) may contain {{ }} text
     if (/\.(code|body|description)$/.test(path)) return
+    if (/^(steps\[\d+\]|end)\.(credentialName|locationId)$/.test(path)) return // reported by the receiver rules
     if (!PARAM_FIELDS.test(path)) {
       err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as an HTTP receiver url in v1`)
       return

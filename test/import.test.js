@@ -6,7 +6,7 @@ const JSZip = require('jszip')
 const { build } = require('../srv/iflow-builder/builder')
 const { importIflow } = require('../srv/iflow-builder/import')
 const { validate } = require('../srv/iflow-builder/validator')
-const { baseSpec } = require('./helpers')
+const { baseSpec, readRef } = require('./helpers')
 
 const IFLW = /src\/main\/resources\/scenarioflows\/integrationflow\/[^/]+\.iflw$/
 
@@ -29,6 +29,20 @@ const rename = (iflw, from, to) => iflw.replace(`name="${from}"`, `name="${to}"`
 const rowType = (iflw, value, type) => iflw.replace(`&lt;cell id='Type'&gt;constant&lt;/cell&gt;&lt;cell id='Value'&gt;${value}&lt;`, `&lt;cell id='Type'&gt;${type}&lt;/cell&gt;&lt;cell id='Value'&gt;${value}&lt;`)
 
 const converters = (n, from = 1) => Array.from({ length: n }, (_, i) => ({ type: 'jsonToXml', name: `S${from + i}` }))
+
+describe('import keeps HTTP receiver settings (Ref_Receivers)', () => {
+  test('authentication, credential name, proxy and location ID are kept; a {{Parameter}} credential becomes its default', async () => {
+    const r = await importIflow(readRef('Ref_Receivers.zip'), { fileName: 'Ref_Receivers.zip', packageId: 'PilotReference' })
+    const http = r.spec.steps.filter((s) => s.type === 'requestReplyHttp').map(({ name, authType, credentialName, proxyType, locationId }) => ({ name, authType, credentialName, proxyType, locationId }))
+    expect(http).toEqual([
+      { name: 'RR_Basic', authType: 'Basic', credentialName: 'DUMMY_BASIC_CRED', proxyType: undefined, locationId: undefined },
+      { name: 'RR_OAuth', authType: 'OAuth2 Client Credentials', credentialName: 'DUMMY_OAUTH_CRED', proxyType: undefined, locationId: undefined },
+      { name: 'RR_OnPrem', authType: 'Basic', credentialName: 'DUMMY_ONPREM_CRED', proxyType: 'On-Premise', locationId: 'DUMMY_LOC' }
+    ])
+    expect(r.notes).toContain('Receiver: the credential name {{BasicCredential}} became its value DUMMY_BASIC_CRED (externalized credential names are not supported yet)')
+    expect(r.valid).toBe(true)
+  })
+})
 
 describe('import', () => {
   test('unsupported steps become placeholders, merged to stay within 50 steps; XPath moves into Groovy', async () => {
@@ -63,11 +77,11 @@ describe('import', () => {
     ])
     expect(r.attachments['xpath_Values.groovy']).toContain("message.setProperty('OrderId', xpath.evaluate('/Order/Id', doc))")
 
-    // unique names, authentication reset to None with a note
+    // unique names; an authentication method the spec cannot hold is reset to None with a note
     expect(names.filter((n) => n.startsWith('Dup'))).toEqual(['Dup', 'Dup 2'])
     expect(new Set(names).size).toBe(names.length)
     expect(r.spec.end).toMatchObject({ type: 'httpReceiver', system: 'Backend', authType: 'None' })
-    expect(r.notes.join('\n')).toMatch(/End receiver Backend: set authentication OAuth2SAMLBearerAssertion/)
+    expect(r.notes.join('\n')).toMatch(/End receiver Backend: set authentication 'OAuth2SAMLBearerAssertion' in the CPI web editor/)
 
     // the generated script is a valid Groovy step for the builder
     const { zipBase64 } = await build(r.spec, { attachments: r.attachments })
