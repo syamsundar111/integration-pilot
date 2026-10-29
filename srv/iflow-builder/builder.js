@@ -11,6 +11,7 @@ const path = require('path')
 const JSZip = require('jszip')
 const { validate, effectiveNames } = require('./validator')
 const receiverSettings = require('./receiver-settings')
+const cpiValues = require('./cpi-values')
 
 const TEMPLATE_DIR = path.join(__dirname, 'templates')
 
@@ -224,7 +225,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   // Flow nodes in order: start, steps, end
   const nodes = []
   const start = { id: nextId('StartEvent'), kind: 'start', w: L.EVENT, h: L.EVENT }
-  if (spec.trigger.type === 'timer') Object.assign(start, { name: 'Start Timer 1', timerId: nextId('TimerEventDefinition') })
+  if (spec.trigger.type === 'timer') Object.assign(start, { name: 'Start Timer 1', timerId: nextId('TimerEventDefinition'), schedule: cpiValues.scheduleOf(spec.trigger) })
   else start.name = 'Start'
   nodes.push(start)
 
@@ -425,7 +426,10 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     id: spec.id,
     name: spec.name,
     packageId: spec.packageId,
-    trigger: spec.trigger.type === 'httpsSender' ? { type: 'httpsSender', address: spec.trigger.address } : { type: 'timer', mode: spec.trigger.mode },
+    trigger:
+      spec.trigger.type === 'httpsSender'
+        ? { type: 'httpsSender', address: spec.trigger.address }
+        : { type: 'timer', mode: spec.trigger.mode, ...(spec.trigger.mode === 'every' && { minutes: spec.trigger.minutes }) },
     steps: nodes.filter((n) => n.kind === 'step').map((n) => ({ id: n.id, type: n.step.type, name: n.name })),
     end: spec.end.type === 'httpReceiver' ? { type: 'httpReceiver', system: names.endSystem, url: spec.end.url } : { type: 'none' },
     exceptionSubprocess: sub
@@ -444,7 +448,7 @@ function nodeToXml(n) {
   const common = { ID: n.id, NAME: escAttr(n.name) }
   if (n.kind === 'start')
     return n.timerId
-      ? fill('iflw/start-timer.xml', { ...common, OUTGOING: n.outgoing, TIMER_ID: n.timerId })
+      ? fill('iflw/start-timer.xml', { ...common, OUTGOING: n.outgoing, TIMER_ID: n.timerId, SCHEDULE: n.schedule })
       : fill('iflw/start-message.xml', { ...common, OUTGOING: n.outgoing })
   if (n.kind === 'errorStart') return fill('iflw/start-error.xml', { ...common, OUTGOING: n.outgoing })
   if (n.kind === 'end') return fill('iflw/end-message.xml', { ...common, INCOMING: n.incoming })
@@ -456,15 +460,23 @@ function nodeToXml(n) {
       const table = (entries = []) =>
         entries
           .map((e) =>
-            // a plain value is a constant, also if a spec says expression (see normalizeTypes)
-            fill('content-modifier-row.xml', { TYPE: escText(e.type === 'expression' && !String(e.value ?? '').includes('${') ? 'constant' : e.type), VALUE: escText(e.value), NAME: escText(e.name), DATATYPE: escText(e.datatype || '') })
+            // a plain value is a constant, also if a spec says expression (see normalizeTypes); the variable
+            // sources have other names in CPI; XPath needs a data type
+            fill('content-modifier-row.xml', {
+              TYPE: escText(cpiValues.CM_SOURCE_TYPES[e.type === 'expression' && !String(e.value ?? '').includes('${') ? 'constant' : e.type]),
+              VALUE: escText(e.value),
+              NAME: escText(e.name),
+              DEFAULT: escText(e.default || ''),
+              DATATYPE: escText(e.datatype || (e.type === 'xpath' ? cpiValues.DEFAULT_XPATH_DATATYPE : ''))
+            })
           )
           .join('')
       const hasBody = s.body != null && s.body !== ''
       return fill('iflw/step-content-modifier.xml', {
         ...io,
-        // As in the references: 'expression' with a body, 'constant' + empty body to keep the message body
-        BODY_TYPE_VALUE: val(hasBody ? 'expression' : 'constant'),
+        // 'expression' only for a body with ${...}, else 'constant' (as Ref_Variables; the CPI editor warns about an
+        // expression without parameters); an empty constant body keeps the message body
+        BODY_TYPE_VALUE: val(hasBody && String(s.body).includes('${') ? 'expression' : 'constant'),
         BODY_VALUE: val(hasBody ? s.body : ''),
         HEADER_TABLE_VALUE: val(table(s.headers)),
         PROPERTY_TABLE_VALUE: val(table(s.properties))
@@ -472,6 +484,20 @@ function nodeToXml(n) {
     }
     case 'groovyScript':
       return fill('iflw/step-groovy-script.xml', { ...io, SCRIPT_VALUE: val(`${s.fileName}.groovy`) })
+    case 'writeVariables': {
+      const rows = s.variables
+        .map((v) =>
+          fill('write-variables-row.xml', {
+            NAME: escText(v.name),
+            DATATYPE: escText(v.datatype || (v.type === 'xpath' ? cpiValues.DEFAULT_XPATH_DATATYPE : '')),
+            TYPE: escText(v.type),
+            VALUE: escText(v.value),
+            SCOPE: cpiValues.scopeOf(v)
+          })
+        )
+        .join('')
+      return fill('iflw/step-write-variables.xml', { ...io, VARIABLES_VALUE: val(rows) })
+    }
     case 'jsonToXml':
       return fill('iflw/step-json-to-xml.xml', io)
     case 'xmlToJson':

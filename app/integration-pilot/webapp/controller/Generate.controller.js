@@ -28,8 +28,12 @@ sap.ui.define(
       groovyScript: 'Groovy Script',
       jsonToXml: 'JSON to XML',
       xmlToJson: 'XML to JSON',
-      requestReplyHttp: 'Request Reply (HTTP)'
+      requestReplyHttp: 'Request Reply (HTTP)',
+      writeVariables: 'Write Variables'
     }
+    // Content Modifier sources as the CPI editor names them
+    const SOURCE_LABELS = { globalVariable: 'global variable', localVariable: 'local variable', xpath: 'XPath' }
+    const sourceText = (e) => `${SOURCE_LABELS[e.type] || e.type}${e.datatype ? `, ${e.datatype}` : ''}${e.default ? `, default ${e.default}` : ''}`
 
     /** "Basic, credential ERP_USER · On-Premise, location ERP_LOC · timeout 30000 ms"; '' for the defaults */
     const receiverSettingsText = (c) =>
@@ -815,8 +819,8 @@ sap.ui.define(
           lines:
             s.type === 'contentModifier'
               ? [
-                  ...(s.headers || []).map((h) => `header ${h.name} = ${h.value} (${h.type})`),
-                  ...(s.properties || []).map((x) => `property ${x.name} = ${x.value} (${x.type})`),
+                  ...(s.headers || []).map((h) => `header ${h.name} = ${h.value} (${sourceText(h)})`),
+                  ...(s.properties || []).map((x) => `property ${x.name} = ${x.value} (${sourceText(x)})`),
                   s.body ? `body = ${s.body.length > 80 ? `${s.body.slice(0, 80)}…` : s.body}` : null
                 ]
                   .filter(Boolean)
@@ -825,13 +829,26 @@ sap.ui.define(
                 ? [`${s.method} ${s.url}`, receiverSettingsText(s)].filter(Boolean).join('\n')
                 : s.type === 'groovyScript'
                   ? `script/${s.fileName}.groovy${s.code == null ? ' (attached file)' : ''}`
-                  : ''
+                  : s.type === 'writeVariables'
+                    ? (s.variables || [])
+                        .map((v) => `variable ${v.name} = ${v.value} (${v.type === 'xpath' ? 'XPath' : v.type}${v.datatype ? `, ${v.datatype}` : ''}, ${v.global ? 'global' : 'this iFlow only'})`)
+                        .join('\n')
+                    : ''
         })
 
         if (isIflow && spec.trigger) {
           active.diagramHtml = flowDiagram.toHtml(flowDiagram.fromSpec(spec))
           active.stepCards = [
-            { title: 'Trigger', type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : 'Timer', lines: spec.trigger.type === 'httpsSender' ? spec.trigger.address : 'Runs once after deployment' },
+            {
+              title: 'Trigger',
+              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : 'Timer',
+              lines:
+                spec.trigger.type === 'httpsSender'
+                  ? spec.trigger.address
+                  : spec.trigger.mode === 'every'
+                    ? `Every ${spec.trigger.minutes} minutes, all day, UTC`
+                    : 'Runs once after deployment'
+            },
             ...spec.steps.map((s, i) => stepCard(s, `${i + 1}.`)),
             {
               title: 'End',

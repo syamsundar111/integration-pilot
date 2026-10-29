@@ -14,6 +14,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     jsonToXml: 'JSON → XML',
     xmlToJson: 'XML → JSON',
     requestReplyHttp: 'Request Reply',
+    writeVariables: 'Write Variables',
     router: 'Router'
   }
   const DEFAULT_NAMES = {
@@ -21,7 +22,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     groovyScript: 'Groovy Script',
     jsonToXml: 'JSON to XML Converter',
     xmlToJson: 'XML to JSON Converter',
-    requestReplyHttp: 'Request Reply'
+    requestReplyHttp: 'Request Reply',
+    writeVariables: 'Write Variables'
   }
   const ICONS = {
     https: 'sap-icon://internet-browser',
@@ -35,8 +37,12 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     jsonToXml: 'sap-icon://switch-views',
     xmlToJson: 'sap-icon://switch-views',
     requestReplyHttp: 'sap-icon://outbox',
+    writeVariables: 'sap-icon://save',
     unknown: 'sap-icon://puzzle'
   }
+
+  /** "Run once", "Every 15 min (UTC)" or "Scheduled" */
+  const timerText = (t) => (t.mode === 'once' ? 'Run once' : t.mode === 'every' ? `Every ${t.minutes} min (UTC)` : 'Scheduled')
 
   function icon(name) {
     const info = IconPool.getIconInfo(ICONS[name] || ICONS.unknown)
@@ -48,7 +54,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     const counters = {}
     let rr = 0
     return {
-      trigger: spec.trigger.type === 'httpsSender' ? { kind: 'https', label: 'HTTPS', detail: spec.trigger.address } : { kind: 'timer', label: 'Timer', detail: 'Run once' },
+      trigger: spec.trigger.type === 'httpsSender' ? { kind: 'https', label: 'HTTPS', detail: spec.trigger.address } : { kind: 'timer', label: 'Timer', detail: timerText(spec.trigger) },
       steps: spec.steps.map((s) => {
         counters[s.type] = (counters[s.type] || 0) + 1
         const name = s.name || `${DEFAULT_NAMES[s.type] || s.type} ${counters[s.type]}`
@@ -58,6 +64,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           const n = (s.headers || []).length + (s.properties || []).length
           return { type: s.type, name, detail: [n ? `${n} value${n === 1 ? '' : 's'}` : null, s.body ? 'body' : null].filter(Boolean).join(' · ') || undefined }
         }
+        if (s.type === 'writeVariables') return { type: s.type, name, detail: (s.variables || []).map((v) => v.name).join(', ') || undefined }
         return { type: s.type, name }
       }),
       end: spec.end.type === 'httpReceiver' ? { receiver: { name: spec.end.system || 'Receiver', detail: `${spec.end.method} ${spec.end.url}` } } : {},
@@ -80,7 +87,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       t.type === 'httpsSender'
         ? { kind: 'https', label: 'HTTPS', detail: t.address }
         : t.type === 'timer'
-          ? { kind: 'timer', label: 'Timer', detail: t.mode === 'once' ? 'Run once' : 'Scheduled' }
+          ? { kind: 'timer', label: 'Timer', detail: timerText(t) }
           : t.type === 'sender'
             ? { kind: 'other', label: t.adapter || 'Sender', detail: t.address }
             : { kind: 'none', label: 'Start' }
@@ -90,7 +97,14 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       steps: (p.steps || []).map((s) => ({
         type: s.type,
         name: s.name,
-        detail: s.type === 'groovyScript' ? s.script || `${s.fileName}.groovy` : s.type === 'requestReplyHttp' ? s.method : undefined,
+        detail:
+          s.type === 'groovyScript'
+            ? s.script || `${s.fileName}.groovy`
+            : s.type === 'requestReplyHttp'
+              ? s.method
+              : s.type === 'writeVariables'
+                ? (s.variables || []).map((v) => v.name).join(', ') || undefined
+                : undefined,
         receiver: s.type === 'requestReplyHttp' ? { name: s.system || 'Receiver', detail: s.url } : undefined
       })),
       end:

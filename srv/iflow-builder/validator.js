@@ -6,12 +6,13 @@
 const Ajv = require('ajv')
 const schema = require('./spec-schema.json')
 const { AUTH_TYPES, PROXY_TYPES, checkAgainstReferences } = require('./receiver-settings')
+const cpiValues = require('./cpi-values')
 
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp']
-// Steps allowed in the exception subprocess (no receivers there in v1)
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'writeVariables']
+// Steps allowed in the exception subprocess (no receivers there; Write Variables only in the main flow so far)
 const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'timer']
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
@@ -29,7 +30,8 @@ const DEFAULT_STEP_NAMES = {
   groovyScript: 'Groovy Script',
   jsonToXml: 'JSON to XML Converter',
   xmlToJson: 'XML to JSON Converter',
-  requestReplyHttp: 'Request Reply'
+  requestReplyHttp: 'Request Reply',
+  writeVariables: 'Write Variables'
 }
 const DEFAULT_EXCEPTION_SUBPROCESS_NAME = 'Exception Subprocess 1'
 
@@ -37,7 +39,7 @@ const GROOVY_IMPORT = /import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Me
 const GROOVY_ENTRY = /def\s+Message\s+processData\s*\(\s*Message\s+message\s*\)/
 const PARAM_REF = /\{\{\s*([^}]*?)\s*\}\}/g
 const WHOLE_PARAM = /^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/
-// v1 creates HTTP receivers with authentication None only (the only value in the reference exports)
+// receiver credentials are names of deployed security material, never secrets
 const CREDENTIAL_HINT = 'give the name of the security material deployed in CPI (User Credentials or OAuth2 Client Credentials), never a password or secret'
 
 const SECRET_NAME = /pass(word|wd)?|pwd|secret|api[-_]?key|token|authorization|client[-_]?secret/i
@@ -134,8 +136,12 @@ function walkStrings(node, path, fn) {
   if (node && typeof node === 'object') for (const [k, v] of Object.entries(node)) walkStrings(v, path ? `${path}.${k}` : k, fn)
 }
 
-/** Fields where {{Parameter}} references are allowed: an HTTP receiver's URL, credential name and location ID */
-const PARAM_FIELDS = /^(steps\[\d+\]|end)\.(url|credentialName|locationId)$/
+/**
+ * Fields where {{Parameter}} references are allowed: an HTTP receiver's URL, credential name and location ID,
+ * and the value of a constant header or property (an externalized value; the other sources name a header,
+ * property, variable or XPath)
+ */
+const PARAM_FIELDS = /^((steps\[\d+\]|end)\.(url|credentialName|locationId)|(steps|exceptionSubprocess\.steps)\[\d+\]\.(headers|properties)\[\d+\]\.value)$/
 
 /**
  * @param {object} spec
@@ -183,7 +189,7 @@ function validate(spec, { attachments = [] } = {}) {
   })
   if (spec.trigger?.type && !SUPPORTED_TRIGGERS.includes(spec.trigger.type)) {
     skip.push('/trigger')
-    err('TRIGGER_UNSUPPORTED', `trigger: '${spec.trigger.type}' is not supported in v1. Use httpsSender { address } or timer { mode: "once" }.`)
+    err('TRIGGER_UNSUPPORTED', `trigger: '${spec.trigger.type}' is not supported yet. Use httpsSender { address }, timer { mode: "once" } or timer { mode: "every", minutes }.`)
   }
   if (spec.end?.type && !SUPPORTED_ENDS.includes(spec.end.type)) {
     skip.push('/end')
@@ -194,6 +200,11 @@ function validate(spec, { attachments = [] } = {}) {
   const calls = (Array.isArray(spec.steps) ? spec.steps : []).map((s, i) => [s, `steps[${i}]`, `/steps/${i}`]).filter(([s]) => s?.type === 'requestReplyHttp')
   if (spec.end?.type === 'httpReceiver') calls.push([spec.end, 'end', '/end'])
   const referenceWarnings = []
+  const valueCheck = (component, stored, where) => {
+    const r = cpiValues.checkValues(component, stored, where)
+    r.errors.forEach((m) => err('NOT_IN_REFERENCES', m))
+    referenceWarnings.push(...r.warnings)
+  }
   for (const [call, where, ptr] of calls) {
     const auth = call.authType ?? 'None'
     if (AUTH_TYPES.includes(auth)) {
@@ -282,7 +293,30 @@ function validate(spec, { attachments = [] } = {}) {
 
   const httpCalls = steps.map((s, i) => [s, `steps[${i}]`]).filter(([s]) => s?.type === 'requestReplyHttp')
   if (spec.end?.type === 'httpReceiver') httpCalls.push([spec.end, 'end'])
-  const warnings = [...referenceWarnings]
+  // Timer: "every" needs its interval; values of timers, Content Modifier sources and Write Variables must be
+  // in the reference exports (a value seen once and not confirmed is a warning)
+  if (spec.trigger?.type === 'timer') {
+    if (spec.trigger.mode === 'every' && spec.trigger.minutes == null) err('MISSING_FIELD', 'trigger: missing required field \'minutes\' (the interval of mode every)')
+    if (spec.trigger.mode === 'once' && spec.trigger.minutes != null) err('UNKNOWN_FIELD', 'trigger.minutes: only used with mode every — remove it, or set mode "every"')
+    if (['once', 'every'].includes(spec.trigger.mode) && (spec.trigger.mode === 'once' || Number.isInteger(spec.trigger.minutes))) valueCheck('Timer', cpiValues.timerValues(spec.trigger), 'trigger')
+  }
+  for (const [s, where] of allSteps.filter(([x]) => isObj(x))) {
+    if (s.type === 'contentModifier')
+      for (const [table, rows] of [['headers', s.headers], ['properties', s.properties]])
+        (Array.isArray(rows) ? rows : []).forEach((r, i) => {
+          const type = cpiValues.CM_SOURCE_TYPES[r?.type]
+          if (!type) return // reported by the schema
+          const datatype = r.datatype || (r.type === 'xpath' ? cpiValues.DEFAULT_XPATH_DATATYPE : '')
+          valueCheck('Content Modifier', [['sourceType', type], ...(datatype ? [['datatype', datatype]] : [])], `${where}.${table}[${i}]`)
+        })
+    if (s.type === 'writeVariables')
+      (Array.isArray(s.variables) ? s.variables : []).forEach((v, i) => {
+        if (!cpiValues.WV_TYPES.includes(v?.type)) return // reported by the schema
+        const datatype = v.datatype || (v.type === 'xpath' ? cpiValues.DEFAULT_XPATH_DATATYPE : '')
+        valueCheck('Write Variables', [['type', v.type], ['scope', cpiValues.scopeOf(v)], ...(datatype ? [['datatype', datatype]] : [])], `${where}.variables[${i}]`)
+      })
+  }
+  const warnings = [...new Set(referenceWarnings)]
   for (const [call, where] of httpCalls) {
     if (typeof call.url === 'string' && /^https?:\/\/[^/@\s]+:[^/@\s]+@/.test(call.url))
       err('URL_CREDENTIALS', `${where}.url: contains user:password — remove it; set authType and credentialName instead (${CREDENTIAL_HINT})`)
@@ -330,8 +364,10 @@ function validate(spec, { attachments = [] } = {}) {
     if (!refs.length) return
     // Groovy code, body and descriptions (documentation, not configuration) may contain {{ }} text
     if (/\.(code|body|description)$/.test(path)) return
-    if (!PARAM_FIELDS.test(path)) {
-      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver`)
+    const row = path.match(/^(steps|exceptionSubprocess\.steps)\[(\d+)\]\.(headers|properties)\[(\d+)\]\.value$/)
+    const rowType = row && (row[1] === 'steps' ? steps : subSteps)[row[2]]?.[row[3]]?.[row[4]]?.type
+    if (!PARAM_FIELDS.test(path) || (row && rowType !== 'constant')) {
+      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, or as a constant value`)
       return
     }
     if (!WHOLE_PARAM.test(value)) {

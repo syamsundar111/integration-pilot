@@ -129,6 +129,19 @@ describe('builder', () => {
     expect(all(doc, 'messageFlow')).toHaveLength(0)
   })
 
+  test('body type: constant for a plain body, expression only when it contains ${...}; rows likewise', async () => {
+    const cm = (body, rows) => built(baseSpec({ steps: [{ type: 'contentModifier', body, properties: rows }] })).then(({ doc }) => props(stepElement(doc, 'Content Modifier 1')))
+    expect(await cm('<root><value>42</value></root>')).toMatchObject({ bodyType: 'constant', wrapContent: '<root><value>42</value></root>' })
+    expect(await cm('{"id": "${property.orderId}"}')).toMatchObject({ bodyType: 'expression' })
+    const rows = await cm(undefined, [
+      { name: 'Plain', type: 'expression', value: 'SF' },
+      { name: 'Expr', type: 'expression', value: '${header.Source}' }
+    ])
+    expect(rows.bodyType).toBe('constant')
+    expect(rows.propertyTable).toContain("<cell id='Type'>constant</cell><cell id='Value'>SF</cell>")
+    expect(rows.propertyTable).toContain("<cell id='Type'>expression</cell><cell id='Value'>${header.Source}</cell>")
+  })
+
   test('contentModifier: headers, properties and body', async () => {
     const step = {
       type: 'contentModifier',
@@ -142,7 +155,8 @@ describe('builder', () => {
     const { doc } = await built(baseSpec({ steps: [step] }))
     assertStructure(doc)
     const p = props(stepElement(doc, 'Content Modifier 1'))
-    expect(p).toMatchObject({ activityType: 'Enricher', bodyType: 'expression', wrapContent: '<root/>' })
+    // a plain body is a constant (the CPI editor warns about an expression without parameters)
+    expect(p).toMatchObject({ activityType: 'Enricher', bodyType: 'constant', wrapContent: '<root/>' })
     expect(p.headerTable).toBe(
       "<row><cell id='Action'>Create</cell><cell id='Type'>constant</cell><cell id='Value'>x&lt;y &amp; z</cell><cell id='Default'></cell><cell id='Name'>A</cell><cell id='Datatype'></cell></row>" +
         "<row><cell id='Action'>Create</cell><cell id='Type'>expression</cell><cell id='Value'>${property.p}</cell><cell id='Default'></cell><cell id='Name'>B</cell><cell id='Datatype'>java.lang.String</cell></row>"

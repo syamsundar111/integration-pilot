@@ -9,6 +9,7 @@ const fs = require('fs')
 const path = require('path')
 const { validate, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS } = require('./validator')
 const { AUTH_TYPES } = require('./receiver-settings')
+const cpiValues = require('./cpi-values')
 
 const RESOURCES = 'src/main/resources/'
 
@@ -37,6 +38,12 @@ const CONVERTER_DEFAULTS = (() => {
         .map((m) => [m[1], m[2] ?? ''])
     )
   return { jsonToXml: values(read('step-json-to-xml.xml')), xmlToJson: values(read('step-xml-to-json.xml')) }
+})()
+/** Write Variables step settings the spec cannot hold: the builder writes its template values */
+const WRITE_VARIABLES_DEFAULTS = (() => {
+  const xml = fs.readFileSync(path.join(__dirname, 'templates', 'iflw', 'step-write-variables.xml'), 'utf8')
+  const all = Object.fromEntries([...xml.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
+  return { visibility: all.visibility, encrypt: all.encrypt, expire: all.expire }
 })()
 const LABELS = { senderAuthType: 'sender authentication', xsrfProtection: 'CSRF protection' }
 
@@ -86,8 +93,9 @@ function toStep(s, scripts, where) {
       const rows = (list = [], table) =>
         list.map((e) => {
           if (e.action && e.action !== 'Create') throw `${where} '${s.name}': ${table} '${e.name}' uses action '${e.action}' (only Create is supported)`
-          if (!['constant', 'expression'].includes(e.type)) throw `${where} '${s.name}': ${table} '${e.name}' has source type '${e.type}' (only constant and expression are supported)`
-          return { name: e.name, type: e.type, value: e.value ?? '', ...(e.datatype && { datatype: e.datatype }) }
+          const type = cpiValues.cmTypeFromCpi(e.type)
+          if (!type) throw `${where} '${s.name}': ${table} '${e.name}' has source type '${e.type}', which the spec cannot hold`
+          return { name: e.name, type, value: e.value ?? '', ...(e.datatype && { datatype: e.datatype }), ...(e.default && { default: e.default }) }
         })
       const step = { ...base }
       if (s.headers?.length) step.headers = rows(s.headers, 'header')
@@ -114,6 +122,16 @@ function toStep(s, scripts, where) {
     }
     case 'requestReplyHttp':
       return { ...base, ...callFields(s, `${where} '${s.name}': receiver ${s.system}`) }
+    case 'writeVariables': {
+      // step settings the spec cannot hold (visibility, encryption, expiry): the builder writes its template values
+      for (const [key, would] of Object.entries(WRITE_VARIABLES_DEFAULTS)) {
+        if (!s.settings || !(key in s.settings)) continue
+        const have = String(s.settings[key] ?? '')
+        if (have !== would) throw `${where} '${s.name}': ${key} is '${have}'; an update would reset it to '${would || '(empty)'}'`
+      }
+      for (const v of s.variables) if (!cpiValues.WV_TYPES.includes(v.type)) throw `${where} '${s.name}': variable '${v.name}' has type '${v.type}', which the spec cannot hold`
+      return { ...base, variables: s.variables.map((v) => ({ name: v.name, type: v.type, value: v.value ?? '', ...(v.datatype && { datatype: v.datatype }), ...(v.global && { global: true }) })) }
+    }
     default:
       throw `${where} '${s.name}': step type '${s.activityType || s.type}' is not supported by the spec`
   }
@@ -145,7 +163,8 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   let trigger = null
   if (t.type === 'httpsSender') trigger = { type: 'httpsSender', address: t.address }
   else if (t.type === 'timer' && t.mode === 'once') trigger = { type: 'timer', mode: 'once' }
-  else blockers.push(`trigger: ${t.type === 'timer' ? 'scheduled timer' : t.adapter || t.type} (only HTTPS sender or run-once timer)`)
+  else if (t.type === 'timer' && t.mode === 'every') trigger = { type: 'timer', mode: 'every', minutes: t.minutes }
+  else blockers.push(`trigger: ${t.type === 'timer' ? 'scheduled timer' : t.adapter || t.type} (only HTTPS sender, run-once timer or every N minutes in UTC)`)
 
   for (const a of parsed.adapters || [])
     if (!(a.type === 'HTTPS' && a.direction === 'Sender') && !(a.type === 'HTTP' && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
@@ -154,8 +173,11 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     SUPPORTED_STEPS.includes(s.type) ? attempt(() => toStep(s, parsed.scripts || [], `step ${i + 1}`)) : (blockers.push(`step ${i + 1} '${s.name}': ${s.activityType || s.type} is not supported by the spec`), null)
   )
 
+  // An empty exception subprocess that ends with an Error End (Error Start -> Error End, as the iGlow extension
+  // adds one) changes nothing: a failing message ends as FAILED with or without it, so an update leaves it out
+  const emptyErrorSubprocess = parsed.exceptionSubprocess && !parsed.exceptionSubprocess.steps.length && parsed.exceptionSubprocess.end === 'error'
   let exceptionSubprocess
-  if (parsed.exceptionSubprocess) {
+  if (parsed.exceptionSubprocess && !emptyErrorSubprocess) {
     const sub = parsed.exceptionSubprocess
     const subSteps = sub.steps.map((s, i) =>
       SUPPORTED_EXCEPTION_STEPS.includes(s.type)
@@ -169,7 +191,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   // the builder writes Message Ends: another end kind would change how failed messages are reported
   const END_KINDS = { error: 'an Error End', escalation: 'an Escalation End', terminate: 'a Terminate End' }
   if (END_KINDS[parsed.end?.kind]) blockers.push(`the main flow ends with ${END_KINDS[parsed.end.kind]}; an update would make it a Message End`)
-  if (END_KINDS[parsed.exceptionSubprocess?.end])
+  if (END_KINDS[parsed.exceptionSubprocess?.end] && !emptyErrorSubprocess)
     blockers.push(`the exception subprocess ends with ${END_KINDS[parsed.exceptionSubprocess.end]}; an update would make it a Message End (failed messages would show as COMPLETED)`)
 
   const e = parsed.end || {}

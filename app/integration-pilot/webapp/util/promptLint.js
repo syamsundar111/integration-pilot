@@ -39,7 +39,6 @@ sap.ui.define([], () => {
     ['XSLT', /\bxslt\b|\bxsl (mapping|transformation)\b/i],
     ['mapping', /\b(message|graphical|operation|xml|edmx)\s+mapping\b|\bmapping\s+(step|artifact)\b|\b(an?|add|use|via|with)\s+(an?\s+)?mapping\b/i],
     ['SFTP', /\bsftp\b/i],
-    ['write variables', /\bwrite variables?\b/i],
     ['process call', /\b(local )?process call\b/i]
   ]
 
@@ -52,9 +51,11 @@ sap.ui.define([], () => {
   ]
 
   // Where a {{Param}} can stand: a receiver URL (a line about a URL, or right after an HTTP method or
-  // "address"), or a receiver's credential name or location ID
+  // "address"), a receiver's credential name or location ID, or a constant value ("constant {{X}}",
+  // "externalized parameter {{X}}")
   const URL_LINE = /\burls?\b|https?:\/\//i
-  const PARAM_POSITION = /(\b(GET|POST|PUT|PATCH|DELETE)(\s+to)?|\b(address|url|endpoint)\s*[:=]?|\bcredential(\s+name)?\s*[:=]?|\blocation(\s+id)?\s*[:=]?)\s*$/i
+  const PARAM_POSITION =
+    /(\b(GET|POST|PUT|PATCH|DELETE)(\s+to)?|\b(address|url|endpoint)\s*[:=]?|\bcredential(\s+name)?\s*[:=]?|\blocation(\s+id)?\s*[:=]?|\bconstant\s*[:=]?|\bparameter)\s*$/i
   // Never, even on a URL line: right after user or password (credentials are names only), or part of a URL
   const NOT_PARAM_FIELD = /\b(user(\s*name)?|password)\s*[:=]?\s*$/i
   const IN_URL = (before, after) => /(:\/\/|\/)$/.test(before) || after.startsWith('/')
@@ -105,10 +106,10 @@ sap.ui.define([], () => {
 
   const WARNINGS = {
     unsupported: (found) =>
-      `Not supported in v1: ${found.join(', ')}. Flows are linear (Content Modifier, Groovy Script, JSON/XML converters, HTTP request-reply). Use a Groovy script, or add the step in the CPI web editor after creation.` +
+      `Not supported yet: ${found.join(', ')}. Flows are linear (Content Modifier, Groovy Script, Write Variables, JSON/XML converters, HTTP request-reply). Use a Groovy script, or add the step in the CPI web editor after creation.` +
       (found.includes('XSLT') ? ' Attach the .xsl file to include it in the iFlow, ready for an XSLT Mapping step.' : ''),
     params: (names) =>
-      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver. Use literal values elsewhere.`,
+      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, or as a constant value. Use literal values elsewhere.`,
     secret:
       'This looks like a password, secret or token. Never send credentials: deploy them as security material in CPI (User Credentials or OAuth2 Client Credentials) and give only its name, e.g. "Basic, credential ERP_BASIC_USER".'
   }

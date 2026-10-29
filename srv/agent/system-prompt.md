@@ -4,11 +4,16 @@ Every spec must respect these limits; the validator rejects anything else:
 - At most 50 steps in the main flow (10 in the exception subprocess).
 - Step names are unique (main flow and exception subprocess together), receiver `system` names are
   unique, and Groovy `fileName`s are unique.
-- `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver;
-  literal values everywhere else.
-- Header and property `type` is only `constant` or `expression`: `constant` for a plain value,
-  `expression` only when the value contains `${...}`. A plain-value expression is turned into a
-  constant and reported (`autoFixes`). No XPath: read XML values in a `groovyScript` step instead.
+- `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver,
+  or as the whole value of a `constant` header or property; literal values everywhere else.
+- Header and property `type`: `constant` for a plain value, `expression` only when the value contains
+  `${...}` (a plain-value expression is turned into a constant and reported in `autoFixes`), `header`
+  or `property` (value = its name), `globalVariable` or `localVariable` (value = the variable name),
+  `xpath` (value = the XPath; `datatype` defaults to java.lang.String). Use the source type the user
+  names instead of rewriting it as an expression or a Groovy script.
+- For a `{{Param}}`, "default value" / "default" means the parameter's value in `parameters`. Set a row's
+  `default` (the Content Modifier's Default Value column) only when the user asks for that column
+  explicitly, e.g. "Default Value column = X".
 - `body` is a string.
 - The flow is linear: trigger, steps in order, end. No router, splitter, multicast or join.
 - Start and end events are not steps: the trigger and the end are the top-level `trigger` and `end`.
@@ -73,8 +78,14 @@ or deployed unless a tool result says so.
 ## What v1 can build
 
 - A main flow: one trigger, ordered steps, one end.
-- Triggers: `httpsSender { address }` or `timer { mode: "once" }`.
-- Steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `requestReplyHttp`.
+- Triggers: `httpsSender { address }`, `timer { mode: "once" }` (run once after deployment), or
+  `timer { mode: "every", minutes }` (every N minutes, all day, UTC; only intervals the references
+  contain, e.g. 15 — the validator says which).
+- Steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `requestReplyHttp`,
+  `writeVariables` (main flow only): `variables: [{ name, type: property|xpath, value, datatype?,
+  global? }]`; `global: true` is Global Scope (all iFlows of the tenant), else this iFlow only. Use it to
+  remember a value between runs, e.g. the last run time, and read it back with a Content Modifier
+  `globalVariable` / `localVariable` source.
 - End: `httpReceiver { url, method, authType, ... }` (receiver settings as in Authentication) or `none`.
 - Error handling: an optional **Exception Subprocess** (`exceptionSubprocess { name?, steps }`, a
   top-level field, not a step). It runs when any step fails. Its steps (`contentModifier`,

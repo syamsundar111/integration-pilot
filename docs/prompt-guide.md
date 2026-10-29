@@ -14,8 +14,8 @@ turns into extra questions.
 
 | | Supported | Not supported |
 |---|---|---|
-| Trigger | HTTPS sender (with a path), timer that runs once after deployment | Schedules, SFTP, SOAP, other senders |
-| Steps | Content Modifier, Groovy Script, JSON to XML, XML to JSON, HTTP request-reply | Router, splitter, gather, join, multicast, mapping, XSLT step, write variables, process call |
+| Trigger | HTTPS sender (with a path), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, SOAP, other senders |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP request-reply | Router, splitter, gather, join, multicast, mapping, XSLT step, process call |
 | End | HTTP receiver, or no receiver | Mail, SFTP and other receivers |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
 | Error handling | One exception subprocess (Content Modifier, Groovy, converters) | Request-reply inside the exception subprocess |
@@ -25,9 +25,13 @@ Hard limits:
 - At most **50 steps** in the main flow (10 in the exception subprocess). Large flows are written
   and checked in parts of up to 8 steps, so their size does not cause timeouts.
 - Step names, receiver names and Groovy file names must be **unique**.
-- `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver.
-- Header and property values are **constant** or **expression** only. Read XML values with XPath in a
-  Groovy script.
+- `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver,
+  or as a whole **constant** header or property value. "Default" for a parameter means its value
+  (Configure); to fill a Content Modifier's Default Value column, say so explicitly: "Default Value
+  column = X".
+- Header and property sources: constant, expression, header, property, XPath (with a data type),
+  global or local variable. Write Variables writes properties or XPath values, in this iFlow or
+  globally. Only values in the reference exports are accepted (e.g. a timer every 15 minutes).
 - Receivers take credential **names** only: the security material deployed on the tenant (User
   Credentials or OAuth2 Client Credentials). Never put a password, secret or token into a request.
   The credential must exist before you deploy the iFlow.
@@ -51,7 +55,7 @@ Error handling: <exception subprocess: what to set, log or return when a step fa
 
 Before sending, the chat checks the request without calling the model. It warns about:
 
-- steps v1 cannot build (router, splitter, gather, join, multicast, XSLT, mapping, SFTP, write variables, process call)
+- steps v1 cannot build (router, splitter, gather, join, multicast, XSLT, mapping, SFTP, process call)
 - more than 25 numbered steps
 - `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID
 - template fields that are still unfilled
@@ -100,12 +104,13 @@ spec:
   placeholders merged.
 - A branching flow keeps its main path (at each router, the route with a condition); the other
   routes are described in the router's placeholder.
-- `{{Param}}` values outside receiver URLs, credential names and location IDs become the parameter's
-  default; a receiver URL combined from parameters becomes one `<Receiver>_URL` parameter.
+- `{{Param}}` values outside receiver URLs, credential names, location IDs and constant values become
+  the parameter's default; a receiver URL combined from parameters becomes one `<Receiver>_URL` parameter.
 - A Process Call in the exception subprocess is replaced by the steps of the local process it calls,
   if they are Content Modifiers and Groovy scripts.
 - The import gets a new iFlow id (`<original>_Imported`); duplicate names are made unique.
-- XPath values of Content Modifiers move into a generated Groovy script.
+- Content Modifier sources (header, property, XPath, global and local variables), Write Variables and a
+  timer every N minutes are kept as they are.
 - Scripts and XSLT files become attachments.
 
 Then ask *Propose the imported iFlow as a new iFlow* and replace the placeholders in the CPI web

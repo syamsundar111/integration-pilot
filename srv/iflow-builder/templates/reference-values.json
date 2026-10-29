@@ -36,5 +36,245 @@
         "confirmed": "On-Premise, re-selected in Ref_Receivers (RR_OnPrem), 2026-10-29"
       }
     }
+  },
+  "Content Modifier": {
+    "sourceType": {
+      "constant": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Multicast_Enrich",
+          "Ref_Persistence",
+          "Ref_Persistence",
+          "Ref_Persistence",
+          "Ref_Persistence",
+          "Ref_Persistence",
+          "Ref_Receivers",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_SFTP",
+          "Ref_Sender_SOAP",
+          "Ref_Sender_SOAP",
+          "Ref_Sender_SOAP",
+          "Ref_Sender_SOAP",
+          "Ref_Structure",
+          "Ref_Transform",
+          "Ref_Transform",
+          "Ref_Transform",
+          "Ref_Variables",
+          "Ref_Variables",
+          "Ref_Variables",
+          "Ref_Variables",
+          "Reference_AllSteps"
+        ]
+      },
+      "expression": {
+        "references": [
+          "Ref_Persistence",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_SOAP",
+          "Ref_Transform",
+          "Ref_Variables",
+          "Reference_AllSteps"
+        ]
+      },
+      "xpath": {
+        "references": [
+          "Ref_Structure",
+          "Ref_Variables"
+        ]
+      },
+      "global persisted variables": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "Global Variable, re-selected in Ref_Variables (CM_ReadSources p_global), 2026-10-28"
+      },
+      "persisted variables": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "Local Variable, re-selected in Ref_Variables (CM_ReadSources p_local), 2026-10-28"
+      },
+      "header": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "re-selected in Ref_Variables (CM_ReadSources p_header); confirmed in the tenant check of phase 1a, 2026-10-29"
+      },
+      "property": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "re-selected in Ref_Variables (CM_ReadSources p_property); confirmed in the tenant check of phase 1a, 2026-10-29"
+      }
+    },
+    "datatype": {
+      "java.lang.String": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Multicast_Enrich",
+          "Ref_Persistence",
+          "Ref_Persistence",
+          "Ref_Persistence",
+          "Ref_Persistence",
+          "Ref_Persistence",
+          "Ref_Receivers",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_HTTPS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_JMS",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_ProcessDirect",
+          "Ref_Sender_SFTP",
+          "Ref_Sender_SOAP",
+          "Ref_Sender_SOAP",
+          "Ref_Sender_SOAP",
+          "Ref_Sender_SOAP",
+          "Ref_Sender_SOAP",
+          "Ref_Structure",
+          "Ref_Structure",
+          "Ref_Transform",
+          "Ref_Transform",
+          "Ref_Transform",
+          "Ref_Transform",
+          "Ref_Variables",
+          "Ref_Variables",
+          "Ref_Variables"
+        ]
+      },
+      "java.lang.Boolean": {
+        "references": [
+          "Ref_Persistence"
+        ]
+      }
+    }
+  },
+  "Write Variables": {
+    "type": {
+      "property": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "re-selected in Ref_Variables (WV_Variables DUMMY_GLOBAL_VAR), 2026-10-29"
+      },
+      "xpath": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "re-selected in Ref_Variables (WV_Variables DUMMY_LOCAL_VAR), 2026-10-29"
+      }
+    },
+    "scope": {
+      "global": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "Global Scope checked, Ref_Variables (DUMMY_GLOBAL_VAR), 2026-10-29"
+      },
+      "local": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "Global Scope unchecked, Ref_Variables (DUMMY_LOCAL_VAR), 2026-10-29"
+      }
+    },
+    "datatype": {
+      "java.lang.String": {
+        "references": [
+          "Ref_Variables"
+        ],
+        "confirmed": "XPath data type, Ref_Variables (DUMMY_LOCAL_VAR); confirmed in the tenant check of phase 1a, 2026-10-29"
+      }
+    }
+  },
+  "Timer": {
+    "repeat": {
+      "NONE": {
+        "references": [
+          "Ref_Mapping",
+          "Ref_Multicast_Enrich",
+          "Ref_Persistence",
+          "Ref_Receivers",
+          "Ref_Receivers_2",
+          "Ref_Structure",
+          "Ref_Transform",
+          "Ref_Variables",
+          "Reference_Timer"
+        ]
+      },
+      "MINUTES": {
+        "references": [
+          "Ref_Router_Ends"
+        ],
+        "confirmed": "Simple Schedule, Repeat Minutes, re-selected in Ref_Router_Ends (Timer 1), 2026-10-29"
+      }
+    },
+    "timeZone": {
+      "Etc/GMT": {
+        "references": [
+          "Ref_Mapping",
+          "Ref_Multicast_Enrich",
+          "Ref_Persistence",
+          "Ref_Receivers",
+          "Ref_Receivers_2",
+          "Ref_Router_Ends",
+          "Ref_Structure",
+          "Ref_Transform",
+          "Ref_Variables",
+          "Reference_Timer"
+        ]
+      }
+    },
+    "every": {
+      "15": {
+        "references": [
+          "Ref_Router_Ends"
+        ],
+        "confirmed": "Every 15, re-selected in Ref_Router_Ends (Timer 1), 2026-10-29"
+      }
+    }
   }
 }

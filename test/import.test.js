@@ -28,6 +28,27 @@ const rename = (iflw, from, to) => iflw.replace(`name="${from}"`, `name="${to}"`
 /** Encoded Content Modifier row: Type cell of the row whose Value is `value` */
 const rowType = (iflw, value, type) => iflw.replace(`&lt;cell id='Type'&gt;constant&lt;/cell&gt;&lt;cell id='Value'&gt;${value}&lt;`, `&lt;cell id='Type'&gt;${type}&lt;/cell&gt;&lt;cell id='Value'&gt;${value}&lt;`)
 
+/**
+ * Inserts a copy of the step `name` right after it, as `copyName` (the builder builds at most 50 steps, an
+ * import may get more): the copy takes the step's outgoing flow, a new flow leads from it to the old target
+ */
+function addStepAfter(iflw, name, copyName) {
+  const [block, id] = iflw.match(new RegExp(`<bpmn2:callActivity id="([^"]+)" name="${name}">[\\s\\S]*?</bpmn2:callActivity>`))
+  const out = block.match(/<bpmn2:outgoing>([^<]+)<\/bpmn2:outgoing>/)[1]
+  const [flow, target] = iflw.match(new RegExp(`<bpmn2:sequenceFlow id="${out}"[^>]*targetRef="([^"]+)"[^>]*/?>`))
+  const copyId = `${id}_copy`
+  const copyFlow = `${out}_copy`
+  const copy = block
+    .replace(`id="${id}"`, `id="${copyId}"`)
+    .replace(`name="${name}"`, `name="${copyName}"`)
+    .replace(/<bpmn2:incoming>[^<]+<\/bpmn2:incoming>/, `<bpmn2:incoming>${out}</bpmn2:incoming>`)
+    .replace(/<bpmn2:outgoing>[^<]+<\/bpmn2:outgoing>/, `<bpmn2:outgoing>${copyFlow}</bpmn2:outgoing>`)
+  return iflw
+    .replace(block, block + copy)
+    .replace(flow, flow.replace(`targetRef="${target}"`, `targetRef="${copyId}"`) + `<bpmn2:sequenceFlow id="${copyFlow}" sourceRef="${copyId}" targetRef="${target}"/>`)
+    .replace(new RegExp(`(<bpmn2:[A-Za-z]+ id="${target}"[\\s\\S]*?<bpmn2:incoming>)${out}(</bpmn2:incoming>)`), `$1${copyFlow}$2`)
+}
+
 const converters = (n, from = 1) => Array.from({ length: n }, (_, i) => ({ type: 'jsonToXml', name: `S${from + i}` }))
 
 describe('import keeps HTTP receiver settings (Ref_Receivers)', () => {
@@ -45,8 +66,36 @@ describe('import keeps HTTP receiver settings (Ref_Receivers)', () => {
   })
 })
 
+describe('import keeps phase 1a content (Ref_Variables, Ref_Router_Ends)', () => {
+  test('Content Modifier sources, a constant parameter with its default, Write Variables; the empty iGlow subprocess is left out', async () => {
+    const r = await importIflow(readRef('Ref_Variables.zip'), { fileName: 'Ref_Variables.zip', packageId: 'PilotReference' })
+    expect(r.valid).toBe(true)
+    const [, read, write] = r.spec.steps
+    expect(read.properties.map((p) => `${p.name}:${p.type}`)).toEqual([
+      'p_global:globalVariable',
+      'p_local:localVariable',
+      'p_header:header',
+      'p_property:property',
+      'p_xpath:xpath',
+      'p_constant:constant',
+      'p_expr:expression',
+      'p_param:constant'
+    ])
+    expect(read.properties.at(-1)).toEqual({ name: 'p_param', type: 'constant', value: '{{DummyParam}}', default: 'default-value' })
+    expect(r.spec.parameters).toEqual({ DummyParam: 'dummy-value' })
+    expect(write).toMatchObject({ type: 'writeVariables', variables: [{ name: 'DUMMY_GLOBAL_VAR', global: true }, { name: 'DUMMY_LOCAL_VAR', type: 'xpath' }] })
+    expect(r.spec.exceptionSubprocess).toBeUndefined()
+  })
+
+  test('a timer every 15 minutes stays a timer every 15 minutes', async () => {
+    const r = await importIflow(readRef('Ref_Router_Ends.zip'), { fileName: 'Ref_Router_Ends.zip', packageId: 'PilotReference' })
+    expect(r.spec.trigger).toEqual({ type: 'timer', mode: 'every', minutes: 15 })
+    expect(r.notes.join('\n')).not.toMatch(/became "run once/)
+  })
+})
+
 describe('import', () => {
-  test('unsupported steps become placeholders, merged to stay within 50 steps; XPath moves into Groovy', async () => {
+  test('unsupported steps become placeholders, merged to stay within 50 steps; XPath stays an XPath row', async () => {
     const spec = baseSpec({
       steps: [
         { type: 'contentModifier', name: 'Values', properties: [{ name: 'OrderId', type: 'constant', value: '/Order/Id' }, { name: 'Source', type: 'constant', value: 'Shop' }] },
@@ -55,7 +104,7 @@ describe('import', () => {
       end: { type: 'httpReceiver', system: 'Backend', url: 'https://example.org/orders', method: 'POST', authType: 'None' }
     })
     const zip = await zipWith(spec, (x) =>
-      rename(rename(rowType(retype(x, ['S3', 'S4', 'S5', 'S6', 'S7', 'S8'], 'Splitter'), '/Order/Id', 'xpath'), 'S10', 'Dup'), 'S11', 'Dup').replace(
+      rename(rename(rowType(retype(addStepAfter(x, 'S49', 'S50'), ['S3', 'S4', 'S5', 'S6', 'S7', 'S8'], 'Splitter'), '/Order/Id', 'xpath'), 'S10', 'Dup'), 'S11', 'Dup').replace(
         /(<key>authenticationMethod<\/key>\s*)<value>None<\/value>/,
         '$1<value>OAuth2SAMLBearerAssertion</value>'
       )
@@ -64,19 +113,23 @@ describe('import', () => {
     expect(r).toMatchObject({ valid: true, errors: [], placeholders: 1 })
     const names = r.spec.steps.map((s) => s.name)
 
-    // 1 Groovy + 1 Content Modifier + 49 converters = 51 > 50: the 6 splitters became one placeholder
+    // 1 Content Modifier + 50 converters = 51 > 50: the 6 splitters became one placeholder
     expect(r.spec.steps).toHaveLength(46)
     const merged = r.spec.steps.find((s) => /^REPLACE WITH /.test(s.description || ''))
     expect(merged).toMatchObject({ type: 'contentModifier', name: 'S3', properties: [{ name: 'REPLACE_WITH', type: 'constant' }] })
     expect(merged.description).toBe("REPLACE WITH Splitter 'S3'; then Splitter 'S4'; then Splitter 'S5'; then Splitter 'S6'; then Splitter 'S7'; then Splitter 'S8'")
     expect(r.notes).toContain('Main flow: 6 consecutive placeholders were merged into one to stay within 50 steps')
 
-    // XPath: a generated script before the Content Modifier, which keeps its constant
-    expect(r.spec.steps.slice(0, 2)).toEqual([
-      expect.objectContaining({ type: 'groovyScript', name: 'Values XPath', fileName: 'xpath_Values' }),
-      expect.objectContaining({ type: 'contentModifier', name: 'Values', properties: [{ name: 'Source', type: 'constant', value: 'Shop' }] })
-    ])
-    expect(r.attachments['xpath_Values.groovy']).toContain("message.setProperty('OrderId', xpath.evaluate('/Order/Id', doc))")
+    // XPath: kept as an XPath row (phase 1a), no generated script
+    expect(r.spec.steps[0]).toEqual({
+      type: 'contentModifier',
+      name: 'Values',
+      properties: [
+        { name: 'OrderId', type: 'xpath', value: '/Order/Id' },
+        { name: 'Source', type: 'constant', value: 'Shop' }
+      ]
+    })
+    expect(r.attachments).toEqual({})
 
     // unique names; an authentication method the spec cannot hold is reset to None with a note
     expect(names.filter((n) => n.startsWith('Dup'))).toEqual(['Dup', 'Dup 2'])
@@ -93,7 +146,7 @@ describe('import', () => {
     const spec = baseSpec({
       steps: [{ type: 'contentModifier', name: 'Values', properties: [{ name: 'A', type: 'constant', value: '/a' }, { name: 'B', type: 'constant', value: 'b' }] }, ...converters(49)]
     })
-    const zip = await zipWith(spec, (x) => rowType(x, '/a', 'xpath'))
+    const zip = await zipWith(spec, (x) => addStepAfter(x, 'S49', 'S50')) // 51 real steps
     await expect(importIflow(zip, { fileName: 'big.zip' })).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE', status: 400 })
   })
 
@@ -209,15 +262,17 @@ describe('import', () => {
       expect(r).toMatchObject({ valid: true, errors: [] })
     })
 
-    test('{{Param}} outside receiver URLs becomes its default; placeholder text is not a parameter value', async () => {
+    test('{{Param}} stays as a whole constant value; elsewhere it becomes its default; placeholder text is not a parameter value', async () => {
       const r = await branchy()
       const [setProps, , mainA, router5] = r.spec.steps
       expect(setProps.properties).toEqual([
-        { name: 'Source', type: 'constant', value: 'SF' },
-        { name: 'KeyValue', type: 'expression', value: '${property.IncidentNumber}' }, // type "property" whose name is a parameter
-        { name: 'Auth', type: 'expression', value: '${header.Authorization}' } // type "header"
+        { name: 'Source', type: 'constant', value: '{{SourceSystem}}' }, // an externalized constant (phase 1a)
+        { name: 'QueryDate', type: 'localVariable', value: 'lastModifiedDateTime' }, // CPI type "persisted variables"
+        { name: 'KeyValue', type: 'property', value: 'IncidentNumber' }, // type "property" whose name is a parameter
+        { name: 'Auth', type: 'header', value: 'Authorization' } // type "header"
       ])
-      expect(setProps.description).toContain('Parameter defaults used: SourceSystem = SF (was {{SourceSystem}})')
+      expect(r.spec.parameters).toMatchObject({ SourceSystem: 'SF' })
+      expect(setProps.description).toBe('Parameter defaults used: KeyProperty = IncidentNumber (was {{KeyProperty}})')
       expect(mainA.headers).toEqual([{ name: 'Client', type: 'expression', value: 'client=100' }])
       expect(mainA.description).toBe('Parameter defaults used: SAP Client = 100 (was {{SAP Client}})')
       // the router's REPLACE_WITH value keeps the condition without {{ }}; the description keeps it as it was
@@ -225,15 +280,17 @@ describe('import', () => {
       expect(router5.description).toContain('{{Limit}}')
     })
 
-    test('a Content Modifier with an unsupported row stays a real step with that row noted', async () => {
+    test('a Content Modifier with a row the spec cannot hold stays a real step with that row noted', async () => {
       const r = await branchy()
       const setProps = r.spec.steps[0]
       expect(setProps).toMatchObject({ type: 'contentModifier', name: 'CM_SetProperties' })
-      // CPI writes persisted variable rows with Type "persisted variables"
-      expect(setProps.description).toMatch(/^Add in the CPI web editor: property QueryDate = persisted variable lastModifiedDateTime \(type persisted variables\) \(not supported by the spec\)/)
-      // rows of type "property" and "header" stay real as ${property.X} / ${header.X}
-      expect(setProps.properties.map((x) => x.value)).toEqual(['SF', '${property.IncidentNumber}', '${header.Authorization}'])
-      expect(setProps.description).not.toMatch(/^REPLACE WITH/)
+      // every row of this fixture is supported now (phase 1a); an unknown source type is noted
+      const zip = await zipWith(baseSpec({ steps: [{ type: 'contentModifier', name: 'CM', properties: [{ name: 'N', type: 'constant', value: 'x' }, { name: 'K', type: 'constant', value: 'k' }] }] }), (x) =>
+        rowType(x, 'x', 'number range')
+      )
+      const cm = (await importIflow(zip, { fileName: 'cm.zip' })).spec.steps[0]
+      expect(cm).toMatchObject({ type: 'contentModifier', name: 'CM', properties: [{ name: 'K', type: 'constant', value: 'k' }] })
+      expect(cm.description).toBe('Add in the CPI web editor: property N (source type number range) (not supported by the spec)')
     })
 
     test('imports always get a new iFlow id', async () => {

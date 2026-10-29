@@ -68,7 +68,7 @@ describe('the pre-send check passes every example request (a warning on our own 
     expect(flagged('Create an iFlow: POST https://x.example.com/api, credential {{ErpCredential}}, proxy On-Premise, location ID {{ErpLocation}}')).toEqual([])
     expect(flagged('Create an iFlow: GET {{Orders}}, Basic, credential name: {{ErpCredential}}')).toEqual([])
     expect(lint('Create an iFlow: GET {{Orders}}, header Source = {{Source}}').map((w) => w.message)).toEqual([
-      '{{Source}}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver. Use literal values elsewhere.'
+      '{{Source}}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, or as a constant value. Use literal values elsewhere.'
     ])
   })
 })

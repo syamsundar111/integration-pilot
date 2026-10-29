@@ -83,6 +83,21 @@ describe('update blockers', () => {
     }
   })
 
+  test('Write Variables settings an update would reset are blockers; the rows themselves are kept (phase 1a)', async () => {
+    const wvSpec = { ...spec, steps: [...spec.steps, { type: 'writeVariables', name: 'WV', variables: [{ name: 'LAST', type: 'property', value: 'p', global: true }] }] }
+    const zip = await JSZip.loadAsync(Buffer.from((await build(wvSpec)).zipBase64, 'base64'))
+    const file = Object.keys(zip.files).find((f) => IFLW.test(f))
+    const iflw = await zip.file(file).async('string')
+    const back = async (xml) => {
+      zip.file(file, xml)
+      return specFromParsed(await parse(await zip.generateAsync({ type: 'nodebuffer' })), { packageId: spec.packageId })
+    }
+    const kept = await back(iflw)
+    expect(kept.blockers).toEqual([])
+    expect(kept.spec.steps.at(-1)).toEqual({ type: 'writeVariables', name: 'WV', variables: [{ name: 'LAST', type: 'property', value: 'p', global: true }] })
+    expect((await back(setting(iflw, 'encrypt', 'false'))).blockers).toEqual(["step 2 'WV': encrypt is 'false'; an update would reset it to 'true'"])
+  })
+
   test('sender settings that the update would change are blockers (e.g. CSRF protection on)', async () => {
     const r = await readBack((x) => setting(x, 'xsrfProtection', '1'))
     expect(r.blockers).toEqual([expect.stringMatching(/^sender .*: CSRF protection is '1'; an update would reset it to '0'$/)])

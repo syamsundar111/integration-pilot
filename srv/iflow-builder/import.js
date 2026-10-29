@@ -14,6 +14,7 @@
  */
 const JSZip = require('jszip')
 const { parse } = require('./parser')
+const cpiValues = require('./cpi-values')
 const { validate } = require('./validator')
 
 const MAX_STEPS = 50
@@ -50,28 +51,6 @@ function uniquer(separator) {
 }
 
 /** Groovy single-quoted string literal */
-const groovyString = (s) => `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')}'`
-
-/** Groovy that sets the XPath values a Content Modifier had (v1 has constant and expression only) */
-function xpathGroovy(stepName, entries) {
-  const sets = entries.map((e) => `    message.set${e.table === 'header' ? 'Header' : 'Property'}(${groovyString(e.name)}, xpath.evaluate(${groovyString(e.xpath)}, doc))`)
-  return [
-    'import com.sap.gateway.ip.core.customdev.util.Message',
-    'import javax.xml.parsers.DocumentBuilderFactory',
-    'import javax.xml.xpath.XPathFactory',
-    '',
-    `// Generated on import: the XPath values of Content Modifier ${groovyString(stepName)}.`,
-    '// Namespace prefixes are not mapped; adjust the expressions if the XML uses namespaces.',
-    'def Message processData(Message message) {',
-    "    def body = message.getBody(java.io.InputStream) ?: new ByteArrayInputStream('<empty/>'.getBytes('UTF-8'))",
-    '    def doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(body) // streamed, not read into a String',
-    '    def xpath = XPathFactory.newInstance().newXPath()',
-    ...sets,
-    '    return message',
-    '}',
-    ''
-  ].join('\n')
-}
 
 /** A bare .iflw becomes a minimal zip the parser understands */
 async function zipOf(buffer, fileName) {
@@ -202,33 +181,18 @@ async function importIflow(buffer, { fileName, packageId }) {
     switch (s.type) {
       case 'contentModifier': {
         const dropped = []
-        const xpaths = []
         const was = []
         const rows = (list = [], table) =>
           list.flatMap((r) => {
             if (r.action && r.action !== 'Create') return dropped.push(`${table} ${r.name} (action ${r.action})`), []
             if (!ROW_NAME.test(r.name || '')) return dropped.push(`${table} '${r.name}' (name not supported)`), []
-            const keep = (type, value) => [{ name: r.name, type, value, ...(r.datatype && { datatype: r.datatype }) }]
-            switch (r.type) {
-              case 'constant':
-              case 'expression':
-                return keep(r.type, inlineParams(r.value, was))
-              case 'header':
-              case 'property': {
-                // value is the header/property name, possibly a {{Param}}
-                const source = inlineParams(r.value, was).trim()
-                if (!source) return dropped.push(`${table} ${r.name} (${r.type} name is empty)`), []
-                return keep('expression', `\${${r.type}.${source}}`)
-              }
-              case 'persisted variables':
-              case 'global variable':
-              case 'local variable':
-                return dropped.push(`${table} ${r.name} = persisted variable ${inlineParams(r.value, was) || '?'} (type ${r.type})`), []
-              case 'xpath':
-                return xpaths.push({ table, name: r.name, xpath: r.value || '' }), []
-              default:
-                return dropped.push(`${table} ${r.name} (source type ${r.type})`), []
-            }
+            const type = cpiValues.cmTypeFromCpi(r.type)
+            if (!type) return dropped.push(`${table} ${r.name} (source type ${r.type})`), []
+            // a constant may be a whole {{Param}} (an externalized value); elsewhere a parameter becomes its default
+            const whole = type === 'constant' && String(r.value ?? '').match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
+            const value = whole && Object.hasOwn(params, whole) ? r.value : inlineParams(r.value, was)
+            if (['header', 'property', 'globalVariable', 'localVariable', 'xpath'].includes(type) && !value.trim()) return dropped.push(`${table} ${r.name} (${r.type} is empty)`), []
+            return [{ name: r.name, type, value, ...(r.datatype && { datatype: r.datatype }), ...(r.default && { default: r.default }) }]
           })
         const cm = { type: 'contentModifier', ...(name && { name }) }
         const headers = rows(s.headers, 'header')
@@ -242,15 +206,20 @@ async function importIflow(buffer, { fileName, packageId }) {
           ...(was.length ? [`Parameter defaults used: ${[...new Set(was)].join('; ')}`] : [])
         ]
         if (notes_.length) cm.description = truncate(notes_.join('. '), 500)
-        const out = []
-        if (xpaths.length) {
-          const fileName = uniqueFile(`xpath_${identifier(s.name, 'values')}`, 50)
-          attachments[`${fileName}.groovy`] = xpathGroovy(s.name || 'Content Modifier', xpaths)
-          out.push({ type: 'groovyScript', name: `${name || 'Content Modifier'} XPath`, description: `XPath values of ${s.name || 'the Content Modifier'}, set in Groovy (generated on import)`, fileName })
-          notes.push(`${s.name || 'A Content Modifier'}: ${xpaths.length} XPath value(s) moved into the generated script ${fileName}.groovy, which runs before it`)
+        return [cm]
+      }
+      case 'writeVariables': {
+        if (inException) return [placeholder(name, `Write Variables ${label}: ${s.variables.map((v) => `${v.name} = ${v.value} (${v.type})`).join(', ')} (not supported in the exception subprocess)`)]
+        const variables = s.variables.filter((v) => cpiValues.WV_TYPES.includes(v.type) && /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/.test(v.name || '') && v.value)
+        if (!variables.length) return [placeholder(name, `Write Variables ${label}: ${s.variables.map((v) => `${v.name} (${v.type})`).join(', ')}`)]
+        const step = {
+          type: 'writeVariables',
+          ...(name && { name }),
+          variables: variables.map((v) => ({ name: v.name, type: v.type, value: v.value, ...(v.datatype && { datatype: v.datatype }), ...(v.global && { global: true }) }))
         }
-        if (headers.length || properties.length || cm.body || dropped.length || !xpaths.length) out.push(cm)
-        return out
+        const left = s.variables.filter((v) => !variables.includes(v))
+        if (left.length) step.description = truncate(`Add in the CPI web editor: ${left.map((v) => `variable ${v.name} (type ${v.type})`).join('; ')} (not supported by the spec)`, 500)
+        return [step]
       }
       case 'groovyScript': {
         const file = (parsed.scripts || []).find((f) => f.fileName === `${s.fileName}.groovy`)
@@ -309,8 +278,10 @@ async function importIflow(buffer, { fileName, packageId }) {
   const t = parsed.trigger || {}
   let trigger
   if (t.type === 'timer') {
-    trigger = { type: 'timer', mode: 'once' }
-    if (t.mode !== 'once') notes.push('Trigger: the timer schedule became "run once after deployment"; set the schedule in the CPI web editor')
+    // every N minutes stays when N is a value of the reference exports; any other schedule becomes run once
+    const every = t.mode === 'every' && !cpiValues.checkValues('Timer', cpiValues.timerValues(t), 'trigger').errors.length
+    trigger = every ? { type: 'timer', mode: 'every', minutes: t.minutes } : { type: 'timer', mode: 'once' }
+    if (t.mode !== 'once' && !every) notes.push('Trigger: the timer schedule became "run once after deployment"; set the schedule in the CPI web editor')
   } else if (t.type === 'httpsSender') {
     const address = '/' + String(t.address || '').split('/').map((seg) => seg.replace(/[^A-Za-z0-9_.~-]/g, '-')).filter(Boolean).join('/')
     trigger = { type: 'httpsSender', address: address === '/' ? fallbackAddress : address }
@@ -415,4 +386,4 @@ async function importIflow(buffer, { fileName, packageId }) {
   return { spec, attachments, notes, placeholders, valid, errors }
 }
 
-module.exports = { importIflow, xpathGroovy }
+module.exports = { importIflow }

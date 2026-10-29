@@ -104,18 +104,20 @@ At most ${MAX_STEPS_PER_EDIT} steps per call. Returns the outline and open error
 /** The spec format in short (getSupportedSteps); test/agent.test.js keeps it in line with spec-schema.json */
 const SPEC_FORMAT = {
   spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50), end, exceptionSubprocess?, parameters?, resources? }',
-  trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "timer", "mode": "once" }'],
+  trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
   steps: {
-    contentModifier: '{ type, name?, description?, headers?: [entry], properties?: [entry], body?: string }; entry = { name, type: "constant"|"expression", value, datatype? }',
+    contentModifier:
+      '{ type, name?, description?, headers?: [entry], properties?: [entry], body?: string }; entry = { name, type: constant|expression|header|property|xpath|globalVariable|localVariable, value (a constant may be "{{Param}}"), datatype? (xpath: default java.lang.String), default? (the Default Value column, only when asked for explicitly) }',
     groovyScript: '{ type, name?, description?, fileName } — code written with writeScript (or attached), never in the spec',
     jsonToXml: '{ type, name?, description? }',
     xmlToJson: '{ type, name?, description? }',
+    writeVariables: '{ type, name?, description?, variables: [{ name, type: property|xpath, value, datatype? (xpath), global? (Global Scope, default false) }] } — main flow only',
     requestReplyHttp:
       '{ type, name?, description?, system?, url: "https://…" | "{{Param}}", method: GET|POST|PUT|PATCH|DELETE, authType: None|Basic|"OAuth2 Client Credentials", credentialName? (deployed credential name or "{{Param}}", never a secret; required unless None), proxyType?: Internet|On-Premise, locationId? (On-Premise only; name or "{{Param}}"), timeout? (ms, default 60000) }'
   },
   end: ['{ "type": "none" }', '{ "type": "httpReceiver", system?, url, method, authType, credentialName?, proxyType?, locationId?, timeout? } (as requestReplyHttp)'],
   exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson }',
-  parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId "{{Name}}"',
+  parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId, or a constant header/property value "{{Name}}"',
   resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
   names: 'id: letters, digits, _ · packageId: letters, digits, dots (a Name with _ or spaces is turned into the ID) · fileName, system: letter first, then letters, digits, _ · step names unique'
 }
@@ -470,7 +472,7 @@ const handlers = {
         'exceptionSubprocess runs when a step fails; its result is returned to the HTTPS sender. ${exception.message} holds the error text; set header CamelHttpResponseCode to return an HTTP error status.',
         'To change an existing iFlow: getIflowSpec, change the spec, proposeIflowUpdate. Never use proposeIflow with an existing id.',
         'HTTP receivers: authType None, Basic or OAuth2 Client Credentials with credentialName (the name of deployed security material, never a password); proxyType Internet or On-Premise (locationId optional); timeout in ms.',
-        'Externalized parameters ({{Name}}) are only supported as the whole url, credentialName or locationId of an HTTP receiver; define each in "parameters".',
+        'Externalized parameters ({{Name}}) are only supported as the whole url, credentialName or locationId of an HTTP receiver, or as a constant header/property value; define each in "parameters".',
         'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).',
         'Write every Groovy script with writeScript (plain code), then reference it in the spec by fileName without code; never put Groovy code into a spec.',
         'Send the complete spec in one proposeIflow call (it validates). Only when an answer was cut off for length: build the draft with editDraftSpec (set, then addSteps with at most 8 steps per call) and propose { useDraftSpec: true }; fix single steps with replaceStep.'

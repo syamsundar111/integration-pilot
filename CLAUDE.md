@@ -54,8 +54,10 @@ configurations → optional deploy + runtime polling. It runs in-process in the 
 step is safe to re-run (`retry`). Updates keep a backup zip for `restore`. All writes go to the audit log (`srv/lib/audit.js`).
 Because turns and approvals live in the process, the backend must stay at **`instances: 1`** (enforced by `test/repo-hygiene.test.js`).
 
-**iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender | timer once),
-linear steps (contentModifier, groovyScript, jsonToXml, xmlToJson, requestReplyHttp, …) and an end (httpReceiver | none).
+**iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender |
+timer once | timer every N minutes), linear steps (contentModifier, groovyScript, writeVariables, jsonToXml, xmlToJson,
+requestReplyHttp) and an end (httpReceiver | none). Spec values that CPI stores differently are mapped in `cpi-values.js`
+(Content Modifier sources, Write Variables, timer schedules) and `receiver-settings.js` (HTTP receivers).
 - `validator.js`: the schema plus rules. It returns human-readable errors meant for the LLM to fix.
 - `builder.js`: spec → CPI zip, using `templates/`. The templates are derived by `derive-templates.js` from the exported zips in
   `reference/`, which are the **source of truth**. Never hand-write or guess CPI XML; extend the reference exports and re-derive.

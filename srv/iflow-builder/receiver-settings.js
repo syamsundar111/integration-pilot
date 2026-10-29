@@ -4,7 +4,7 @@
  * reference exports (templates/reference-values.json); credentials are names of deployed security
  * material only, never secrets.
  */
-const REFERENCE_VALUES = require('./templates/reference-values.json')
+const { checkValues } = require('./cpi-values')
 
 const AUTH_TYPES = ['None', 'Basic', 'OAuth2 Client Credentials'] // stored as they are
 const PROXY_TYPES = { Internet: 'default', 'On-Premise': 'sapcc' } // spec value -> stored value
@@ -46,22 +46,12 @@ function fromCpi(p = {}) {
 }
 
 /**
- * The stored values of a call checked against the reference exports: { errors, warnings }. A value no
- * reference contains is an error; one that only one receiver in the references uses, and that nobody
- * re-selected in the CPI editor (confirmed), is a warning.
+ * The stored values of a call checked against the reference exports (cpi-values.js): { errors, warnings }
  * @param {object} [values] - reference-values.json, for tests
  */
-function checkAgainstReferences(call, where, values = REFERENCE_VALUES) {
-  const errors = []
-  const warnings = []
+function checkAgainstReferences(call, where, values) {
   const stored = toCpi(call)
-  for (const [key, seen] of Object.entries(values[ADAPTER] || {})) {
-    const entry = seen[stored[key]]
-    if (!entry) errors.push(`${where}: ${key} '${stored[key]}' is in no reference export (known: ${Object.keys(seen).join(', ')})`)
-    else if (entry.references.length === 1 && !entry.confirmed)
-      warnings.push(`${where}: ${key} '${stored[key]}' is seen in only one reference export (${entry.references[0]}) and not yet confirmed in the CPI editor`)
-  }
-  return { errors, warnings }
+  return checkValues(ADAPTER, [['authenticationMethod', stored.authenticationMethod], ['proxyType', stored.proxyType]], where, values)
 }
 
 module.exports = { AUTH_TYPES, PROXY_TYPES, DEFAULT_TIMEOUT, toCpi, fromCpi, checkAgainstReferences }

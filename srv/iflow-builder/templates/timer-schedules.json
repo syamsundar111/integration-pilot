@@ -1,0 +1,4 @@
+{
+  "once": "simple.repeat=NONE&amp;amp;trigger.timeZone=Etc/GMT",
+  "everyMinutes": "simple.repeat=MINUTES&amp;amp;simple.every={{MINUTES}}&amp;amp;trigger.timeZone=Etc/GMT"
+}

@@ -69,7 +69,7 @@ describe('exception subprocess: validator', () => {
 
   test('no secrets and no {{parameters}} in the subprocess', () => {
     const errors = errorsOf(
-      orderSpec({ exceptionSubprocess: { steps: [{ type: 'contentModifier', headers: [{ name: 'Password', type: 'constant', value: 'x' }, { name: 'X', type: 'constant', value: '{{Url}}' }] }] } })
+      orderSpec({ exceptionSubprocess: { steps: [{ type: 'contentModifier', headers: [{ name: 'Password', type: 'constant', value: 'x' }, { name: 'X', type: 'expression', value: '{{Url}}' }] }] } })
     ).join('\n')
     expect(errors).toMatch(/exceptionSubprocess\.steps\[0\]\.headers\[0\]: 'Password' looks like a secret/)
     expect(errors).toMatch(/exceptionSubprocess\.steps\[0\]\.headers\[1\]\.value: parameters/)

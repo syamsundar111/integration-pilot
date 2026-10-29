@@ -121,3 +121,112 @@ describe('allowed values (templates/reference-values.json)', () => {
     expect(await referenceValues()).toEqual(require('../srv/iflow-builder/templates/reference-values.json'))
   })
 })
+
+/** Properties of the element (step or start event) named `name` in a built or reference ZIP, without ids and versions */
+async function elementProps(zipBuffer, name) {
+  const zip = await JSZip.loadAsync(zipBuffer)
+  const iflw = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+  const element = iflw.match(new RegExp(`<bpmn2:(callActivity|startEvent) id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:\\1>`))[0]
+  return Object.fromEntries(
+    [...element.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].filter((m) => !/^(cmdVariantUri|componentVersion)$/.test(m[1])).map((m) => [m[1], m[2] ?? ''])
+  )
+}
+
+describe('Ref_Variables: Content Modifier sources and Write Variables (phase 1a)', () => {
+  // test/reference-prompts/Ref_Variables.txt
+  const spec = {
+    id: 'Ref_Variables',
+    name: 'Ref_Variables',
+    packageId: 'PilotReference',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [
+      {
+        type: 'contentModifier',
+        name: 'CM_SetBody',
+        headers: [{ name: 'DummyHeader', type: 'constant', value: 'H1', datatype: 'java.lang.String' }],
+        properties: [{ name: 'inputProp', type: 'constant', value: 'P1', datatype: 'java.lang.String' }],
+        body: '<root><value>42</value></root>'
+      },
+      {
+        type: 'contentModifier',
+        name: 'CM_ReadSources',
+        properties: [
+          { name: 'p_global', type: 'globalVariable', value: 'DUMMY_GLOBAL_VAR' },
+          { name: 'p_local', type: 'localVariable', value: 'DUMMY_LOCAL_VAR' },
+          { name: 'p_header', type: 'header', value: 'DummyHeader' },
+          { name: 'p_property', type: 'property', value: 'inputProp' },
+          { name: 'p_xpath', type: 'xpath', value: '/root/value', datatype: 'java.lang.String' },
+          { name: 'p_constant', type: 'constant', value: 'ABC' },
+          { name: 'p_expr', type: 'expression', value: '${date:now:yyyy-MM-dd HH:mm:ss}' },
+          { name: 'p_param', type: 'constant', value: '{{DummyParam}}', default: 'default-value' }
+        ]
+      },
+      {
+        type: 'writeVariables',
+        name: 'WV_Variables',
+        variables: [
+          { name: 'DUMMY_GLOBAL_VAR', type: 'property', value: 'p_constant', global: true },
+          { name: 'DUMMY_LOCAL_VAR', type: 'xpath', value: '/root/value', datatype: 'java.lang.String' }
+        ]
+      }
+    ],
+    end: { type: 'none' },
+    parameters: { DummyParam: 'dummy-value' }
+  }
+  const NAMES = ['CM_SetBody', 'CM_ReadSources', 'WV_Variables']
+
+  let builtZip, built, reference
+  beforeAll(async () => {
+    builtZip = Buffer.from((await build(spec)).zipBase64, 'base64')
+    built = await parse(builtZip)
+    reference = await parse(readRef('Ref_Variables.zip'))
+  })
+
+  test('the parsed steps are the same: every row with its source, value, default and data type', () => {
+    const steps = (p) => p.steps.filter((s) => NAMES.includes(s.name)).map(({ id, ...rest }) => rest)
+    expect(steps(built)).toEqual(steps(reference))
+    expect(built.parameters.DummyParam).toBe(reference.parameters.DummyParam)
+  })
+
+  test('every property of the three steps is as in the reference (tables included)', async () => {
+    for (const name of NAMES) expect([name, await elementProps(builtZip, name)]).toEqual([name, await elementProps(readRef('Ref_Variables.zip'), name)])
+  })
+
+  test('the spec validates without errors or warnings it should not have', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors }).toEqual({ valid: true, errors: [] })
+    // every value is in the references and confirmed (confirmed-values.json)
+    expect(warnings).toEqual([])
+  })
+})
+
+describe('Ref_Router_Ends: Timer start every 15 minutes (phase 1a; the routers follow in 1b)', () => {
+  const spec = {
+    id: 'Ref_Router_Ends',
+    name: 'Ref_Router_Ends',
+    packageId: 'PilotReference',
+    trigger: { type: 'timer', mode: 'every', minutes: 15 },
+    steps: [{ type: 'contentModifier', name: 'CM_SetInput', properties: [{ name: 'routeKey', type: 'constant', value: 'A' }] }],
+    end: { type: 'none' }
+  }
+  const schedule = (props) => Object.fromEntries([...props.scheduleKey.replace(/&lt;/g, '<').replace(/&gt;/g, '>').matchAll(/<row><cell>([^<]*)<\/cell><cell>([^<]*)<\/cell><\/row>/g)].map((m) => [m[1], m[2]]))
+
+  test('parsed as every 15 minutes, like the reference', async () => {
+    const built = await parse((await build(spec)).zipBase64)
+    const reference = await parse(readRef('Ref_Router_Ends.zip'))
+    expect(built.trigger).toEqual({ ...reference.trigger, name: built.trigger.name })
+    expect(built.trigger).toMatchObject({ type: 'timer', mode: 'every', minutes: 15 })
+  })
+
+  test('the timer properties and the stored schedule are as in the reference', async () => {
+    const built = await elementProps(Buffer.from((await build(spec)).zipBase64, 'base64'), 'Start Timer 1')
+    const reference = await elementProps(readRef('Ref_Router_Ends.zip'), 'Timer 1')
+    const { scheduleKey: a, ...builtRest } = built
+    const { scheduleKey: b, ...referenceRest } = reference
+    expect(builtRest).toEqual(referenceRest)
+    // the newer scheduler's setting is schedule1; the older clock fields keep the template's values
+    const [s1, s2] = [schedule(built), schedule(reference)]
+    expect(s1.schedule1).toBe(s2.schedule1)
+    expect(Object.keys(s1).sort()).toEqual(Object.keys(s2).sort())
+  })
+})

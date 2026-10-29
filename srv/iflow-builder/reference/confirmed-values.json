@@ -7,5 +7,34 @@
     "proxyType": {
       "sapcc": "On-Premise, re-selected in Ref_Receivers (RR_OnPrem), 2026-10-29"
     }
+  },
+  "Content Modifier": {
+    "sourceType": {
+      "global persisted variables": "Global Variable, re-selected in Ref_Variables (CM_ReadSources p_global), 2026-10-28",
+      "persisted variables": "Local Variable, re-selected in Ref_Variables (CM_ReadSources p_local), 2026-10-28",
+      "header": "re-selected in Ref_Variables (CM_ReadSources p_header); confirmed in the tenant check of phase 1a, 2026-10-29",
+      "property": "re-selected in Ref_Variables (CM_ReadSources p_property); confirmed in the tenant check of phase 1a, 2026-10-29"
+    }
+  },
+  "Write Variables": {
+    "type": {
+      "property": "re-selected in Ref_Variables (WV_Variables DUMMY_GLOBAL_VAR), 2026-10-29",
+      "xpath": "re-selected in Ref_Variables (WV_Variables DUMMY_LOCAL_VAR), 2026-10-29"
+    },
+    "scope": {
+      "global": "Global Scope checked, Ref_Variables (DUMMY_GLOBAL_VAR), 2026-10-29",
+      "local": "Global Scope unchecked, Ref_Variables (DUMMY_LOCAL_VAR), 2026-10-29"
+    },
+    "datatype": {
+      "java.lang.String": "XPath data type, Ref_Variables (DUMMY_LOCAL_VAR); confirmed in the tenant check of phase 1a, 2026-10-29"
+    }
+  },
+  "Timer": {
+    "repeat": {
+      "MINUTES": "Simple Schedule, Repeat Minutes, re-selected in Ref_Router_Ends (Timer 1), 2026-10-29"
+    },
+    "every": {
+      "15": "Every 15, re-selected in Ref_Router_Ends (Timer 1), 2026-10-29"
+    }
   }
 }

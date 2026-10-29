@@ -30,7 +30,11 @@ describe('fidelity with Reference_AllSteps.zip', () => {
     ref = await referenceFiles('Reference_AllSteps.zip')
     gen = await unzip((await build(await allStepsSpec(), { now: NOW })).zipBase64)
     const iflw = 'src/main/resources/scenarioflows/integrationflow/Reference_AllSteps.iflw'
-    refDoc = parseXml(ref[iflw])
+    // one intended difference: the reference stores its plain body ({"hello":"world"}) with Body Type
+    // "expression"; the builder writes "constant" unless the body contains ${...} (the CPI editor warns about
+    // an expression without parameters; Ref_Variables stores a plain body as constant)
+    expect(ref[iflw].match(/<key>bodyType<\/key>\s*<value>expression<\/value>/g)).toHaveLength(1)
+    refDoc = parseXml(ref[iflw].replace(/(<key>bodyType<\/key>\s*<value>)expression(<\/value>)/, '$1constant$2'))
     genDoc = parseXml(gen[iflw])
   })
 

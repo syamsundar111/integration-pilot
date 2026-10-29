@@ -164,6 +164,8 @@ describe('system prompt: patterns loaded on demand (review item 6)', () => {
     expect(flat).toMatch(/v1 cannot build ProcessDirect; the HTTPS workaround is public and needs authentication/)
     expect(flat).toMatch(/To update, change, extend or fix an existing iFlow, first call `getPattern` with `updateIflow`/)
     expect(flat).toMatch(/Never call `proposeIflow` for an iFlow that already exists, and never list the changes yourself/)
+    // phase 1a tenant check: "with default value X" on a {{Param}} filled the Default Value column too
+    expect(flat).toMatch(/For a `\{\{Param\}\}`, "default value" \/ "default" means the parameter's value in `parameters`\. Set a row's `default` \(the Content Modifier's Default Value column\) only when the user asks for that column explicitly/)
     // "okay" to a suggested name is an answer: the name is not asked again
     expect(flat).toMatch(/If the user agrees to a suggested name \("okay", "yes", "create a new one"\), use that name and the id it gives \(`Order_Intake_2`\) at once; do not ask for the name again/)
     expect(flat).toMatch(/Before proposing or changing it, call `getPattern` with `importedIflow`/)

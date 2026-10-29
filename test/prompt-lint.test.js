@@ -30,7 +30,7 @@ describe('prompt linter', () => {
   test('unsupported step kinds, ignoring quoted text', () => {
     const w = lint('Build an iFlow on a timer in package P: use a router, then a General Splitter, an XSLT, a message mapping and an SFTP receiver, a Write Variables step and a Process Call. No auth.')
     expect(keys(w)).toEqual(['unsupported'])
-    expect(w[0].message).toMatch(/router, splitter, XSLT, mapping, SFTP, write variables, process call/)
+    expect(w[0].message).toMatch(/router, splitter, XSLT, mapping, SFTP, process call/) // Write Variables is supported (phase 1a)
     expect(w[0].message).toMatch(/Attach the .xsl file/)
     expect(lint('Build an iFlow on a timer in package P that sets property Kind = "router mapping". No auth.')).toEqual([])
     expect(keys(lint('Add a multicast after step 2, then gather and join the branches'))).toEqual(['unsupported'])
@@ -96,7 +96,7 @@ describe('prompt linter', () => {
       expect(lint('Build an iFlow on a timer in package P, no router and no SFTP, no auth.')).toEqual([])
       // a new clause ends the negation
       const w = lint('Build an iFlow on a timer in package P without a router, but add a splitter. No auth.')
-      expect(w.map((x) => x.message)).toEqual([expect.stringMatching(/Not supported in v1: splitter\./)])
+      expect(w.map((x) => x.message)).toEqual([expect.stringMatching(/Not supported yet: splitter\./)])
       expect(keys(lint('Build an iFlow on a timer in package P, no authentication, use a router.'))).toEqual(['unsupported'])
     })
 
@@ -111,7 +111,7 @@ describe('prompt linter', () => {
       // a step kind not named before is new; the ones already warned about are not repeated
       const w = lint('Add a multicast after step 2 and a router.', { history: [first] })
       expect(keys(w)).toEqual(['unsupported'])
-      expect(w[0].message).toMatch(/Not supported in v1: router, multicast\./)
+      expect(w[0].message).toMatch(/Not supported yet: router, multicast\./)
       // new {{Param}} outside a URL
       expect(keys(lint('Add header Source = {{SourceSystem}}.', { history: [first] }))).toEqual(['params'])
     })

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://iflow-pilot/spec-schema.json",
   "title": "iFlow spec v1",
-  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Router, splitter and mapping are not supported in v1. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
+  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Router, splitter and mapping are not supported yet. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver, and as a constant header or property value. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
   "type": "object",
   "required": [
     "id",
@@ -225,8 +225,16 @@
           "const": "timer"
         },
         "mode": {
-          "const": "once",
-          "description": "Run once after deployment (only mode in v1)."
+          "enum": [
+            "once",
+            "every"
+          ],
+          "description": "once: run once after deployment; every: repeat every `minutes` minutes, all day, time zone UTC"
+        },
+        "minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "With mode every: the interval in minutes (only values in the reference exports, e.g. 15)"
         }
       }
     },
@@ -246,16 +254,26 @@
         "type": {
           "enum": [
             "constant",
-            "expression"
+            "expression",
+            "header",
+            "property",
+            "xpath",
+            "globalVariable",
+            "localVariable"
           ],
-          "description": "constant value, or Camel simple expression like ${header.X}"
+          "description": "Source of the value: constant; Camel simple expression like ${header.X}; header, property, global or local variable (value = its name); xpath (value = the XPath, datatype defaults to java.lang.String)"
         },
         "value": {
-          "type": "string"
+          "type": "string",
+          "description": "The value; for a constant also a whole {{Parameter}} (an externalized value, defined in parameters)"
         },
         "datatype": {
           "type": "string",
-          "description": "Optional Java type, e.g. java.lang.String"
+          "description": "Optional Java type, e.g. java.lang.String (default for xpath)"
+        },
+        "default": {
+          "type": "string",
+          "description": "Optional: the Content Modifier's Default column"
         }
       }
     },
@@ -316,6 +334,65 @@
           "type": "string",
           "minLength": 1,
           "description": "Groovy source. Omit it when <fileName>.groovy is an attached file."
+        }
+      }
+    },
+    "writeVariables": {
+      "type": "object",
+      "required": [
+        "type",
+        "variables"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "writeVariables"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "variables": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "type",
+              "value"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,99}$",
+                "description": "Variable name"
+              },
+              "type": {
+                "enum": [
+                  "property",
+                  "xpath"
+                ],
+                "description": "property: value = an exchange property name; xpath: value = the XPath"
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1
+              },
+              "datatype": {
+                "type": "string",
+                "description": "For xpath: Java type, default java.lang.String"
+              },
+              "global": {
+                "type": "boolean",
+                "description": "Global Scope: visible to all iFlows of the tenant (default false: this iFlow only)"
+              }
+            }
+          }
         }
       }
     },
@@ -460,7 +537,8 @@
             "groovyScript",
             "jsonToXml",
             "xmlToJson",
-            "requestReplyHttp"
+            "requestReplyHttp",
+            "writeVariables"
           ]
         }
       },
@@ -523,6 +601,18 @@
           },
           "then": {
             "$ref": "#/definitions/requestReplyHttp"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "writeVariables"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/writeVariables"
           }
         }
       ]

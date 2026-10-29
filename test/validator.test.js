@@ -33,7 +33,7 @@ describe('validator', () => {
   test('rejects unknown step, trigger and end types', () => {
     const errors = errorsOf(baseSpec({ steps: [{ type: 'magic' }], trigger: { type: 'sftp' }, end: { type: 'mail' } })).join('\n')
     expect(errors).toMatch(/steps\[0\]: unknown step type 'magic'/)
-    expect(errors).toMatch(/trigger: 'sftp' is not supported in v1/)
+    expect(errors).toMatch(/trigger: 'sftp' is not supported yet/)
     expect(errors).toMatch(/end: 'mail' is not supported in v1/)
   })
 
@@ -67,6 +67,30 @@ describe('validator', () => {
     const spec = baseSpec({ steps: [{ type: 'jsonToXml', name: 'JSON to XML Converter 1' }, { type: 'jsonToXml' }] })
     expect(errorsOf(spec)).toEqual([])
     expect(effectiveNames(spec).steps).toEqual(['JSON to XML Converter 1', 'JSON to XML Converter 2'])
+  })
+
+  describe('phase 1a: timer every N minutes, Content Modifier sources, Write Variables', () => {
+    test('a timer every N minutes needs minutes, and only intervals of the reference exports', () => {
+      expect(errorsOf(baseSpec({ trigger: { type: 'timer', mode: 'every', minutes: 15 } }))).toEqual([])
+      expect(errorsOf(baseSpec({ trigger: { type: 'timer', mode: 'every' } }))).toEqual(["trigger: missing required field 'minutes' (the interval of mode every)"])
+      expect(errorsOf(baseSpec({ trigger: { type: 'timer', mode: 'every', minutes: 5 } }))).toEqual(["trigger: every '5' is in no reference export (known: 15)"])
+      expect(errorsOf(baseSpec({ trigger: { type: 'timer', mode: 'once', minutes: 15 } }))).toEqual(['trigger.minutes: only used with mode every — remove it, or set mode "every"'])
+    })
+
+    test('Content Modifier sources: header, property, xpath, global and local variable; unknown types are refused', () => {
+      const cm = (type) => baseSpec({ steps: [{ type: 'contentModifier', properties: [{ name: 'p', type, value: 'X' }] }] })
+      for (const type of ['header', 'property', 'xpath', 'globalVariable', 'localVariable']) expect([type, errorsOf(cm(type))]).toEqual([type, []])
+      expect(errorsOf(cm('numberRange'))).toEqual([expect.stringMatching(/^steps\[0\]\.properties\[0\]\.type: must be one of constant, expression, header, property, xpath, globalVariable, localVariable/)])
+    })
+
+    test('Write Variables: property or xpath, in the main flow only', () => {
+      const wv = { type: 'writeVariables', variables: [{ name: 'LAST_RUN', type: 'property', value: 'runTimestamp', global: true }] }
+      expect(errorsOf(baseSpec({ steps: [wv] }))).toEqual([])
+      expect(errorsOf(baseSpec({ steps: [{ ...wv, variables: [{ name: 'A', type: 'constant', value: 'x' }] }] }))).toEqual(['steps[0].variables[0].type: must be one of property, xpath'])
+      expect(errorsOf(baseSpec({ steps: [{ ...wv, variables: [] }] }))).toEqual([expect.stringMatching(/^steps\[0\]\.variables: must NOT have fewer than 1 items/)])
+      const inException = errorsOf(baseSpec({ exceptionSubprocess: { steps: [wv] } }))
+      expect(inException).toEqual([expect.stringMatching(/^exceptionSubprocess\.steps\[0\]: 'writeVariables' is not supported in the exception subprocess/)])
+    })
   })
 
   describe('HTTP receivers: authentication, proxy and timeout', () => {
@@ -112,8 +136,8 @@ describe('validator', () => {
       expect(checkAgainstReferences({ authType: 'Basic', credentialName: 'C', proxyType: 'On-Premise' }, 'end', values)).toEqual({
         errors: [],
         warnings: [
-          "end: proxyType 'sapcc' is seen in only one reference export (A) and not yet confirmed in the CPI editor",
-          "end: authenticationMethod 'Basic' is seen in only one reference export (A) and not yet confirmed in the CPI editor"
+          "end: authenticationMethod 'Basic' is seen in only one reference export (A) and not yet confirmed in the CPI editor",
+          "end: proxyType 'sapcc' is seen in only one reference export (A) and not yet confirmed in the CPI editor"
         ]
       })
       values['HTTP Receiver'].proxyType.sapcc.confirmed = 'test'
@@ -139,8 +163,11 @@ describe('validator', () => {
     const undefinedParam = baseSpec({ end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'None' } })
     expectError(undefinedParam, /end\.url: parameter 'Missing' is referenced but not defined/)
 
-    const wrongPlace = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'constant', value: '{{P}}' }] }], parameters: { P: 'v' } })
-    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
+    // a constant header or property may be a whole parameter (an externalized value); an expression may not
+    const constantValue = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'constant', value: '{{P}}' }] }], parameters: { P: 'v' } })
+    expect(errorsOf(constantValue)).toEqual([])
+    const wrongPlace = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'expression', value: '{{P}}' }] }], parameters: { P: 'v' } })
+    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, or as a constant value/)
 
     const senderParam = baseSpec({ trigger: { type: 'httpsSender', address: '{{Path}}' }, parameters: { Path: '/x' } })
     expectError(senderParam, /trigger\.address: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
@@ -154,7 +181,7 @@ describe('validator', () => {
     const spec = baseSpec({
       steps: [
         { type: 'contentModifier', name: 'A' },
-        { type: 'contentModifier', name: 'A', headers: [{ name: 'X', type: 'xpath', value: '/a' }] },
+        { type: 'contentModifier', name: 'A', headers: [{ name: 'X', type: 'numberRange', value: '/a' }] },
         { type: 'router' },
         ...Array.from({ length: 49 }, () => ({ type: 'jsonToXml' }))
       ],
@@ -183,7 +210,7 @@ describe('validator', () => {
   test('{{…}} in a step description is documentation, not a parameter', () => {
     const spec = baseSpec({ steps: [{ type: 'contentModifier', name: 'Note', description: 'Manual: schedule {{Scheduler}} every 2 minutes' }] })
     expect(validate(spec).errors).toEqual([])
-    const inValue = baseSpec({ steps: [{ type: 'contentModifier', name: 'Note', headers: [{ name: 'X', type: 'constant', value: '{{Scheduler}}' }] }] })
+    const inValue = baseSpec({ steps: [{ type: 'contentModifier', name: 'Note', headers: [{ name: 'X', type: 'expression', value: '{{Scheduler}}' }] }] })
     expect(validate(inValue).issues.map((i) => i.code)).toEqual(['PARAM_NOT_URL'])
   })
 })

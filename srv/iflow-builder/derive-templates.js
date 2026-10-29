@@ -70,28 +70,57 @@ function apply(text, label, { attrs = {}, props = {}, texts = [] } = {}) {
   return text
 }
 
-// Dropdown fields whose values the builder writes: per adapter (matched by its cmdVariantUri), the
-// property keys. Only values seen in the reference exports are allowed (validator), see referenceValues().
+// Dropdown fields whose values the builder writes, per component: the component's elements (matched by
+// cmdVariantUri) and its (field, value) pairs. Only values seen in the reference exports are allowed
+// (validator), see referenceValues().
+const unescape = (v) => String(v || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+const tableRows = (v) => [...unescape(v).matchAll(/<row>(.*?)<\/row>/g)].map((r) => [...r[1].matchAll(/<cell(?: id='([^']*)')?>([^<]*)<\/cell>/g)].map((c) => ({ id: c[1], value: c[2] })))
 const VALUE_FIELDS = {
-  'HTTP Receiver': { variant: /cname::(?:sap:)?HTTP\/tp::HTTP\/mp::None\/direction::Receiver\//, keys: ['authenticationMethod', 'proxyType'] }
+  'HTTP Receiver': {
+    variant: /cname::(?:sap:)?HTTP\/tp::HTTP\/mp::None\/direction::Receiver\//,
+    values: (p) => [['authenticationMethod', p.authenticationMethod], ['proxyType', p.proxyType]]
+  },
+  // header and property rows: source type, and the data type when one is set
+  'Content Modifier': {
+    variant: /cname::Enricher\//,
+    values: (p) =>
+      [...tableRows(p.headerTable), ...tableRows(p.propertyTable)].flatMap((cells) => {
+        const cell = (id) => cells.find((c) => c.id === id)?.value ?? ''
+        return [['sourceType', cell('Type')], ...(cell('Datatype') ? [['datatype', cell('Datatype')]] : [])]
+      })
+  },
+  // variable rows: name, data type, type, value, scope
+  'Write Variables': {
+    variant: /cname::Variables\//,
+    values: (p) => tableRows(p.variable).flatMap((c) => [['type', c[2]?.value], ['scope', c[4]?.value], ...(c[1]?.value ? [['datatype', c[1].value]] : [])])
+  },
+  // the schedule of a timer start: repeat (NONE, MINUTES, ...) and, when repeating, the interval
+  Timer: {
+    variant: /cname::intermediatetimer\//,
+    values: (p) => {
+      const schedule = unescape(Object.fromEntries(tableRows(p.scheduleKey).map((c) => [c[0]?.value, c[1]?.value])).schedule1)
+      const get = (k) => schedule.match(new RegExp(`(?:^|&)${k.replace('.', '\\.')}=([^&]*)`))?.[1]
+      return [['repeat', get('simple.repeat')], ['every', get('simple.every')], ['timeZone', get('trigger.timeZone')]].filter(([, v]) => v != null)
+    }
+  }
 }
 
 /**
  * The values of VALUE_FIELDS in all reference exports:
- * { adapter: { key: { value: { references: [reference, ...], confirmed?: note } } } }, one reference
- * entry per message flow that uses the value. confirmed comes from reference/confirmed-values.json
- * (re-selected in the CPI editor); an unconfirmed value seen once is a warning in the validator.
+ * { component: { field: { value: { references: [reference, ...], confirmed?: note } } } }, one reference
+ * entry per use of the value. confirmed comes from reference/confirmed-values.json (re-selected in the
+ * CPI editor); an unconfirmed value seen once is a warning in the validator.
  */
 async function referenceValues() {
-  const out = Object.fromEntries(Object.entries(VALUE_FIELDS).map(([a, { keys }]) => [a, Object.fromEntries(keys.map((k) => [k, {}]))]))
+  const out = Object.fromEntries(Object.keys(VALUE_FIELDS).map((c) => [c, {}]))
   for (const file of fs.readdirSync(REF_DIR).filter((f) => f.endsWith('.zip')).sort()) {
     const { iflw } = await readZip(file)
     if (!iflw) continue // e.g. a Message Mapping artifact
-    for (const [flow] of iflw.matchAll(/<bpmn2:messageFlow\b[\s\S]*?<\/bpmn2:messageFlow>/g)) {
-      const values = Object.fromEntries([...flow.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
-      for (const [adapter, { variant, keys }] of Object.entries(VALUE_FIELDS)) {
-        if (!variant.test(values.cmdVariantUri || '')) continue
-        for (const k of keys) if (k in values) (out[adapter][k][values[k]] ??= { references: [] }).references.push(file.replace(/\.zip$/, ''))
+    for (const [element] of iflw.matchAll(/<bpmn2:(messageFlow|callActivity|startEvent)\b[\s\S]*?<\/bpmn2:\1>/g)) {
+      const props = Object.fromEntries([...element.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
+      for (const [component, { variant, values }] of Object.entries(VALUE_FIELDS)) {
+        if (!variant.test(props.cmdVariantUri || '')) continue
+        for (const [field, value] of values(props)) if (value != null) ((out[component][field] ??= {})[value] ??= { references: [] }).references.push(file.replace(/\.zip$/, ''))
       }
     }
   }
@@ -164,14 +193,22 @@ async function main() {
   t['iflw/start-message.xml'] = apply(block(x, 'id="StartEvent_2"'), 'start-message', {
     attrs: { 'id="StartEvent_2"': 'id="{{ID}}"', 'name="Start"': 'name="{{NAME}}"', '>SequenceFlow_3<': '>{{OUTGOING}}<' }
   })
+  // the schedule (scheduleKey's schedule1, stored escaped twice) is a placeholder: timer-schedules.json
+  const ONCE = 'simple.repeat=NONE&amp;amp;trigger.timeZone=Etc/GMT'
   t['iflw/start-timer.xml'] = apply(block(timer.iflw, 'id="StartEvent_4"'), 'start-timer', {
     attrs: {
       'id="StartEvent_4"': 'id="{{ID}}"',
       'name="Start Timer 1"': 'name="{{NAME}}"',
       '>SequenceFlow_8<': '>{{OUTGOING}}<',
       'id="TimerEventDefinition_21607"': 'id="{{TIMER_ID}}"'
-    }
+    },
+    texts: [[ONCE, '{{SCHEDULE}}']]
   })
+  // "every N minutes" as the newer scheduler stores it (Ref_Router_Ends: Repeat Minutes, Every 15, Etc/GMT)
+  const routerEnds = await readZip('Ref_Router_Ends.zip')
+  const every = routerEnds.iflw.match(/schedule1&lt;\/cell&gt;&lt;cell&gt;(simple\.repeat=MINUTES&amp;amp;simple\.every=)15(&amp;amp;trigger\.timeZone=Etc\/GMT)&lt;/)
+  if (!every) throw new Error('Ref_Router_Ends.zip: no "every 15 minutes" schedule')
+  t['timer-schedules.json'] = JSON.stringify({ once: ONCE, everyMinutes: `${every[1]}{{MINUTES}}${every[2]}` }, null, 2) + '\n'
   t['iflw/end-message.xml'] = apply(block(x, 'id="EndEvent_2"'), 'end-message', {
     attrs: { 'id="EndEvent_2"': 'id="{{ID}}"', 'name="End"': 'name="{{NAME}}"', '>SequenceFlow_19<': '>{{INCOMING}}<' }
   })
@@ -196,9 +233,21 @@ async function main() {
       "<cell id='Type'>constant</cell>": "<cell id='Type'>{{TYPE}}</cell>",
       "<cell id='Value'>Pilot</cell>": "<cell id='Value'>{{VALUE}}</cell>",
       "<cell id='Name'>Source</cell>": "<cell id='Name'>{{NAME}}</cell>",
+      "<cell id='Default'></cell>": "<cell id='Default'>{{DEFAULT}}</cell>",
       "<cell id='Datatype'></cell>": "<cell id='Datatype'>{{DATATYPE}}</cell>"
     }
   })
+  // Write Variables (Ref_Variables): the step, and one row of its variable table stored unescaped
+  const variables = await readZip('Ref_Variables.zip')
+  t['iflw/step-write-variables.xml'] = apply(block(variables.iflw, 'id="CallActivity_9"'), 'step-write-variables', {
+    attrs: { 'id="CallActivity_9"': 'id="{{ID}}"', 'name="WV_Variables"': 'name="{{NAME}}"', '>SequenceFlow_8<': '>{{INCOMING}}<', '>SequenceFlow_9<': '>{{OUTGOING}}<' },
+    props: { variable: 'VARIABLES_VALUE' }
+  })
+  const variableTable = variables.iflw.match(/<key>variable<\/key>\s*<value>([^<]*)<\/value>/)[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+  t['write-variables-row.xml'] = apply(variableTable.match(/<row>.*?<\/row>/g)[1], 'write-variables-row', {
+    texts: [['<cell>DUMMY_LOCAL_VAR</cell><cell>java.lang.String</cell><cell>xpath</cell><cell>/root/value</cell><cell>local</cell>', '<cell>{{NAME}}</cell><cell>{{DATATYPE}}</cell><cell>{{TYPE}}</cell><cell>{{VALUE}}</cell><cell>{{SCOPE}}</cell>']]
+  })
+
   t['iflw/step-groovy-script.xml'] = step('CallActivity_8', 'Groovy Script 1', 'SequenceFlow_6', 'SequenceFlow_14', { script: 'SCRIPT_VALUE' })
   t['iflw/step-json-to-xml.xml'] = step('CallActivity_11', 'JSON to XML Converter 1', 'SequenceFlow_14', 'SequenceFlow_12')
   t['iflw/step-xml-to-json.xml'] = step('CallActivity_15', 'XML to JSON Converter 1', 'SequenceFlow_12', 'SequenceFlow_16')

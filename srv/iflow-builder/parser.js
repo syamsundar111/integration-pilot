@@ -6,6 +6,7 @@
 const JSZip = require('jszip')
 const { DOMParser } = require('@xmldom/xmldom')
 const receiverSettings = require('./receiver-settings')
+const cpiValues = require('./cpi-values')
 
 const IFLOW_DIR = 'src/main/resources/scenarioflows/integrationflow/'
 const TEXT_EXT = /\.(iflw|groovy|gsh|js|xml|xsd|wsdl|xsl|xslt|mmap|json|edmx|prop|propdef|MF|project|txt)$/i
@@ -67,6 +68,13 @@ function unescapeProp(s) {
 }
 
 /** Rows of a Content Modifier headerTable/propertyTable (the value is escaped XML) */
+/** Rows of a table without cell ids (Write Variables, timer schedule): [[cell, ...], ...] */
+function parseCells(value) {
+  if (!value) return []
+  const doc = new DOMParser({ onError: () => {} }).parseFromString(`<rows>${value}</rows>`, 'text/xml')
+  return childrenNamed(doc.documentElement, 'row').map((row) => childrenNamed(row, 'cell').map(text))
+}
+
 function parseTable(value) {
   if (!value) return []
   const doc = new DOMParser({ onError: () => {} }).parseFromString(`<rows>${value}</rows>`, 'text/xml')
@@ -74,6 +82,7 @@ function parseTable(value) {
     const cells = Object.fromEntries(childrenNamed(row, 'cell').map((c) => [c.getAttribute('id'), text(c)]))
     const entry = { name: cells.Name, type: cells.Type, value: cells.Value, action: cells.Action }
     if (cells.Datatype) entry.datatype = cells.Datatype
+    if (cells.Default) entry.default = cells.Default
     return entry
   })
 }
@@ -139,6 +148,16 @@ function stepOf(node, adaptersBySource) {
       if (p.subActivityType === 'GroovyScript')
         return { ...base, type: 'groovyScript', fileName: (p.script || '').replace(/\.groovy$/, ''), script: p.script, function: p.scriptFunction || 'processData' }
       return { ...base, type: 'script', language: p.subActivityType, script: p.script }
+    case 'Variables': {
+      // rows: name, data type, type, value, scope; step settings (visibility, encryption, expiry) for update checks
+      const step = {
+        ...base,
+        type: 'writeVariables',
+        variables: parseCells(p.variable).map(([name, datatype, type, value, scope]) => ({ name, type, value, ...(datatype && { datatype }), global: scope === 'global' }))
+      }
+      Object.defineProperty(step, 'settings', { value: p, enumerable: false })
+      return step
+    }
     case 'ProcessCallElement':
       return { ...base, type: 'processCall', processId: p.processId || p.subProcessId || null, activityType: p.activityType }
     case 'JsonToXmlConverter':
@@ -361,7 +380,14 @@ async function parse(input) {
     const startId = startNode.getAttribute('id')
     if (timerDef) {
       const schedule = props(timerDef).scheduleKey || ''
-      trigger = { type: 'timer', name: startNode.getAttribute('name'), mode: /simple\.repeat=NONE/.test(schedule) ? 'once' : 'scheduled' }
+      // once; every N minutes in UTC (as the builder writes it); anything else is 'scheduled' with its schedule
+      const plan = cpiValues.parseSchedule(String(Object.fromEntries(parseCells(schedule).map((c) => [c[0], c[1]])).schedule1 || '').replace(/&amp;/g, '&'))
+      const every = plan.repeat === 'MINUTES' && /^\d+$/.test(plan.every || '') && plan.timeZone === cpiValues.TIME_ZONE ? Number(plan.every) : null
+      trigger = {
+        type: 'timer',
+        name: startNode.getAttribute('name'),
+        ...(plan.repeat === 'NONE' ? { mode: 'once' } : every ? { mode: 'every', minutes: every } : { mode: 'scheduled', schedule: plan })
+      }
     } else if (adaptersByTarget[startId]) {
       const a = adaptersByTarget[startId]
       trigger = a.type === 'HTTPS' ? { type: 'httpsSender', address: a.address } : { type: 'sender', adapter: a.type, address: a.address }
