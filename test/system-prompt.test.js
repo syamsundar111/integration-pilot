@@ -120,6 +120,10 @@ describe('system prompt: CPI script API imports (Test 16)', () => {
 })
 
 describe('system prompt: types (review item 3)', () => {
+  test('every XPath starts with / or // (a relative one finds nothing in CPI)', () => {
+    expect(flat).toMatch(/Every XPath \(rows, Write Variables, splitter, gather\) starts with `\/` or `\/\/`: CPI evaluates it from the document root, so `id` finds nothing/)
+  })
+
   test('constant for plain values, expression only with ${...}', () => {
     expect(flat).toMatch(/`constant` for a plain value, `expression` only when the value contains `\$\{\.\.\.\}`/)
   })

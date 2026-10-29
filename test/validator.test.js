@@ -443,3 +443,24 @@ describe('splitters, gathers, process calls and local processes (phase 2)', () =
     expectError(baseSpec({ steps: [{ type: 'exceptionSubprocess' }] }), /error handling is not a step/)
   })
 })
+
+describe('relative XPaths: a note (CPI evaluates an XPath from the document root)', () => {
+  test('rows, Write Variables, splitter and gather XPaths that do not start with / or // get a note; functions do not', () => {
+    const spec = baseSpec({
+      steps: [
+        { type: 'splitter', name: 'S', kind: 'iterating', expression: 'order', stopOnException: false },
+        { type: 'contentModifier', name: 'CM', headers: [{ name: 'orderId', type: 'xpath', value: 'id' }, { name: 'ok', type: 'xpath', value: '/order/id' }, { name: 'n', type: 'xpath', value: 'count(//item)' }] },
+        { type: 'writeVariables', name: 'WV', variables: [{ name: 'V', type: 'xpath', value: './id' }] },
+        { type: 'gather', name: 'G', source: '//order', target: 'orders' }
+      ]
+    })
+    const r = validate(spec)
+    expect(r.valid).toBe(true)
+    expect(r.warnings).toEqual([
+      "steps[0].expression: the XPath 'order' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//order'",
+      "steps[1].headers[0].value: the XPath 'id' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//id'",
+      "steps[2].variables[0].value: the XPath './id' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//id'",
+      "steps[3].target: the XPath 'orders' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//orders'"
+    ])
+  })
+})

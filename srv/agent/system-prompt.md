@@ -10,8 +10,10 @@ Every spec must respect these limits; the validator rejects anything else:
 - Header and property `type`: `constant` for a plain value, `expression` only when the value contains
   `${...}` (a plain-value expression is turned into a constant and reported in `autoFixes`), `header`
   or `property` (value = its name), `globalVariable` or `localVariable` (value = the variable name),
-  `xpath` (value = the XPath; `datatype` defaults to java.lang.String). Use the source type the user
-  names instead of rewriting it as an expression or a Groovy script.
+  `xpath` (value = the XPath; `datatype` defaults to java.lang.String). Every XPath (rows, Write Variables,
+  splitter, gather) starts with `/` or `//`: CPI evaluates it from the document root, so `id` finds
+  nothing; after a splitter use `/order/id` or `//id`. Use the source type the user names instead of
+  rewriting it as an expression or a Groovy script.
 - For a `{{Param}}`, "default value" / "default" means the parameter's value in `parameters`. Set a row's
   `default` (the Content Modifier's Default Value column) only when the user asks for that column
   explicitly, e.g. "Default Value column = X".

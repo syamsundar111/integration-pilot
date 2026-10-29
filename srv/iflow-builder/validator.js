@@ -99,6 +99,14 @@ function effectiveNames(spec) {
 }
 
 /**
+ * An XPath CPI evaluates from the document root that does not start there ('id' instead of '/order/id' or '//id'):
+ * it finds nothing at runtime. Functions like count(//order) are fine.
+ */
+const relativeXPath = (v) => typeof v === 'string' && v.trim() !== '' && !/^\s*(\/|\(|[A-Za-z][\w.-]*(:[\w-]+)?\s*\()/.test(v)
+const xpathNote = (where, v) =>
+  `${where}: the XPath '${v}' is relative; CPI evaluates it from the document root, so it finds nothing — start it with / or //, e.g. '//${v.trim().replace(/^\.\/?/, '')}'`
+
+/**
  * What is wrong with a condition, or null: NonXML reads ${...} and has spaces around the operator
  * (${property.x} = 'A', not ${property.x}='A'); XML is an XPath without ${...}
  */
@@ -497,6 +505,16 @@ function validate(spec, { attachments = [] } = {}) {
         const datatype = v.datatype || (v.type === 'xpath' ? cpiValues.DEFAULT_XPATH_DATATYPE : '')
         valueCheck('Write Variables', [['type', v.type], ['scope', cpiValues.scopeOf(v)], ...(datatype ? [['datatype', datatype]] : [])], `${where}.variables[${i}]`)
       })
+  }
+  // XPaths that do not start at the document root (Content Modifier and Write Variables rows, splitters, gathers)
+  for (const [s, where] of allSteps.filter(([x]) => isObj(x))) {
+    if (s.type === 'contentModifier')
+      for (const table of ['headers', 'properties'])
+        (Array.isArray(s[table]) ? s[table] : []).forEach((r, i) => r?.type === 'xpath' && relativeXPath(r.value) && referenceWarnings.push(xpathNote(`${where}.${table}[${i}].value`, r.value)))
+    if (s.type === 'writeVariables')
+      (Array.isArray(s.variables) ? s.variables : []).forEach((v, i) => v?.type === 'xpath' && relativeXPath(v.value) && referenceWarnings.push(xpathNote(`${where}.variables[${i}].value`, v.value)))
+    if (s.type === 'splitter' && relativeXPath(s.expression)) referenceWarnings.push(xpathNote(`${where}.expression`, s.expression))
+    if (s.type === 'gather') for (const k of ['source', 'target']) if (relativeXPath(s[k])) referenceWarnings.push(xpathNote(`${where}.${k}`, s[k]))
   }
   const warnings = [...new Set(referenceWarnings)]
   for (const [call, where] of httpCalls) {
