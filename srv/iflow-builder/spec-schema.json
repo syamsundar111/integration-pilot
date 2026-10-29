@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://iflow-pilot/spec-schema.json",
   "title": "iFlow spec v1",
-  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Router, splitter and mapping are not supported in v1. Externalized parameters ({{Name}}) are only supported as HTTP receiver URLs. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
+  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Router, splitter and mapping are not supported in v1. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
   "type": "object",
   "required": [
     "id",
@@ -355,8 +355,8 @@
         },
         "credentialName": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_.-]{1,150}$",
-          "description": "Name of the deployed security material (User Credentials or OAuth2 Client Credentials) in CPI. A name only, never a password or secret. Required unless authType is None."
+          "pattern": "^([A-Za-z0-9_.-]{1,150}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Name of the deployed security material (User Credentials or OAuth2 Client Credentials) in CPI, or a whole {{Parameter}} with the name as its default. A name only, never a password or secret. Required unless authType is None."
         },
         "proxyType": {
           "enum": [
@@ -367,8 +367,8 @@
         },
         "locationId": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_.-]{1,100}$",
-          "description": "Cloud Connector location ID; only with proxyType On-Premise, optional (empty: the default location)"
+          "pattern": "^([A-Za-z0-9_.-]{1,100}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Cloud Connector location ID, or a whole {{Parameter}}; only with proxyType On-Premise, optional (empty: the default location)"
         },
         "timeout": {
           "type": "integer",

@@ -84,7 +84,9 @@ const PATTERN_HINTS = {
   url: 'use a full http(s) URL or a whole parameter reference like {{TargetURL}}',
   address: 'use a path like /orders/create (letters, digits, - _ . ~)',
   system: 'use letters, digits and underscore only',
-  name: 'use letters, digits, dot, dash or underscore'
+  name: 'use letters, digits, dot, dash or underscore',
+  credentialName: 'use the name of the deployed credential (letters, digits, dot, dash, underscore) or a whole parameter like {{ErpCredential}}',
+  locationId: 'use letters, digits, dot, dash or underscore, or a whole parameter like {{ErpLocation}}'
 }
 
 /** Translates Ajv errors into plain sentences: [{ code, message }] */
@@ -132,8 +134,8 @@ function walkStrings(node, path, fn) {
   if (node && typeof node === 'object') for (const [k, v] of Object.entries(node)) walkStrings(v, path ? `${path}.${k}` : k, fn)
 }
 
-/** Fields where {{Parameter}} references are allowed: HTTP receiver URLs only in v1 */
-const PARAM_FIELDS = /^(steps\[\d+\]|end)\.url$/
+/** Fields where {{Parameter}} references are allowed: an HTTP receiver's URL, credential name and location ID */
+const PARAM_FIELDS = /^(steps\[\d+\]|end)\.(url|credentialName|locationId)$/
 
 /**
  * @param {object} spec
@@ -203,12 +205,8 @@ function validate(spec, { attachments = [] } = {}) {
       skip.push(`${ptr}/${key}`)
       err('SECRET', `${where}.${key}: never put credentials into the spec — ${CREDENTIAL_HINT}`)
     }
-    for (const key of ['credentialName', 'locationId'].filter((k) => typeof call[k] === 'string' && PARAM_REF.test(call[k]))) {
-      PARAM_REF.lastIndex = 0
-      skip.push(`${ptr}/${key}`)
-      err('PARAM_NOT_SUPPORTED', `${where}.${key}: an externalized parameter is not supported here yet — use the literal ${key === 'locationId' ? 'location ID' : 'credential name'}`)
-    }
-    PARAM_REF.lastIndex = 0
+    // a {{Parameter}} is checked by the parameter rules below, not by the name pattern of the schema
+    for (const key of ['credentialName', 'locationId'].filter((k) => typeof call[k] === 'string' && call[k].includes('{{'))) skip.push(`${ptr}/${key}`)
     if (call.locationId && call.proxyType !== 'On-Premise') err('LOCATION_WITHOUT_PROXY', `${where}.locationId: only used with proxyType On-Premise — remove it, or set proxyType "On-Premise"`)
     // the stored values must be ones the reference exports contain (a value seen once is a warning)
     if (AUTH_TYPES.includes(auth) && (call.proxyType == null || call.proxyType in PROXY_TYPES)) {
@@ -332,9 +330,8 @@ function validate(spec, { attachments = [] } = {}) {
     if (!refs.length) return
     // Groovy code, body and descriptions (documentation, not configuration) may contain {{ }} text
     if (/\.(code|body|description)$/.test(path)) return
-    if (/^(steps\[\d+\]|end)\.(credentialName|locationId)$/.test(path)) return // reported by the receiver rules
     if (!PARAM_FIELDS.test(path)) {
-      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as an HTTP receiver url in v1`)
+      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver`)
       return
     }
     if (!WHOLE_PARAM.test(value)) {

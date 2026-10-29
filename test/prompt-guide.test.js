@@ -53,10 +53,8 @@ describe('the pre-send check passes every example request (a warning on our own 
     expect(lint('Create an iFlow: POST to {{OrderReceiver}}\nthen a call to address {{Second}}')).toEqual([])
   })
 
-  test('on a URL line too: a parameter after credential, location, user or password, or inside a URL, is flagged', () => {
+  test('on a URL line too: a parameter after user or password, or inside a URL, is flagged', () => {
     const flagged = (t) => lint(t).flatMap((w) => (w.key === 'params' ? [w.message.split(':')[0]] : []))
-    expect(flagged('Create an iFlow: POST https://x.example.com/api, credential {{ErpCredential}}')).toEqual(['{{ErpCredential}}'])
-    expect(flagged('Create an iFlow: POST https://x.example.com/api, proxy On-Premise, location ID {{ErpLocation}}')).toEqual(['{{ErpLocation}}'])
     expect(flagged('Create an iFlow: GET https://x.example.com/api with user {{User}} and password: {{Pwd}}')).toEqual(['{{User}}, {{Pwd}}'])
     expect(flagged('Create an iFlow: GET https://{{Host}}/api')).toEqual(['{{Host}}'])
     expect(flagged('Create an iFlow: GET https://x.example.com/{{Path}}')).toEqual(['{{Path}}'])
@@ -65,9 +63,12 @@ describe('the pre-send check passes every example request (a warning on our own 
     expect(flagged('Create an iFlow: GET {{ShopURL}}, default https://x.example.com/api')).toEqual([])
   })
 
-  test('a parameter elsewhere is still flagged, e.g. as the credential name', () => {
-    expect(lint('Create an iFlow: GET {{Orders}}, authentication Basic, credential {{ErpCredential}}').map((w) => w.message)).toEqual([
-      '{{ErpCredential}}: parameters work only as the whole URL of an HTTP receiver. Use literal values elsewhere.'
+  test('a credential name or location ID may be a parameter (step c2); elsewhere a parameter is flagged', () => {
+    const flagged = (t) => lint(t).flatMap((w) => (w.key === 'params' ? [w.message.split(':')[0]] : []))
+    expect(flagged('Create an iFlow: POST https://x.example.com/api, credential {{ErpCredential}}, proxy On-Premise, location ID {{ErpLocation}}')).toEqual([])
+    expect(flagged('Create an iFlow: GET {{Orders}}, Basic, credential name: {{ErpCredential}}')).toEqual([])
+    expect(lint('Create an iFlow: GET {{Orders}}, header Source = {{Source}}').map((w) => w.message)).toEqual([
+      '{{Source}}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver. Use literal values elsewhere.'
     ])
   })
 })

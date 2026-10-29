@@ -17,7 +17,7 @@ turns into extra questions.
 | Trigger | HTTPS sender (with a path), timer that runs once after deployment | Schedules, SFTP, SOAP, other senders |
 | Steps | Content Modifier, Groovy Script, JSON to XML, XML to JSON, HTTP request-reply | Router, splitter, gather, join, multicast, mapping, XSLT step, write variables, process call |
 | End | HTTP receiver, or no receiver | Mail, SFTP and other receivers |
-| HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID; timeout | Client certificate and other methods; credential name or location ID as a parameter; manual proxy |
+| HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
 | Error handling | One exception subprocess (Content Modifier, Groovy, converters) | Request-reply inside the exception subprocess |
 
 Hard limits:
@@ -25,7 +25,7 @@ Hard limits:
 - At most **50 steps** in the main flow (10 in the exception subprocess). Large flows are written
   and checked in parts of up to 8 steps, so their size does not cause timeouts.
 - Step names, receiver names and Groovy file names must be **unique**.
-- `{{Parameter}}` only as the **whole URL** of an HTTP receiver.
+- `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver.
 - Header and property values are **constant** or **expression** only. Read XML values with XPath in a
   Groovy script.
 - Receivers take credential **names** only: the security material deployed on the tenant (User
@@ -53,7 +53,7 @@ Before sending, the chat checks the request without calling the model. It warns 
 
 - steps v1 cannot build (router, splitter, gather, join, multicast, XSLT, mapping, SFTP, write variables, process call)
 - more than 25 numbered steps
-- `{{…}}` used anywhere other than a URL
+- `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID
 - template fields that are still unfilled
 - a password, secret or token in the message (give the credential name instead)
 
@@ -100,8 +100,8 @@ spec:
   placeholders merged.
 - A branching flow keeps its main path (at each router, the route with a condition); the other
   routes are described in the router's placeholder.
-- `{{Param}}` values outside receiver URLs become the parameter's default; a receiver URL combined
-  from parameters becomes one `<Receiver>_URL` parameter.
+- `{{Param}}` values outside receiver URLs, credential names and location IDs become the parameter's
+  default; a receiver URL combined from parameters becomes one `<Receiver>_URL` parameter.
 - A Process Call in the exception subprocess is replaced by the steps of the local process it calls,
   if they are Content Modifiers and Groovy scripts.
 - The import gets a new iFlow id (`<original>_Imported`); duplicate names are made unique.

@@ -92,7 +92,8 @@ function manifestHeader(name, value) {
 
 // --- adapter mapping -------------------------------------------------------------
 
-const HTTP_ADDRESS_ATTRIBUTE = () => tpl('propdef-attribute-http-address.txt').trim()
+// parameters.propdef references of receiver fields given as {{Param}}: { field: { attributeId, uilabel, categorySuffix } }
+const RECEIVER_ATTRIBUTES = () => JSON.parse(tpl('propdef-receiver-attributes.json'))
 
 function splitUrl(url, params = {}) {
   const param = String(url).match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
@@ -306,8 +307,13 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       TIMEOUT_VALUE: val(cpiSettings.httpRequestTimeout)
     }
     messageFlows.push(mf)
-    const param = address.match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
-    if (param) paramRefs.push({ category: system, attributeId: HTTP_ADDRESS_ATTRIBUTE(), uilabel: 'Address', key: param })
+    // fields given as a whole {{Param}}: a reference in parameters.propdef, as the CPI editor writes it
+    const attributes = RECEIVER_ATTRIBUTES()
+    for (const [field, value] of [['address', address], ['credentialName', cpiSettings.credentialName], ['locationID', cpiSettings.locationID]]) {
+      const param = String(value).match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
+      const a = attributes[field]
+      if (param) paramRefs.push({ category: system + a.categorySuffix, attributeId: a.attributeId, uilabel: a.uilabel, key: param })
+    }
     adapters.push({ type: 'HTTP', direction: 'Receiver', system, address: call.url, method: call.method, authType: cpiSettings.authenticationMethod })
     return { p, mf }
   }

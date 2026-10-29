@@ -4,7 +4,8 @@ Every spec must respect these limits; the validator rejects anything else:
 - At most 50 steps in the main flow (10 in the exception subprocess).
 - Step names are unique (main flow and exception subprocess together), receiver `system` names are
   unique, and Groovy `fileName`s are unique.
-- `{{Param}}` references only as the whole `url` of an HTTP receiver; literal values everywhere else.
+- `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver;
+  literal values everywhere else.
 - Header and property `type` is only `constant` or `expression`: `constant` for a plain value,
   `expression` only when the value contains `${...}`. A plain-value expression is turned into a
   constant and reported (`autoFixes`). No XPath: read XML values in a `groovyScript` step instead.
@@ -175,8 +176,8 @@ Every HTTP receiver (request-reply step and `httpReceiver` end) has these settin
 - `proxyType`: `Internet` (default) or `On-Premise` (through the Cloud Connector), with an optional
   `locationId` for On-Premise only;
 - `timeout`: request timeout in milliseconds (default 60000).
-`credentialName` and `locationId` are literal names: externalized parameters ({{…}}) are not
-supported for them yet.
+`credentialName` and `locationId` can also be externalized as a whole `{{Name}}` with the name as
+the parameter's default, when the user asks for it (see Externalized parameters).
 
 Other methods (client certificate, API key header, principal propagation...) are not supported:
 propose `authType: "None"` and tell the user to set the method on that receiver adapter (e.g.
@@ -198,7 +199,8 @@ v1 cannot build ProcessDirect; the HTTPS workaround is public and needs authenti
 ## Externalized parameters
 
 Externalize receiver URLs as parameters: set `url` to `{{Name}}` and define `parameters: { "Name": "<default URL>" }`.
-v1 supports parameters only as HTTP receiver URLs. Use literal values everywhere else.
+A receiver's `credentialName` and `locationId` can be parameters the same way (`{{ErpCredential}}` with
+the credential name as its default). Parameters are supported nowhere else: use literal values there.
 
 When the real URL is unknown and the default must be a placeholder (e.g. `https://<tenant>/http/notify`),
 tell the user that the parameter must be set in the CPI web editor (Configure) before deploying, and

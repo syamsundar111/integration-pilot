@@ -31,15 +31,16 @@ const rowType = (iflw, value, type) => iflw.replace(`&lt;cell id='Type'&gt;const
 const converters = (n, from = 1) => Array.from({ length: n }, (_, i) => ({ type: 'jsonToXml', name: `S${from + i}` }))
 
 describe('import keeps HTTP receiver settings (Ref_Receivers)', () => {
-  test('authentication, credential name, proxy and location ID are kept; a {{Parameter}} credential becomes its default', async () => {
+  test('authentication, credential name, proxy and location ID are kept, parameters as parameters (step c2)', async () => {
     const r = await importIflow(readRef('Ref_Receivers.zip'), { fileName: 'Ref_Receivers.zip', packageId: 'PilotReference' })
     const http = r.spec.steps.filter((s) => s.type === 'requestReplyHttp').map(({ name, authType, credentialName, proxyType, locationId }) => ({ name, authType, credentialName, proxyType, locationId }))
     expect(http).toEqual([
-      { name: 'RR_Basic', authType: 'Basic', credentialName: 'DUMMY_BASIC_CRED', proxyType: undefined, locationId: undefined },
-      { name: 'RR_OAuth', authType: 'OAuth2 Client Credentials', credentialName: 'DUMMY_OAUTH_CRED', proxyType: undefined, locationId: undefined },
-      { name: 'RR_OnPrem', authType: 'Basic', credentialName: 'DUMMY_ONPREM_CRED', proxyType: 'On-Premise', locationId: 'DUMMY_LOC' }
+      { name: 'RR_Basic', authType: 'Basic', credentialName: '{{BasicCredential}}', proxyType: undefined, locationId: undefined },
+      { name: 'RR_OAuth', authType: 'OAuth2 Client Credentials', credentialName: '{{RR_OAuth_CredentialName}}', proxyType: undefined, locationId: undefined },
+      { name: 'RR_OnPrem', authType: 'Basic', credentialName: 'DUMMY_ONPREM_CRED', proxyType: 'On-Premise', locationId: '{{RR_OnPrem_LocationId}}' }
     ])
-    expect(r.notes).toContain('Receiver: the credential name {{BasicCredential}} became its value DUMMY_BASIC_CRED (externalized credential names are not supported yet)')
+    expect(r.spec.parameters).toMatchObject({ BasicCredential: 'DUMMY_BASIC_CRED', RR_OAuth_CredentialName: 'DUMMY_OAUTH_CRED', RR_OnPrem_LocationId: 'DUMMY_LOC' })
+    expect(r.notes.filter((n) => /credential|location/i.test(n))).toEqual([])
     expect(r.valid).toBe(true)
   })
 })

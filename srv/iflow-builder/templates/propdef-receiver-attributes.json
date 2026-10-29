@@ -1,0 +1,17 @@
+{
+  "address": {
+    "attributeId": "ctype::AdapterVariant/cname::HTTP/tp::HTTP/mp::None/direction::Receiver/version::1.22.0/attrId::httpAddressWithoutQuery",
+    "uilabel": "Address",
+    "categorySuffix": ""
+  },
+  "credentialName": {
+    "attributeId": "ctype::AdapterVariant/cname::HTTP/tp::HTTP/mp::None/direction::Receiver/version::1.22.0/attrId::credentialName",
+    "uilabel": "Credential Name",
+    "categorySuffix": ".Receiver.Auth"
+  },
+  "locationID": {
+    "attributeId": "ctype::AdapterVariant/cname::HTTP/tp::HTTP/mp::None/direction::Receiver/version::1.22.0/attrId::locationID",
+    "uilabel": "Location ID",
+    "categorySuffix": ""
+  }
+}

@@ -66,9 +66,6 @@ function callFields(s, what) {
   if (s.unsupportedSettings?.length) throw `${what} uses ${s.unsupportedSettings.join(', ')}, which an update cannot keep`
   const auth = s.authType || 'None'
   if (!AUTH_TYPES.includes(auth)) throw `${what} uses authentication '${auth}', which an update cannot keep`
-  // externalized: the spec has no parameter here yet (no reference export with one)
-  if (auth !== 'None' && /\{\{/.test(s.credentialAlias || '')) throw `${what} uses the externalized credential name '${s.credentialAlias}', which an update cannot keep`
-  if (/\{\{/.test(s.locationId || '')) throw `${what} uses the externalized location ID '${s.locationId}', which an update cannot keep`
   return {
     ...(s.system && { system: s.system }),
     url: s.url,

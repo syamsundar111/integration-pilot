@@ -100,15 +100,17 @@ async function importIflow(buffer, { fileName, packageId }) {
   const withDefaults = (text) => String(text ?? '').replace(PARAM_REF, (m, p) => (defaults[p] ? defaults[p] : m))
   /**
    * Authentication, proxy and timeout of a parsed HTTP receiver call, as the spec holds them. A
-   * credential name or location ID given as {{Parameter}} becomes the parameter's default (noted);
-   * settings the spec cannot hold (unsupportedSettings) are left at their defaults and noted by the caller.
+   * credential name or location ID given as a whole {{Parameter}} stays a parameter; one the spec
+   * cannot hold (part of a text, or a name the spec does not allow) becomes its default (noted).
+   * Settings the spec cannot hold (unsupportedSettings) are left at their defaults and noted by the caller.
    */
   const receiverFields = (s, system) => {
     const literal = (v, what) => {
       if (!/\{\{/.test(v || '')) return v
+      if (Object.hasOwn(params, String(v).match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1] ?? '')) return v
       const value = withDefaults(v)
       if (/\{\{/.test(value)) return undefined // no default: left out, the validator asks for it
-      notes.push(`${system}: the ${what} ${v} became its value ${value} (externalized ${what}s are not supported yet)`)
+      notes.push(`${system}: the ${what} ${v} became its value ${value} (it cannot be kept as a parameter)`)
       return value
     }
     const auth = s.authType && s.authType !== 'None' && !s.unsupportedSettings?.some((u) => u.startsWith('authentication')) ? s.authType : 'None'

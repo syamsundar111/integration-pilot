@@ -31,7 +31,7 @@ prompt and the tokens used reported per prompt.
 | a | Commit the open work on `main`, branch `builder-v2`, references and prompts | all | done |
 | b | Parser: the main process is the process that is not local | Ref_Structure | done |
 | c | HTTP receiver: authentication (None, Basic, OAuth2 Client Credentials) with credential name, proxy Internet / On-Premise with location ID, timeout | Ref_Receivers | done |
-| c2 | Credential name and location ID as externalized parameters, with the regression test update | Ref_Receivers (new version: RR_OAuth's credential name and RR_OnPrem's location ID externalized) | after c |
+| c2 | Credential name and location ID as externalized parameters, with the regression test update | Ref_Receivers (new version: RR_OAuth's credential name and RR_OnPrem's location ID externalized) | done |
 | 1 | Router with conditions and default route; Message, Escalation and Error End; Write Variables; Content Modifier sources (Global/Local Variable, Header, Property, XPath); Timer start with a schedule (every N minutes) | Ref_Router_Ends, Ref_Variables | open |
 | 2 | General and Iterating Splitter, Gather; local integration process with Process Call and Looping Process Call | Ref_Structure | open |
 | 3 | SOAP 1.x and Mail receivers | Ref_Receivers | open |
@@ -48,8 +48,6 @@ prompt and the tokens used reported per prompt.
   phase 1: Ref_Variables (Global/Local Variable source types, Write Variables types and scopes) and
   Ref_Router_Ends (timer, `R_Other` default route); phase 3: the Mail values in Ref_Receivers.
   Step c's (OAuth2 Client Credentials, On-Premise) are in.
-- **Step c2:** the new Ref_Receivers (the user replaces it after step c is committed); until then a
-  credential name or location ID must be literal.
 - **Phase 2:** re-select the Gather values of `GA_Orders` in Ref_Structure in the CPI editor
   (Ref_Multicast_Enrich's Gathers matter only for phase 9).
 - **Phase 3:** check whether `RR_S4HANA` in the original iFlow uses a WSDL; if so, add a WSDL variant
@@ -62,6 +60,11 @@ prompt and the tokens used reported per prompt.
 From the former reference export checklist; each needs a reference export first.
 
 - Receiver authentication **OAuth2 SAML Bearer Assertion** and **Client Certificate** (private key alias).
+- Proposal panel: show the effective proxy and timeout of every receiver, with defaults marked as such
+  ("Internet (default)", "60000 ms (default)"); today they appear only when they differ from the default.
+- Proposal panel, credentials note: for a credential given as a parameter, name the credential that must
+  exist, e.g. "DUMMY_OAUTH_CRED (parameter OAuthCredential)", not "{{OAuthCredential}}" (the chat answer
+  already does this).
 - More timer schedules: every N hours, daily, weekly and monthly at a time, other time zones, and the
   scheduler externalized as `{{Scheduler}}`.
 

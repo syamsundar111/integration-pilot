@@ -3,9 +3,9 @@ sap.ui.define([], () => {
 
   /**
    * Client-side checks of an iFlow request before it is sent (no LLM call): step kinds v1 cannot
-   * build, too many steps, unfilled template fields, a package name without a valid ID, and {{Param}}
-   * references outside URLs, and passwords or secrets (credential names only); a missing package, trigger or
-   * authentication gets a default instead. Each finding costs the user a clarification round or a failed
+   * build, too many steps, unfilled template fields, a package name without a valid ID, {{Param}}
+   * references outside receiver URLs, credential names and location IDs, and passwords or secrets
+   * (credential names only); a missing package, trigger or authentication gets a default instead. Each finding costs the user a clarification round or a failed
    * proposal, so they are shown as warnings with "Send anyway" / "Edit". A follow-up message is
    * checked together with the earlier ones and shows only what is new since the first message.
    */
@@ -51,11 +51,12 @@ sap.ui.define([], () => {
     /\bhttps?:\/\/[^/\s:@]+:[^/\s@]+@/i
   ]
 
-  // Where a {{Param}} is a receiver URL: a line about a URL, or a position right after an HTTP method or "address"
+  // Where a {{Param}} can stand: a receiver URL (a line about a URL, or right after an HTTP method or
+  // "address"), or a receiver's credential name or location ID
   const URL_LINE = /\burls?\b|https?:\/\//i
-  const URL_POSITION = /(\b(GET|POST|PUT|PATCH|DELETE)(\s+to)?|\b(address|url|endpoint)\s*[:=]?)\s*$/i
-  // Never a receiver URL, even on a URL line: right after a credential field, or part of a URL
-  const NOT_URL_FIELD = /\b(credential(\s+name)?|location(\s+id)?|user(\s*name)?|password)\s*[:=]?\s*$/i
+  const PARAM_POSITION = /(\b(GET|POST|PUT|PATCH|DELETE)(\s+to)?|\b(address|url|endpoint)\s*[:=]?|\bcredential(\s+name)?\s*[:=]?|\blocation(\s+id)?\s*[:=]?)\s*$/i
+  // Never, even on a URL line: right after user or password (credentials are names only), or part of a URL
+  const NOT_PARAM_FIELD = /\b(user(\s*name)?|password)\s*[:=]?\s*$/i
   const IN_URL = (before, after) => /(:\/\/|\/)$/.test(before) || after.startsWith('/')
 
   // Quoted text is data or a description, not a step: "REPLACE WITH Router ..." may span lines (up to 600 characters)
@@ -106,7 +107,8 @@ sap.ui.define([], () => {
     unsupported: (found) =>
       `Not supported in v1: ${found.join(', ')}. Flows are linear (Content Modifier, Groovy Script, JSON/XML converters, HTTP request-reply). Use a Groovy script, or add the step in the CPI web editor after creation.` +
       (found.includes('XSLT') ? ' Attach the .xsl file to include it in the iFlow, ready for an XSLT Mapping step.' : ''),
-    params: (names) => `${names.join(', ')}: parameters work only as the whole URL of an HTTP receiver. Use literal values elsewhere.`,
+    params: (names) =>
+      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver. Use literal values elsewhere.`,
     secret:
       'This looks like a password, secret or token. Never send credentials: deploy them as security material in CPI (User Credentials or OAuth2 Client Credentials) and give only its name, e.g. "Basic, credential ERP_BASIC_USER".'
   }
@@ -140,9 +142,9 @@ sap.ui.define([], () => {
     const steps = estimateSteps(message)
     if (steps > MAX_STEPS) warn('steps', `About ${steps} steps — v1 allows at most ${MAX_STEPS} in the main flow. Merge Content Modifiers or move logic into one Groovy script.`)
 
-    // {{…}} is a receiver URL on a line about a URL, or right after an HTTP method ("GET {{X}}",
-    // "POST to {{X}}") or "address/url/endpoint"; never right after a credential field
-    // ("credential {{X}}") or as part of a URL ("https://{{Host}}/api"): only a whole URL can be a parameter
+    // {{…}} is fine as a whole receiver URL (on a line about a URL, or right after "GET", "POST to",
+    // "address") and as a credential name or location ID; never after user or password, and never as part
+    // of a URL ("https://{{Host}}/api"): only a whole value can be a parameter
     const outside = stripQuoted(message)
       .split('\n')
       .flatMap((l) =>
@@ -150,8 +152,8 @@ sap.ui.define([], () => {
           .filter((m) => {
             const before = l.slice(0, m.index)
             const after = l.slice(m.index + m[0].length)
-            if (NOT_URL_FIELD.test(before) || IN_URL(before, after)) return true
-            return !URL_LINE.test(l) && !URL_POSITION.test(before)
+            if (NOT_PARAM_FIELD.test(before) || IN_URL(before, after)) return true
+            return !URL_LINE.test(l) && !PARAM_POSITION.test(before)
           })
           .map((m) => m[0])
       )

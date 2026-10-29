@@ -16,11 +16,13 @@ const spec = baseSpec({
   exceptionSubprocess: { steps: [{ type: 'contentModifier', name: 'Set Error', properties: [{ name: 'E', type: 'expression', value: '${exception.message}' }] }] }
 })
 
-/** Builds the spec, patches the .iflw text, parses the result back like an update would */
-async function readBack(patch = (x) => x) {
+/** Builds the spec, patches the .iflw text (and adds parameters to parameters.prop), parses the result back like an update would */
+async function readBack(patch = (x) => x, parameters = {}) {
   const zip = await JSZip.loadAsync(Buffer.from((await build(spec)).zipBase64, 'base64'))
   const file = Object.keys(zip.files).find((f) => IFLW.test(f))
   zip.file(file, patch(await zip.file(file).async('string')))
+  const prop = Object.keys(zip.files).find((f) => f.endsWith('parameters.prop'))
+  zip.file(prop, (await zip.file(prop).async('string')) + Object.entries(parameters).map(([k, v]) => `${k}=${v}\n`).join(''))
   return specFromParsed(await parse(await zip.generateAsync({ type: 'nodebuffer' })), { packageId: spec.packageId })
 }
 const setting = (xml, key, value) => xml.replace(new RegExp(`(<key>${key}</key>\\s*)(<value>[^<]*</value>|<value/>)`), `$1<value>${value}</value>`)
@@ -55,12 +57,25 @@ describe('update blockers', () => {
     })
   })
 
+  test('a credential name and location ID given as parameters are kept as parameters (step c2)', async () => {
+    const r = await readBack((x) =>
+      [
+        ['proxyType', 'sapcc'],
+        ['locationID', '{{ErpLocation}}'],
+        ['authenticationMethod', 'Basic'],
+        ['credentialName', '{{ErpCredential}}']
+      ].reduce((xml, [k, v]) => setting(xml, k, v), x),
+      { ErpLocation: 'LOC1', ErpCredential: 'ERP_BASIC_USER' }
+    )
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps[0]).toMatchObject({ authType: 'Basic', credentialName: '{{ErpCredential}}', proxyType: 'On-Premise', locationId: '{{ErpLocation}}' })
+    expect(r.spec.parameters).toMatchObject({ ErpLocation: 'LOC1', ErpCredential: 'ERP_BASIC_USER' })
+  })
+
   test('receiver settings the spec cannot hold are blockers, not silently reset', async () => {
     for (const [patch, blocker] of [
       [(x) => setting(x, 'proxyType', 'manual'), "receiver ERP uses proxy type 'manual', which an update cannot keep"],
-      [(x) => setting(x, 'authenticationMethod', 'Client Certificate'), "receiver ERP uses authentication 'Client Certificate', which an update cannot keep"],
-      [(x) => setting(setting(x, 'authenticationMethod', 'Basic'), 'credentialName', '{{ErpCredential}}'), "receiver ERP uses the externalized credential name '{{ErpCredential}}', which an update cannot keep"],
-      [(x) => setting(setting(x, 'proxyType', 'sapcc'), 'locationID', '{{ErpLocation}}'), "receiver ERP uses the externalized location ID '{{ErpLocation}}', which an update cannot keep"]
+      [(x) => setting(x, 'authenticationMethod', 'Client Certificate'), "receiver ERP uses authentication 'Client Certificate', which an update cannot keep"]
     ]) {
       const r = await readBack(patch)
       expect(r.spec).toBeNull()

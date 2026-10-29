@@ -15,10 +15,13 @@ Main integration process, in this order:
    Address = externalized parameter {{RR_OAuth_Address}},
      default https://oauth.example.com/api/items
    Method POST, Proxy Type Internet,
-   Authentication OAuth2 Client Credentials, Credential Name DUMMY_OAUTH_CRED.
+   Authentication OAuth2 Client Credentials,
+   Credential Name = externalized parameter {{RR_OAuth_CredentialName}},
+     default DUMMY_OAUTH_CRED.
 5. RR_OnPrem - Request Reply to receiver RCV_OnPrem, HTTP adapter:
    Address http://s4dummy:8000/sap/bc/dummy, Method POST,
-   Proxy Type On-Premise, Location ID DUMMY_LOC,
+   Proxy Type On-Premise,
+   Location ID = externalized parameter {{RR_OnPrem_LocationId}}, default DUMMY_LOC,
    Authentication Basic, Credential Name DUMMY_ONPREM_CRED.
 6. RR_Soap - Request Reply to receiver RCV_Soap, SOAP 1.x adapter:
    Address http://s4dummy:8000/sap/bc/srt/dummy,

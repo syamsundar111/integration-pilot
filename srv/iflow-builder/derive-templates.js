@@ -257,8 +257,24 @@ async function main() {
       'param_key="TargetURL"': 'param_key="{{PARAM_KEY}}"'
     }
   })
-  // attribute_id of an HTTP receiver address, as used in the reference propdef
-  t['propdef-attribute-http-address.txt'] = firstRef.match(/attribute_id="([^"]+)"/)[1]
+  // Parameter references of HTTP receiver fields (parameters.propdef): attribute_id, label and the
+  // category after the receiver's system name ("<system>.Receiver.Auth" for the credential name).
+  // The address comes from Reference_AllSteps; credential name and location ID from Ref_Receivers,
+  // whose adapter is 1.22.1: their attribute_id gets the version of the template's adapter.
+  const addressId = firstRef.match(/attribute_id="([^"]+)"/)[1]
+  const version = addressId.match(/\/version::([^/]+)\//)[1]
+  const receivers = await readZip('Ref_Receivers.zip')
+  const receiversPropdef = receivers.files['src/main/resources/parameters.propdef']
+  const refOf = (attr) => {
+    const r = receiversPropdef.match(new RegExp(`<reference attribute_category="([^"]+)" attribute_id="([^"]+/attrId::${attr})" attribute_uilabel="([^"]+)" param_key="([^"]+)"/>`))
+    if (!r) throw new Error(`Ref_Receivers.zip: no parameter reference for ${attr}`)
+    const flow = receivers.iflw.match(new RegExp(`<bpmn2:messageFlow\\b[\\s\\S]*?<\\/bpmn2:messageFlow>`, 'g')).find((f) => f.includes(`{{${r[4]}}}`))
+    const system = flow.match(/<key>system<\/key>\s*<value>([^<]*)<\/value>/)[1]
+    if (!r[1].startsWith(system)) throw new Error(`Ref_Receivers.zip: category ${r[1]} does not start with the receiver ${system}`)
+    return { attributeId: r[2].replace(/\/version::[^/]+\//, `/version::${version}/`), uilabel: r[3], categorySuffix: r[1].slice(system.length) }
+  }
+  t['propdef-receiver-attributes.json'] =
+    JSON.stringify({ address: { attributeId: addressId, uilabel: 'Address', categorySuffix: '' }, credentialName: refOf('credentialName'), locationID: refOf('locationID') }, null, 2) + '\n'
 
   // --- allowed values -----------------------------------------------------------------
   t['reference-values.json'] = JSON.stringify(await referenceValues(), null, 2) + '\n'

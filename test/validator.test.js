@@ -93,12 +93,15 @@ describe('validator', () => {
       expectError(end({ authType: 'None', timeout: 0 }), /end\.timeout/)
     })
 
-    test('credentials never go into the spec: passwords, secrets, user:password URLs; parameters only as URLs', () => {
+    test('credentials never go into the spec: passwords, secrets, user:password URLs; credential name and location ID may be parameters', () => {
       const secret = errorsOf(rr({ authType: 'Basic', credentialName: 'C', password: 'hunter2', clientSecret: 'abc' }))
       expect(secret).toEqual([expect.stringMatching(/^steps\[0\]\.password: never put credentials into the spec/), expect.stringMatching(/^steps\[0\]\.clientSecret: never put credentials into the spec/)])
       expectError(end({ authType: 'None', url: 'https://user:secret@x.org/api' }), /end\.url: contains user:password/)
-      expect(errorsOf(rr({ authType: 'Basic', credentialName: '{{Cred}}' }))).toEqual(['steps[0].credentialName: an externalized parameter is not supported here yet — use the literal credential name'])
-      expect(errorsOf(rr({ authType: 'None', proxyType: 'On-Premise', locationId: '{{Loc}}' }))).toEqual(['steps[0].locationId: an externalized parameter is not supported here yet — use the literal location ID'])
+      const withParams = (e) => ({ ...rr(e), parameters: { Cred: 'ERP_BASIC_USER', Loc: 'LOC_1' } })
+      expect(errorsOf(withParams({ authType: 'Basic', credentialName: '{{Cred}}', proxyType: 'On-Premise', locationId: '{{Loc}}' }))).toEqual([])
+      expect(errorsOf(rr({ authType: 'Basic', credentialName: '{{Cred}}' }))).toEqual(["steps[0].credentialName: parameter 'Cred' is referenced but not defined in 'parameters'"])
+      expect(errorsOf(withParams({ authType: 'Basic', credentialName: 'ERP_{{Cred}}' }))).toEqual([expect.stringMatching(/^steps\[0\]\.credentialName: a parameter must be the whole value/)])
+      expect(errorsOf(rr({ authType: 'Basic', credentialName: 'my credential' }))).toEqual([expect.stringMatching(/^steps\[0\]\.credentialName: invalid value — use the name of the deployed credential/)])
     })
 
     test('a value seen in only one reference export warns unless it is confirmed (re-selected in the CPI editor)', () => {
@@ -137,10 +140,10 @@ describe('validator', () => {
     expectError(undefinedParam, /end\.url: parameter 'Missing' is referenced but not defined/)
 
     const wrongPlace = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'constant', value: '{{P}}' }] }], parameters: { P: 'v' } })
-    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as an HTTP receiver url/)
+    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
 
     const senderParam = baseSpec({ trigger: { type: 'httpsSender', address: '{{Path}}' }, parameters: { Path: '/x' } })
-    expectError(senderParam, /trigger\.address: parameters .* can only be used as an HTTP receiver url in v1/)
+    expectError(senderParam, /trigger\.address: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
     expectError(senderParam, /trigger\.address: invalid value — use a path like \/orders\/create/)
 
     const partial = baseSpec({ end: { type: 'httpReceiver', url: 'https://x.org/{{P}}', method: 'POST', authType: 'None' }, parameters: { P: 'x' } })
