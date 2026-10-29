@@ -301,10 +301,15 @@ async function parse(input) {
 
   // Main integration process: the one that is not a local process (processType directCall). Not by
   // position or participant: local processes are "IntegrationProcess" participants too, and may come first.
+  // A process that a (Looping, Idempotent) Process Call calls is local too: older exports may lack processType.
   const processes = childrenNamed(definitions, 'process')
-  const locals = processes.filter((p) => props(p).processType === 'directCall')
-  const integrationProcesses = processes.filter((p) => !locals.includes(p))
-  const main = integrationProcesses[0] || processes[0]
+  const called = new Set([...definitions.getElementsByTagNameNS('*', 'callActivity')].map((el) => props(el).processId).filter(Boolean))
+  const locals = processes.filter((p) => props(p).processType === 'directCall' || called.has(p.getAttribute('id')))
+  // several: the one with a trigger (a start event with a timer or message definition) is the main flow
+  const triggered = (p) => childrenNamed(p, 'startEvent').some((s) => elements(s).some((d) => /EventDefinition$/.test(d.localName)))
+  const candidates = processes.filter((p) => !locals.includes(p))
+  const main = candidates.find(triggered) || candidates[0] || processes[0]
+  const integrationProcesses = candidates.length ? [main, ...candidates.filter((p) => p !== main)] : [] // the main flow first
   const warnings = []
   if (integrationProcesses.length > 1)
     warnings.push(
