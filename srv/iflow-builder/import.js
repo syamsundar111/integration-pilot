@@ -27,7 +27,6 @@ const PARAM_REF = /\{\{\s*([^}]*?)\s*\}\}/g
 const PARAM_NAME = /^[A-Za-z][A-Za-z0-9_]*$/
 const ROW_NAME = /^[A-Za-z0-9_.-]+$/
 const XSL_NAME = /^[A-Za-z][A-Za-z0-9_.-]*\.xslt?$/
-const INLINE_TYPES = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson'] // steps of a local process copied into error handling
 
 const fail = (code, message, hint) => Object.assign(new Error(message), { code, status: 400, hint })
 const truncate = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
@@ -181,11 +180,13 @@ async function importIflow(buffer, { fileName, packageId }) {
 
   // Local processes a Process Call may run: by processId, else the only one there is
   const locals = parsed.localProcessSteps || []
-  const inlined = new Set() // local processes copied into the exception subprocess
   const localProcessOf = (s) => locals.find((l) => l.id === s.processId) || (locals.length === 1 ? locals[0] : null)
 
-  /** Spec steps for one parsed step (a Content Modifier with XPath rows becomes Groovy + Content Modifier) */
-  function convert(s, { inException }) {
+  /**
+   * Spec steps for one parsed step. where: 'main' (main line), 'route', 'exception' or 'local' (a local
+   * process): splitters and gathers only on the main line, process calls not in local processes
+   */
+  function convert(s, { where = 'main' } = {}) {
     const name = s.name ? truncate(s.name, 100) : undefined
     const label = s.name ? `'${s.name}'` : ''
     switch (s.type) {
@@ -219,7 +220,7 @@ async function importIflow(buffer, { fileName, packageId }) {
         return [cm]
       }
       case 'writeVariables': {
-        if (inException) return [placeholder(name, `Write Variables ${label}: ${s.variables.map((v) => `${v.name} = ${v.value} (${v.type})`).join(', ')} (not supported in the exception subprocess)`)]
+        if (where === 'exception') return [placeholder(name, `Write Variables ${label}: ${s.variables.map((v) => `${v.name} = ${v.value} (${v.type})`).join(', ')} (not supported in the exception subprocess)`)]
         const variables = s.variables.filter((v) => cpiValues.WV_TYPES.includes(v.type) && /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/.test(v.name || '') && v.value)
         if (!variables.length) return [placeholder(name, `Write Variables ${label}: ${s.variables.map((v) => `${v.name} (${v.type})`).join(', ')}`)]
         const step = {
@@ -245,7 +246,7 @@ async function importIflow(buffer, { fileName, packageId }) {
       case 'xmlToJson':
         return [{ type: s.type, ...(name && { name }) }]
       case 'requestReplyHttp': {
-        if (inException) return [placeholder(name, `HTTP request-reply ${label} to ${s.url || '?'} (not supported in the exception subprocess)`)]
+        if (where === 'exception') return [placeholder(name, `HTTP request-reply ${label} to ${s.url || '?'} (not supported in the exception subprocess)`)]
         const system = uniqueSystem(identifier(s.system, 'Receiver'), 50)
         const url = httpUrl(s.url, system)
         if (!url) return [placeholder(name, `HTTP request-reply ${label} to ${s.url || '?'} (the URL could not be converted)`)]
@@ -265,14 +266,46 @@ async function importIflow(buffer, { fileName, packageId }) {
         return [placeholder(name, `${s.language || 'script'} step ${label} (${s.script || 'script'})`)]
       case 'processCall': {
         const lip = localProcessOf(s)
-        // in error handling, a called process of Content Modifiers and Groovy runs as the subprocess's own steps
-        if (inException && lip && lip.linear && lip.steps.length && lip.steps.every((x) => INLINE_TYPES.includes(x.type))) {
-          const inner = lip.steps.flatMap((x) => convert(x, { inException }))
-          inlined.add(lip.name)
-          notes.push(`${s.name || 'Process Call'}: the steps of the local process ${lip.name} were copied into the exception subprocess (${inner.map((x) => x.name).filter(Boolean).join(', ')})`)
-          return inner
-        }
-        return [placeholder(name, `Process Call ${label}${lip ? ` to the local process '${lip.name}'` : ''}`)]
+        const what = `${s.loop ? 'Looping Process Call' : 'Process Call'} ${label}${lip ? ` to the local process '${lip.name}'` : ''}`
+        if (where === 'local') return [placeholder(name, `${what} (not supported inside a local process)`)]
+        if (!lip || !lip.steps.length) return [placeholder(name, `${what}${lip ? ' (the local process has no steps)' : ''}`)]
+        if (s.subActivityType && !['NonLoopingProcess', 'LoopingProcess'].includes(s.subActivityType)) return [placeholder(name, `${words(s.subActivityType)} ${label} to the local process '${lip.name}'`)]
+        if (s.loop && (s.loop.expressionType !== 'Non XML' || !s.loop.condition || !s.loop.max))
+          return [placeholder(name, `${what}: ${s.loop.expressionType || 'its'} condition ${s.loop.condition || '(none)'}, at most ${s.loop.max || '?'} times`)]
+        const loop = s.loop && { condition: spacedCondition(withDefaults(s.loop.condition), 'NonXML'), max: s.loop.max }
+        return [{ type: 'processCall', ...(name && { name }), process: lip.name, ...(loop && { loop }) }]
+      }
+      case 'splitter': {
+        const what = `${s.splitType ? words(s.splitType) : 'Splitter'} ${label}${s.expression ? ` (${s.exprType ? `${s.exprType} ` : ''}${s.expression})` : ''}`
+        if (where !== 'main') return [placeholder(name, `${what}: splitters are supported on the main line only`)]
+        // settings given as {{Parameter}} take the parameter's default (a splitter holds no parameters)
+        const raw = s.settings || {}
+        const used = Object.values(raw).filter((v) => /\{\{/.test(v ?? ''))
+        const value = (key, parsedValue) => (raw[key] != null ? withDefaults(raw[key]) : parsedValue)
+        const exprType = value('exprType', s.exprType)
+        const expression = value('splitExprValue', s.expression)
+        const flag = (key, parsedValue) => (raw[key] != null ? value(key) === 'true' : parsedValue)
+        const grouping = Number(value('grouping', s.grouping)) || 1
+        const parallel = flag('ParallelProcessing', s.parallel)
+        if (!s.kind || exprType !== 'XPath' || parallel || /\{\{/.test(expression)) return [placeholder(name, `${what}${parallel ? ', parallel processing' : ''}`)]
+        if (used.length) notes.push(`${s.name || 'Splitter'}: the parameters ${[...new Set(used)].join(', ')} became their values (a splitter holds no parameters)`)
+        return [
+          {
+            type: 'splitter',
+            ...(name && { name }),
+            kind: s.kind,
+            expression,
+            ...(grouping !== 1 && { grouping }),
+            ...(!flag('Streaming', s.streaming) && { streaming: false }),
+            stopOnException: flag('StopOnExecution', s.stopOnException)
+          }
+        ]
+      }
+      case 'gather': {
+        const what = `Gather ${label} (${s.messageType || 'format'}, ${s.aggregationAlgorithm || 'algorithm'})`
+        if (where !== 'main') return [placeholder(name, `${what}: gathers are supported on the main line only`)]
+        if (s.messageType !== 'SameXMLFormat' || s.aggregationAlgorithm !== 'xpath-merge-strategy' || !s.source || !s.target) return [placeholder(name, what)]
+        return [{ type: 'gather', ...(name && { name }), source: s.source, target: s.target }]
       }
       default:
         return [placeholder(name, `${words(s.activityType || s.type)} ${label}${/mapping/i.test(s.activityType || '') && resources.length ? ` (the XSLT files are included as resources)` : ''}`.replace(/\s+$/, ''))]
@@ -316,24 +349,47 @@ async function importIflow(buffer, { fileName, packageId }) {
     if (end.kind === 'message' || !['escalation', 'error'].includes(end.kind)) return { event: 'message', ...(end.name && { name: truncate(end.name, 100) }) }
     return { event: end.kind, ...(end.name && { name: truncate(end.name, 100) }), ...(end.kind === 'escalation' && categoryOf(end.category, where)) }
   }
-  const routerOf = (r) => ({
+  // in a local process (inLocal): its route steps are converted as local steps, and a route ends with a plain End
+  const routerOf = (r, { inLocal = false } = {}) => ({
     type: 'router',
     ...(r.name && { name: truncate(r.name, 100) }),
     expressionType: r.expressionType || 'NonXML',
     routes: r.routes.map((route) => {
       if (route.end && !['message', 'escalation', 'error'].includes(route.end.kind)) notes.push(`${r.name}, route ${route.name}: a ${route.end.kind} end became a Message End; set it in the CPI web editor`)
-      const steps_ = route.steps.flatMap((x) => convert(x, { inException: false }))
+      const steps_ = route.steps.flatMap((x) => convert(x, { where: inLocal ? 'local' : 'route' }))
+      if (inLocal && route.end && route.end.kind !== 'message')
+        notes.push(`${r.name}, route ${route.name}: a ${route.end.kind} end in a local process became a plain End; set it in the CPI web editor`)
       return {
         name: truncate(route.name, 100),
         ...(route.default ? { default: true } : { condition: spacedCondition(withDefaults(route.condition), r.expressionType) }),
         ...(steps_.length && { steps: steps_ }),
-        ...(route.end && { end: routeEnd(route.end, `${r.name}, route ${route.name}`) })
+        ...(route.end && { end: inLocal ? { event: 'message', ...(route.end.name && { name: truncate(route.end.name, 100) }) } : routeEnd(route.end, `${r.name}, route ${route.name}`) })
       }
     })
   })
   let steps = routed
-    ? routed.steps.flatMap((s) => (s.type === 'router' ? [routerOf(s)] : convert(s, { inException: false })))
-    : (branching ? branching.steps : parsed.steps || []).flatMap((s) => convert(s, { inException: false }))
+    ? routed.steps.flatMap((s) => (s.type === 'router' ? [routerOf(s)] : convert(s)))
+    : (branching ? branching.steps : parsed.steps || []).flatMap((s) => convert(s))
+  // a gather needs the splitter before it, and there is no second splitter until then: else a placeholder
+  let split = null
+  let routed_ = false // a router since the splitter: CPI refuses one before the gather
+  steps = steps.map((s) => {
+    if (s.type === 'router' && split) routed_ = true
+    if (s.type === 'splitter') {
+      if (split) {
+        notes.push(`${s.name || 'A splitter'}: a split inside the split of ${split.name || 'the splitter before it'} is not supported; it became a placeholder`)
+        return placeholder(s.name, `${s.kind === 'general' ? 'General' : 'Iterating'} Splitter '${s.name || ''}' (${s.expression}) inside the split of ${split.name || 'the splitter before it'}`)
+      }
+      split = s
+      routed_ = false
+    }
+    if (s.type === 'gather') {
+      if (!split) return placeholder(s.name, `Gather '${s.name || ''}' (combine at ${s.source} into ${s.target}) without a splitter before it`)
+      split = null
+      if (routed_) return placeholder(s.name, `Gather '${s.name || ''}' (combine at ${s.source} into ${s.target}) after a router in the split; move the routing into a local process`)
+    }
+    return s
+  })
   if (routed) notes.push(`The flow branches: ${routed.steps.filter((s) => s.type === 'router').length} router(s) were imported with their routes`)
   else if (branching) {
     if (parsed.routed?.unsupported) notes.push(`The routers could not be imported as routers: ${parsed.routed.unsupported}`)
@@ -360,7 +416,7 @@ async function importIflow(buffer, { fileName, packageId }) {
   // --- exception subprocess ----------------------------------------------------------------
   let exceptionSubprocess
   if (parsed.exceptionSubprocess) {
-    const subSteps = parsed.exceptionSubprocess.steps.flatMap((s) => convert(s, { inException: true }))
+    const subSteps = parsed.exceptionSubprocess.steps.flatMap((s) => convert(s, { where: 'exception' }))
     const endKind = parsed.exceptionSubprocess.end
     if (subSteps.length)
       exceptionSubprocess = {
@@ -384,8 +440,16 @@ async function importIflow(buffer, { fileName, packageId }) {
     }
   }
 
-  const notImported = (parsed.localProcesses || []).filter((n) => !inlined.has(n))
-  if (notImported.length) notes.push(`Local integration processes are not imported: ${notImported.join(', ')}`)
+  // --- local processes: every one, with its steps (what a local process cannot hold becomes a placeholder) ---
+  const localProcesses = locals
+    .filter((lp) => (parsed.localProcesses || []).includes(lp.name))
+    .map((lp) => {
+      const routed_ = lp.routed && !lp.unsupported
+      if (!lp.linear && !routed_) notes.push(`Local process ${lp.name} branches${lp.unsupported ? ` (${lp.unsupported})` : ''}: its steps were put one after another; check the order`)
+      if (lp.end && lp.end !== 'message' && !routed_) notes.push(`Local process ${lp.name}: its ${lp.end} end became a plain End; set it in the CPI web editor`)
+      const lpSteps = lp.steps.flatMap((x) => (routed_ && x.type === 'router' ? [routerOf(x, { inLocal: true })] : convert(x, { where: 'local' })))
+      return { name: truncate(lp.name, 100), steps: lpSteps.length ? lpSteps : [placeholder(undefined, `the steps of the local process ${lp.name} (it has none)`)] }
+    })
   if ((parsed.integrationProcesses?.length || 0) > 1)
     notes.push(`Only the integration process "${parsed.integrationProcesses[0]}" was imported; not imported: ${parsed.integrationProcesses.slice(1).join(', ')}`)
   else if (parsed.warnings?.length) notes.push(...parsed.warnings)
@@ -407,9 +471,12 @@ async function importIflow(buffer, { fileName, packageId }) {
       throw fail('IMPORT_TOO_LARGE', `The ${where.toLowerCase()} has ${out.length} steps after merging placeholders; v1 builds at most ${max}.`, 'Split the iFlow, or remove steps before importing.')
     return out
   }
-  // routers and the steps inside routes count towards the limit; only main-line placeholders are merged
+  // routers, the steps inside routes and the steps of local processes count towards the limit; only main-line
+  // placeholders are merged
   const inRoutes = steps.filter((s) => s.type === 'router').reduce((n, r) => n + r.routes.reduce((m, x) => m + (x.steps?.length || 0), 0), 0)
-  steps = mergeRuns(steps, MAX_STEPS - inRoutes, 'Main flow')
+  const stepCount = (list) => list.reduce((n, s) => n + 1 + (s.type === 'router' ? s.routes.reduce((m, x) => m + (x.steps?.length || 0), 0) : 0), 0)
+  const inLocals = localProcesses.reduce((n, lp) => n + stepCount(lp.steps), 0)
+  steps = mergeRuns(steps, MAX_STEPS - inRoutes - inLocals, 'Main flow')
   if (exceptionSubprocess) exceptionSubprocess.steps = mergeRuns(exceptionSubprocess.steps, MAX_EXCEPTION_STEPS, 'Exception subprocess')
 
   // --- unique names, placeholder markers removed ------------------------------------------------
@@ -418,12 +485,16 @@ async function importIflow(buffer, { fileName, packageId }) {
     return { ...step, name: uniqueName(s.name || (what ? 'Placeholder' : step.type === 'groovyScript' ? 'Groovy Script' : step.type === 'contentModifier' ? 'Content Modifier' : words(step.type))) }
   }
   const routeSteps = steps.filter((s) => s.type === 'router').flatMap((r) => r.routes.flatMap((x) => x.steps || []))
-  const placeholders = [...steps, ...routeSteps, ...(exceptionSubprocess?.steps || [])].filter((s) => s.placeholder).length
-  steps = steps.map((s) => (s.type === 'router' ? { ...finish(s), routes: s.routes.map((x) => (x.steps ? { ...x, steps: x.steps.map(finish) } : x)) } : finish(s)))
+  const withRoutes = (list) => list.flatMap((s) => [s, ...(s.type === 'router' ? s.routes.flatMap((x) => x.steps || []) : [])])
+  const placeholders = [...steps, ...routeSteps, ...(exceptionSubprocess?.steps || []), ...localProcesses.flatMap((lp) => withRoutes(lp.steps))].filter((s) => s.placeholder).length
+  const finishLine = (list) => list.map((s) => (s.type === 'router' ? { ...finish(s), routes: s.routes.map((x) => (x.steps ? { ...x, steps: x.steps.map(finish) } : x)) } : finish(s)))
+  steps = finishLine(steps)
+
   if (exceptionSubprocess) {
     exceptionSubprocess.steps = exceptionSubprocess.steps.map(finish)
     exceptionSubprocess.name = uniqueName(exceptionSubprocess.name || 'Exception Subprocess 1')
   }
+  for (const lp of localProcesses) lp.steps = finishLine(lp.steps)
 
   const description = truncate(`Imported from ${fileName}.${parsed.description ? ` ${parsed.description}` : ''}`, 1000)
   const spec = {
@@ -435,6 +506,7 @@ async function importIflow(buffer, { fileName, packageId }) {
     steps,
     end,
     ...(exceptionSubprocess && { exceptionSubprocess }),
+    ...(localProcesses.length && { localProcesses }),
     ...(Object.keys(params).length && { parameters: params }),
     ...(resources.length && { resources })
   }

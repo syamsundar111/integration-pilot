@@ -306,20 +306,65 @@ describe('import', () => {
       expect(r.spec.id).toBe('Branchy_Imported')
       expect(r.notes).toContain('iFlow id: Branchy_Imported, a new id (iFlow ids are unique per tenant); change it before proposing if you like')
     })
-    test('error handling: a Process Call to a local process of Content Modifiers and Groovy is copied in', async () => {
+    test('error handling: the Process Call stays, and its local process is imported (phase 2)', async () => {
       const r = await branchy()
-      expect(r.spec.exceptionSubprocess.steps.map((s) => s.name)).toEqual(['CM_SetMessage', 'Script_Groovy_SetCustomHeaders'])
-      expect(r.spec.exceptionSubprocess.steps[0]).toMatchObject({ type: 'contentModifier', properties: [{ name: 'Error_Message', type: 'expression', value: '${exception.message}' }] })
+      expect(r.spec.exceptionSubprocess.steps).toEqual([{ type: 'processCall', name: 'PC_Exception Subprocess', process: 'LIP_Exception Subprocess' }])
+      const lip = r.spec.localProcesses.find((p) => p.name === 'LIP_Exception Subprocess')
+      expect(lip.steps.map((s) => s.name)).toEqual(['CM_SetMessage', 'Script_Groovy_SetCustomHeaders'])
+      expect(lip.steps[0]).toMatchObject({ type: 'contentModifier', properties: [{ name: 'Error_Message', type: 'expression', value: '${exception.message}' }] })
       // the script is missing in the export: a placeholder stands in for it
-      expect(r.spec.exceptionSubprocess.steps[1].description).toMatch(/^REPLACE WITH Groovy script 'Script_Groovy_SetCustomHeaders' \(Groovy_MPLLogs.groovy is missing in the export\)/)
-      expect(r.notes).toContain('PC_Exception Subprocess: the steps of the local process LIP_Exception Subprocess were copied into the exception subprocess (CM_SetMessage, Script_Groovy_SetCustomHeaders)')
-      expect(r.notes.join('\n')).not.toMatch(/Local integration processes are not imported/)
+      expect(lip.steps[1].description).toMatch(/^REPLACE WITH Groovy script 'Script_Groovy_SetCustomHeaders' \(Groovy_MPLLogs.groovy is missing in the export\)/)
+      expect(r.notes.join('\n')).not.toMatch(/copied into|not imported/)
     })
 
     test('an Escalation End in error handling is kept as the subprocess end (phase 1b)', async () => {
       const r = await branchy()
       expect(r.spec.exceptionSubprocess.end).toMatchObject({ event: 'escalation' })
-      expect(r.spec.exceptionSubprocess.steps.at(-1).description).not.toMatch(/Escalation End/)
+      expect(r.spec.exceptionSubprocess.steps.at(-1).description ?? '').not.toMatch(/Escalation End/)
     })
+  })
+})
+
+describe('import: splitters, gathers, process calls and local processes (phase 2)', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: name }] })
+  const split = (name, extra = {}) => ({ type: 'splitter', name, kind: 'iterating', expression: '//item', stopOnException: true, ...extra })
+  const setting = (xml, name, key, value) => {
+    const el = xml.match(new RegExp(`<bpmn2:callActivity id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:callActivity>`))[0]
+    return xml.replace(el, el.replace(new RegExp(`(<key>${key}</key>\\s*)(<value>[^<]*</value>|<value/>)`), `$1<value>${value}</value>`))
+  }
+  const spec = baseSpec({
+    steps: [split('S1'), { type: 'processCall', name: 'PC', process: 'L' }, { type: 'gather', name: 'G', source: '//item', target: '/items' }, split('S2')],
+    localProcesses: [{ name: 'L', steps: [cm('L1')] }]
+  })
+
+  test('a flow the spec holds imports as it is', async () => {
+    const r = await importIflow(await zipWith(spec), { fileName: 'split.zip', packageId: 'PilotReference' })
+    expect(r).toMatchObject({ valid: true, placeholders: 0 })
+    expect(r.spec.steps).toEqual(spec.steps)
+    expect(r.spec.localProcesses).toEqual(spec.localProcesses)
+  })
+
+  test('a splitter the spec cannot hold is a placeholder; its gather then too (no splitter before it)', async () => {
+    const r = await importIflow(await zipWith(spec, (x) => setting(x, 'S1', 'ParallelProcessing', 'true')), { fileName: 'split.zip', packageId: 'PilotReference' })
+    expect(r.valid).toBe(true)
+    expect(r.spec.steps.map((s) => [s.name, s.type, s.description || ''])).toEqual([
+      ['S1', 'contentModifier', "REPLACE WITH Iterating Splitter 'S1' (XPath //item), parallel processing"],
+      ['PC', 'processCall', ''],
+      ['G', 'contentModifier', "REPLACE WITH Gather 'G' (combine at //item into /items) without a splitter before it"],
+      ['S2', 'splitter', '']
+    ])
+  })
+
+  test('a Looping Process Call keeps its loop; a condition without spaces gets them', async () => {
+    const looping = baseSpec({ steps: [{ type: 'processCall', name: 'LPC', process: 'L', loop: { condition: "${property.more} = 'true'", max: 4 } }], localProcesses: [{ name: 'L', steps: [cm('L1')] }] })
+    const r = await importIflow(await zipWith(looping, (x) => x.replace("${property.more} = 'true'", "${property.more}='true'")), { fileName: 'loop.zip', packageId: 'PilotReference' })
+    expect(r.spec.steps).toEqual([{ type: 'processCall', name: 'LPC', process: 'L', loop: { condition: "${property.more} = 'true'", max: 4 } }])
+    expect(r.valid).toBe(true)
+  })
+
+  test('steps a local process cannot hold become placeholders there', async () => {
+    const r = await importIflow(await zipWith(spec, (x) => setting(x, 'L1', 'activityType', 'Splitter')), { fileName: 'split.zip', packageId: 'PilotReference' })
+    expect(r.spec.localProcesses[0].steps[0].description).toMatch(/^REPLACE WITH Splitter 'L1': splitters are supported on the main line only/)
+    expect(r.valid).toBe(true)
   })
 })

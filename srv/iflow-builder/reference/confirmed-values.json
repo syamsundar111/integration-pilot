@@ -47,5 +47,34 @@
       "Others": "Others - not further qualified, set in Ref_Router_Ends (EE_Exception) in the CPI editor, 2026-10-29",
       "RoutingConditionNotMet": "Routing condition not met, set in Ref_Router_Ends (EE_Route) in the CPI editor, 2026-10-29"
     }
+  },
+  "Splitter": {
+    "exprType": {
+      "XPath": "re-selected in Ref_Structure (ITSPL_Orders and GSPL_Orders), 2026-10-29"
+    },
+    "streaming": {
+      "true": "re-selected in Ref_Structure (ITSPL_Orders), 2026-10-29",
+      "false": "re-selected in Ref_Structure (GSPL_Orders), 2026-10-29"
+    },
+    "stopOnException": {
+      "false": "re-selected in Ref_Structure (ITSPL_Orders), 2026-10-29",
+      "true": "re-selected in Ref_Structure (GSPL_Orders), 2026-10-29"
+    },
+    "parallel": {
+      "false": "re-selected in Ref_Structure (ITSPL_Orders and GSPL_Orders), 2026-10-29"
+    }
+  },
+  "Gather": {
+    "messageType": {
+      "SameXMLFormat": "XML (Same Format), re-selected in Ref_Structure (GA_Orders), 2026-10-29"
+    },
+    "aggregationAlgorithm": {
+      "xpath-merge-strategy": "Combine at XPath, re-selected in Ref_Structure (GA_Orders), 2026-10-29"
+    }
+  },
+  "Looping Process Call": {
+    "expressionType": {
+      "Non XML": "re-selected in Ref_Structure (LPC_FetchPages), 2026-10-29"
+    }
   }
 }

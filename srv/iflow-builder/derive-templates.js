@@ -99,6 +99,21 @@ const VALUE_FIELDS = {
     variant: /cname::GatewayRoute\//,
     values: (p) => [['expressionType', p.expressionType]]
   },
+  // splitters (Iterating: cname::Camel, General: cname::GeneralSplitter): expression type and the switches
+  Splitter: {
+    variant: /cname::(Camel|GeneralSplitter)\//,
+    values: (p) => [['exprType', p.exprType], ['streaming', p.Streaming], ['stopOnException', p.StopOnExecution], ['parallel', p.ParallelProcessing]]
+  },
+  // a Gather: incoming format and aggregation algorithm
+  Gather: {
+    variant: /cname::Gather\//,
+    values: (p) => [['messageType', p.messageType], ['aggregationAlgorithm', p.aggregationAlgorithm]]
+  },
+  // a Looping Process Call: the condition type
+  'Looping Process Call': {
+    variant: /cname::LoopingProcess\//,
+    values: (p) => [['expressionType', p.expressionType]]
+  },
   // an Escalation End: its category (ErrorCode: Others, RoutingConditionNotMet, ReceiverNotFound, ...)
   'Escalation End': {
     variant: /cname::EscalationEndEvent\//,
@@ -166,6 +181,7 @@ async function main() {
     '{{PROCESS_ELEMENTS}}' +
     '{{SEQUENCE_FLOWS}}' +
     '    </bpmn2:process>\n' +
+    '{{LOCAL_PROCESSES}}' +
     diagramHead +
     '{{SHAPES}}' +
     '{{EDGES}}' +
@@ -288,6 +304,52 @@ async function main() {
   })
   t['iflw/end-error.xml'] = apply(block(re, 'id="EndEvent_1"'), 'end-error', {
     attrs: { 'id="EndEvent_1"': 'id="{{ID}}"', 'name="ERR_Route"': 'name="{{NAME}}"', '>SequenceFlow_8<': '>{{INCOMING}}<' }
+  })
+
+  // Splitters, Gather, Process Calls and local processes (Ref_Structure). Expression type XPath, Parallel
+  // Processing off, the timeout and thread count stay as exported (the only values in the references)
+  const structure = await readZip('Ref_Structure.zip')
+  const st = structure.iflw
+  const structureStep = (id, name, incoming, outgoing, props) =>
+    apply(block(st, `id="${id}"`), id, {
+      attrs: { [`id="${id}"`]: 'id="{{ID}}"', [`name="${name}"`]: 'name="{{NAME}}"', [`>${incoming}<`]: '>{{INCOMING}}<', [`>${outgoing}<`]: '>{{OUTGOING}}<' },
+      props
+    })
+  const splitterProps = { Streaming: 'STREAMING_VALUE', StopOnExecution: 'STOP_ON_EXCEPTION_VALUE', splitExprValue: 'EXPRESSION_VALUE', grouping: 'GROUPING_VALUE' }
+  t['iflw/step-splitter-iterating.xml'] = structureStep('CallActivity_8', 'ITSPL_Orders', 'SequenceFlow_7', 'SequenceFlow_8', { ...splitterProps, tokenValue: 'TOKEN_VALUE' })
+  t['iflw/step-splitter-general.xml'] = structureStep('CallActivity_22', 'GSPL_Orders', 'SequenceFlow_21', 'SequenceFlow_22', splitterProps)
+  t['iflw/step-gather.xml'] = structureStep('CallActivity_15', 'GA_Orders', 'SequenceFlow_14', 'SequenceFlow_15', { sourceXPath: 'SOURCE_VALUE', targetXPath: 'TARGET_VALUE' })
+  t['iflw/step-process-call.xml'] = structureStep('CallActivity_14', 'PC_HandleOrder', 'SequenceFlow_8', 'SequenceFlow_14', { processId: 'PROCESS_ID_VALUE' })
+  const loop = block(st, 'id="CallActivity_21"')
+  const loopId = loop.match(/id="(StandardLoopCharacteristics_\d+)"/)[1] // with an export timestamp
+  const loopCondition = loop.match(/id="(FormalExpression_\d+)"/)[1]
+  t['iflw/step-process-call-looping.xml'] = apply(loop, 'process-call-looping', {
+    attrs: {
+      'id="CallActivity_21"': 'id="{{ID}}"',
+      'name="LPC_FetchPages"': 'name="{{NAME}}"',
+      '>SequenceFlow_15<': '>{{INCOMING}}<',
+      '>SequenceFlow_21<': '>{{OUTGOING}}<',
+      [`id="${loopId}" loopMaximum="5"`]: 'id="{{LOOP_ID}}" loopMaximum="{{MAX}}"',
+      [`id="${loopCondition}"`]: 'id="{{CONDITION_ID}}"',
+      ">${property.hasMore} = 'true'<": '>{{CONDITION}}<'
+    },
+    props: { processId: 'PROCESS_ID_VALUE', loopId: 'LOOP_ID_VALUE' }
+  })
+  // a local process: its participant (pool), the process with its settings, its start and end events
+  t['iflw/participant-process.xml'] = apply(block(st, 'id="Participant_Process_9"'), 'participant-process', {
+    attrs: { 'id="Participant_Process_9"': 'id="{{ID}}"', 'name="LIP_HandleOrder"': 'name="{{NAME}}"', 'processRef="Process_9"': 'processRef="{{PROCESS}}"' }
+  })
+  t['iflw/process-local.xml'] =
+    apply(between(st, '<bpmn2:process id="Process_9"', '<bpmn2:endEvent id="EndEvent_10"'), 'process-local', {
+      attrs: { 'id="Process_9"': 'id="{{ID}}"', 'name="LIP_HandleOrder"': 'name="{{NAME}}"' }
+    }) +
+    '{{ELEMENTS}}' +
+    '    </bpmn2:process>\n'
+  t['iflw/start-local.xml'] = apply(block(st, 'id="StartEvent_11"'), 'start-local', {
+    attrs: { 'id="StartEvent_11"': 'id="{{ID}}"', 'name="Start 1"': 'name="{{NAME}}"', '>SequenceFlow_12<': '>{{OUTGOING}}<' }
+  })
+  t['iflw/end-local.xml'] = apply(block(st, 'id="EndEvent_10"'), 'end-local', {
+    attrs: { 'id="EndEvent_10"': 'id="{{ID}}"', 'name="End 1"': 'name="{{NAME}}"', '>SequenceFlow_13<': '>{{INCOMING}}<' }
   })
 
   t['iflw/step-groovy-script.xml'] = step('CallActivity_8', 'Groovy Script 1', 'SequenceFlow_6', 'SequenceFlow_14', { script: 'SCRIPT_VALUE' })

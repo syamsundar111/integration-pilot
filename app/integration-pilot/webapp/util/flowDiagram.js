@@ -15,7 +15,10 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     xmlToJson: 'XML → JSON',
     requestReplyHttp: 'Request Reply',
     writeVariables: 'Write Variables',
-    router: 'Router'
+    router: 'Router',
+    splitter: 'Splitter',
+    gather: 'Gather',
+    processCall: 'Process Call'
   }
   const DEFAULT_NAMES = {
     contentModifier: 'Content Modifier',
@@ -23,8 +26,15 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     jsonToXml: 'JSON to XML Converter',
     xmlToJson: 'XML to JSON Converter',
     requestReplyHttp: 'Request Reply',
-    writeVariables: 'Write Variables'
+    writeVariables: 'Write Variables',
+    iteratingSplitter: 'Iterating Splitter',
+    generalSplitter: 'General Splitter',
+    gather: 'Gather',
+    processCall: 'Process Call',
+    loopingProcessCall: 'Looping Process Call'
   }
+  /** The key of a step's default name, as the builder counts them (validator.js defaultKey) */
+  const defaultKey = (s) => (s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type)
   const ICONS = {
     https: 'sap-icon://internet-browser',
     timer: 'sap-icon://fob-watch',
@@ -39,6 +49,9 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     requestReplyHttp: 'sap-icon://outbox',
     writeVariables: 'sap-icon://save',
     router: 'sap-icon://split',
+    splitter: 'sap-icon://expand-group',
+    gather: 'sap-icon://collapse-group',
+    processCall: 'sap-icon://process',
     unknown: 'sap-icon://puzzle'
   }
 
@@ -50,15 +63,40 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     return info ? `<span class="ipFlowIcon" style="font-family:'${info.fontFamily}'" aria-hidden="true">${info.content}</span>` : ''
   }
 
+  /** Short details of a splitter, gather or process call (spec and parsed steps alike) */
+  const detailOf = (s) =>
+    s.type === 'splitter'
+      ? `${s.kind === 'general' ? 'General' : s.kind === 'iterating' ? 'Iterating' : s.splitType || ''} ${s.expression || ''}`.trim()
+      : s.type === 'gather'
+        ? `into ${s.target || '?'}`
+        : s.type === 'processCall'
+          ? `→ ${s.process || '?'}${s.loop ? `, loop max ${s.loop.max}` : ''}`
+          : undefined
+
+  /** Marks the steps after a splitter up to its gather (or the end) as per item */
+  function markPerItem(steps) {
+    let split = false
+    for (const s of steps) {
+      if (s.type === 'gather') split = false
+      else if (split) s.perItem = true
+      if (s.type === 'splitter') split = true
+    }
+    return steps
+  }
+
   /** Spec (proposal) -> diagram model */
   function fromSpec(spec) {
     const counters = {}
     let rr = 0
+    const nameOf = (s) => {
+      const key = defaultKey(s)
+      counters[key] = (counters[key] || 0) + 1
+      return s.name || `${DEFAULT_NAMES[key] || s.type} ${counters[key]}`
+    }
     return {
       trigger: spec.trigger.type === 'httpsSender' ? { kind: 'https', label: 'HTTPS', detail: spec.trigger.address } : { kind: 'timer', label: 'Timer', detail: timerText(spec.trigger) },
-      steps: spec.steps.map((s) => {
-        counters[s.type] = (counters[s.type] || 0) + 1
-        const name = s.name || `${DEFAULT_NAMES[s.type] || s.type} ${counters[s.type]}`
+      steps: markPerItem(spec.steps.map((s) => {
+        const name = nameOf(s)
         if (s.type === 'requestReplyHttp') return { type: s.type, name, detail: s.method, receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
         if (s.type === 'groovyScript') return { type: s.type, name, detail: `${s.fileName}.groovy` }
         if (s.type === 'contentModifier') {
@@ -74,15 +112,12 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
             routes: (s.routes || []).map((r) => ({
               name: r.name,
               condition: r.default ? null : r.condition,
-              steps: (r.steps || []).map((x) => {
-                counters[x.type] = (counters[x.type] || 0) + 1
-                return x.name || `${DEFAULT_NAMES[x.type] || x.type} ${counters[x.type]}`
-              }),
+              steps: (r.steps || []).map(nameOf),
               end: r.end ? r.end.event || 'message' : null
             }))
           }
-        return { type: s.type, name }
-      }),
+        return { type: s.type, name, detail: detailOf(s) }
+      })),
       end: {
         ...(spec.end.type === 'httpReceiver' && { receiver: { name: spec.end.system || 'Receiver', detail: `${spec.end.method} ${spec.end.url}` } }),
         event: spec.end.event || 'message',
@@ -95,13 +130,11 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       exception: spec.exceptionSubprocess
         ? {
             name: spec.exceptionSubprocess.name || 'Exception Subprocess 1',
-            steps: (spec.exceptionSubprocess.steps || []).map((s) => {
-              counters[s.type] = (counters[s.type] || 0) + 1
-              return s.name || `${DEFAULT_NAMES[s.type] || s.type} ${counters[s.type]}`
-            }),
+            steps: (spec.exceptionSubprocess.steps || []).map(nameOf),
             end: (spec.exceptionSubprocess.end && spec.exceptionSubprocess.end.event) || 'message'
           }
-        : null
+        : null,
+      locals: (spec.localProcesses || []).map((lp) => ({ name: lp.name, steps: (lp.steps || []).map(nameOf) }))
     }
   }
 
@@ -133,7 +166,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
                 ? s.expressionType === 'XML'
                   ? 'XML (XPath)'
                   : 'Non-XML'
-                : undefined,
+                : detailOf(s),
       receiver: s.type === 'requestReplyHttp' ? { name: s.system || 'Receiver', detail: s.url } : undefined,
       routes:
         routed && s.type === 'router'
@@ -142,7 +175,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     })
     return {
       trigger,
-      steps: (routed ? routed.steps : p.steps || []).map(parsedStep),
+      steps: markPerItem((routed ? routed.steps : p.steps || []).map(parsedStep)),
       end: {
         ...(e.type === 'httpReceiver'
           ? { receiver: { name: e.system || 'Receiver', detail: `${e.method || ''} ${e.url || ''}`.trim() } }
@@ -153,6 +186,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
         none: !!routed && !routed.end
       },
       exception: p.exceptionSubprocess ? { name: p.exceptionSubprocess.name, steps: (p.exceptionSubprocess.steps || []).map((s) => s.name), end: p.exceptionSubprocess.end || 'message' } : null,
+      locals: (p.localProcessSteps || []).map((lp) => ({ name: lp.name, steps: lp.steps.map((s) => s.name) })),
       linear: routed ? true : p.linear
     }
   }
@@ -196,7 +230,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       parts.push(
         `<div class="ipFlowStepCol"><div class="ipFlowStep${known ? '' : ' ipFlowUnknown'}"><div class="ipFlowStepHead"><div class="ipFlowStepIcon">${icon(s.type)}</div><div class="ipFlowStepText"><div class="ipFlowStepName" title="${esc(
           s.name
-        )}">${esc(s.name)}</div><div class="ipFlowStepType">${esc(STEP_LABELS[s.type] || s.type)}</div></div></div>${s.detail ? `<div class="ipFlowMono">${esc(s.detail)}</div>` : ''}</div>${
+        )}">${esc(s.name)}</div><div class="ipFlowStepType">${esc(STEP_LABELS[s.type] || s.type)}${s.perItem ? ' · per item' : ''}</div></div></div>${s.detail ? `<div class="ipFlowMono">${esc(s.detail)}</div>` : ''}</div>${
           s.receiver ? `<div class="ipFlowDash"></div>${receiver(s.receiver)}` : ''
         }${s.routes ? routesHtml(s.routes) : ''}</div>`
       )
@@ -215,7 +249,10 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           .map(esc)
           .join(' → ')}</div>`
       : ''
-    return `<div class="ipFlow" role="img" aria-label="${esc(label)}"><div class="ipFlowRow">${parts.join('')}</div>${exception}${note}</div>`
+    const locals = (model.locals || [])
+      .map((lp) => `<div class="ipFlowNote">Local process ${esc(lp.name)}: ${['Start', ...lp.steps, 'End'].map(esc).join(' → ')}</div>`)
+      .join('')
+    return `<div class="ipFlow" role="img" aria-label="${esc(label)}"><div class="ipFlowRow">${parts.join('')}</div>${exception}${locals}${note}</div>`
   }
 
   return { fromSpec, fromParsed, toHtml }

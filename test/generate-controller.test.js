@@ -322,11 +322,55 @@ describe('proposal panel for routers (phase 1b)', () => {
   const xmlRouter = { type: 'router', name: 'RT_Type', expressionType: 'XML', routes: [{ name: 'X', condition: "/a = 'x'" }, { name: 'Other', default: true }] }
   const base = (steps, extra = {}) => ({ id: 'F', name: 'F', trigger: { type: 'timer', mode: 'once' }, steps, end: { type: 'none' }, ...extra })
 
+  test('splitters, gathers, process calls and local processes (phase 2): plain words, per-item steps, callers, the gather note', () => {
+    const lp = { name: 'LIP_Handle', steps: [cm('H1'), { type: 'groovyScript', name: 'H2', fileName: 'handle', code: 'x' }] }
+    const active = activeFor(
+      base(
+        [
+          cm('A'),
+          { type: 'splitter', name: 'SPL', kind: 'general', expression: '/orders/order', stopOnException: false },
+          { type: 'processCall', name: 'PC', process: 'LIP_Handle' },
+          cm('B'),
+          { type: 'gather', name: 'GA', source: '//order', target: '/orders' },
+          { type: 'processCall', name: 'LPC', process: 'LIP_Handle', loop: { condition: "${property.more} = 'true'", max: 5 } },
+          { type: 'splitter', name: 'SPL2', kind: 'iterating', expression: '//x', stopOnException: true }
+        ],
+        { localProcesses: [lp, { name: 'LIP_Unused', steps: [cm('U1')] }] }
+      )
+    )
+    const card = (title) => active.stepCards.find((c) => c.title === title)
+    expect(card('2. SPL')).toMatchObject({ type: 'General Splitter', lines: 'XPath /orders/order\nOne failing item does not stop the rest\nSteps 3–4 run once per item; GA (step 5) combines the items again' })
+    expect(card('7. SPL2')).toMatchObject({ type: 'Iterating Splitter', lines: 'XPath //x\nOne failing item stops the rest\nNo step runs per item, up to the end' })
+    expect(card('5. GA')).toMatchObject({ type: 'Gather', lines: 'Combines the items: //order into /orders (XML, same format)' })
+    expect(card('6. LPC')).toMatchObject({ type: 'Looping Process Call', lines: "Calls local process LIP_Handle\nAgain while ${property.more} = 'true', at most 5 times" })
+    expect(card('LIP_Handle')).toMatchObject({ type: 'Local Process', lines: 'Called by PC, LPC' })
+    expect(card('LIP_Unused')).toMatchObject({ lines: 'No step calls it, so it never runs' })
+    expect(card('L1.2 H2')).toMatchObject({ type: 'Groovy Script' })
+    expect(active.gatherText).toBe('Exchange properties set while processing one item do not reach the steps after GA: results must travel in the message body.')
+    expect(active.scripts.map((x) => x.fileName)).toEqual(['handle.groovy']) // scripts of local processes are listed too
+    expect(activeFor(base([cm('A')])).gatherText).toBe('')
+  })
+
   test('an XML router after a Content Modifier (routers in between skipped) gets the XML input notice', () => {
     const nonXml = { type: 'router', name: 'RT_Check', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1' }, { name: 'D', default: true }] }
     expect(activeFor(base([cm('CM_SetInput'), nonXml, xmlRouter])).xmlRouterText).toMatch(/on the routes of RT_Type \(after CM_SetInput\): it cannot tell/)
     expect(activeFor(base([{ type: 'jsonToXml', name: 'ToXml' }, xmlRouter])).xmlRouterText).toBe('')
     expect(activeFor(base([cm('A'), nonXml])).xmlRouterText).toBe('')
+    // phase 2 tenant check: CPI shows the notice after a splitter too; only a JSON to XML converter is known to produce XML
+    const split = { type: 'splitter', name: 'SPL', kind: 'iterating', expression: '//a', stopOnException: false }
+    expect(activeFor(base([split, xmlRouter])).xmlRouterText).toMatch(/on the routes of RT_Type \(after SPL\): it cannot tell that the step before produces XML/)
+    expect(activeFor(base([xmlRouter])).xmlRouterText).toMatch(/RT_Type \(first step\)/)
+    // routers in local processes too, with their route steps numbered L1.2.1.1
+    const lp = { name: 'L', steps: [cm('L1'), { ...xmlRouter, name: 'LR', routes: [{ name: 'X', condition: "/a = 'x'", steps: [cm('InLocalRoute')] }, { name: 'Other', default: true }] }] }
+    const active = activeFor(base([{ type: 'processCall', name: 'PC', process: 'L' }], { localProcesses: [lp] }))
+    expect(active.xmlRouterText).toMatch(/on the routes of LR \(after L1\)/)
+    expect(active.stepCards.find((c) => c.title === 'L1.2.1.1 InLocalRoute')).toMatchObject({ type: 'Content Modifier · route X' })
+    expect(active.xmlRouterText).toMatch(/^CPI may show the notice/) // the tenant check showed none after a step that sets no body
+    // a route End in a local process returns to the caller (the main flow goes on after the process call)
+    const ending = { ...lp, steps: [{ ...xmlRouter, name: 'LR', routes: [{ name: 'X', condition: "/a = 'x'", end: { event: 'message' } }, { name: 'Other', default: true }] }] }
+    expect(activeFor(base([{ type: 'processCall', name: 'PC', process: 'L' }], { localProcesses: [ending] })).stepCards.find((c) => c.title === 'L1.1 LR').lines).toBe(
+      "X: /a = 'x' → End (returns to the caller)\nOther: default → continues"
+    )
   })
 
   test('route steps are numbered under their router; End and error handling show their end events (Escalation End with its category)', () => {

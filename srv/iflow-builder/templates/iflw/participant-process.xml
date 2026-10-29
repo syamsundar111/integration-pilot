@@ -1,0 +1,3 @@
+        <bpmn2:participant id="{{ID}}" ifl:type="IntegrationProcess" name="{{NAME}}" processRef="{{PROCESS}}">
+            <bpmn2:extensionElements/>
+        </bpmn2:participant>

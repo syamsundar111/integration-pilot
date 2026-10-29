@@ -190,3 +190,56 @@ describe('Escalation End category on update and import (phase 1b)', () => {
     expect(r.notes).toContain('Exception subprocess: the escalation category ReceiverNotFound became Others; set ReceiverNotFound in the CPI web editor')
   })
 })
+
+describe('splitters, gathers, process calls and local processes on update (phase 2)', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: name }] })
+  const phase2 = baseSpec({
+    id: 'Blocker_Split',
+    steps: [
+      { type: 'splitter', name: 'Split', kind: 'iterating', expression: '//item', stopOnException: false },
+      { type: 'processCall', name: 'Handle', process: 'LIP_Handle' },
+      { type: 'gather', name: 'Gather', source: '//item', target: '/items' },
+      { type: 'processCall', name: 'Loop', process: 'LIP_Handle', loop: { condition: "${property.more} = 'true'", max: 3 } }
+    ],
+    exceptionSubprocess: { steps: [{ type: 'processCall', name: 'OnError', process: 'LIP_Handle' }], end: { event: 'error' } },
+    localProcesses: [{ name: 'LIP_Handle', steps: [cm('H1'), { type: 'requestReplyHttp', name: 'H2', system: 'Backend', url: 'https://backend.example.com/api', method: 'POST', authType: 'None' }] }]
+  })
+  /** Builds phase2, patches the element with the given name, and reads it back like an update */
+  async function readBackPatched(name, patch = (el) => el) {
+    const zip = await JSZip.loadAsync(Buffer.from((await build(phase2)).zipBase64, 'base64'))
+    const file = Object.keys(zip.files).find((f) => IFLW.test(f))
+    const xml = await zip.file(file).async('string')
+    const el = xml.match(new RegExp(`<bpmn2:callActivity id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:callActivity>`))[0]
+    zip.file(file, xml.replace(el, patch(el)))
+    return specFromParsed(await parse(await zip.generateAsync({ type: 'nodebuffer' })), { packageId: phase2.packageId })
+  }
+
+  test("the builder's own output gives the same spec back", async () => {
+    const r = await readBackPatched('Split')
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps).toEqual(phase2.steps)
+    expect(r.spec.exceptionSubprocess.steps).toEqual(phase2.exceptionSubprocess.steps)
+    expect(r.spec.localProcesses).toEqual(phase2.localProcesses)
+  })
+
+  test('settings the builder writes as fixed values are blockers when they differ', async () => {
+    expect((await readBackPatched('Split', (el) => setting(el, 'ParallelProcessing', 'true'))).blockers).toEqual([
+      "step 1 'Split': ParallelProcessing is 'true'; an update would reset it to 'false'"
+    ])
+    expect((await readBackPatched('Split', (el) => setting(el, 'exprType', 'LineBreak'))).blockers).toEqual(["step 1 'Split': exprType is 'LineBreak'; an update would reset it to 'XPath'"])
+    expect((await readBackPatched('Split', (el) => setting(el, 'timeOut', '600'))).blockers).toEqual(["step 1 'Split': timeOut is '600'; an update would reset it to '300'"])
+    expect((await readBackPatched('Gather', (el) => setting(el, 'aggregationAlgorithm', 'sap-pi-multi-mapping'))).blockers).toEqual([
+      "step 3 'Gather': aggregationAlgorithm is 'sap-pi-multi-mapping'; an update would reset it to 'xpath-merge-strategy'"
+    ])
+    expect((await readBackPatched('Loop', (el) => setting(el, 'expressionType', 'XML'))).blockers).toEqual(["step 4 'Loop': expressionType is 'XML'; an update would reset it to 'Non XML'"])
+  })
+
+  test('other splitters and process calls are blockers', async () => {
+    expect((await readBackPatched('Split', (el) => setting(el, 'splitType', 'Tokenizer'))).blockers).toEqual([
+      "step 1 'Split': a Tokenizer is not supported by the spec (only Iterating and General Splitter)"
+    ])
+    expect((await readBackPatched('Handle', (el) => setting(el, 'subActivityType', 'IdempotentProcess'))).blockers).toEqual([
+      "step 2 'Handle': a IdempotentProcess is not supported by the spec (only Process Call and Looping Process Call)"
+    ])
+  })
+})

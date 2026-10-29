@@ -107,7 +107,10 @@ function splitUrl(url, params = {}) {
 
 /** Parameters used as the whole URL of an HTTP receiver ({{P}}) */
 function receiverParams(spec) {
-  const calls = [...specSteps.mainSteps(spec).map((x) => x.step).filter((s) => s?.type === 'requestReplyHttp'), ...(spec?.end?.type === 'httpReceiver' ? [spec.end] : [])]
+  const calls = [
+    ...[...specSteps.mainSteps(spec), ...specSteps.localSteps(spec)].map((x) => x.step).filter((s) => s?.type === 'requestReplyHttp'),
+    ...(spec?.end?.type === 'httpReceiver' ? [spec.end] : [])
+  ]
   return calls.map((c) => String(c.url ?? '').match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]).filter(Boolean)
 }
 
@@ -152,7 +155,8 @@ const L = {
   SUB_GAP: 30, // main flow -> exception subprocess below it
   SUB_H: 140,
   SUB_PAD: 40, // subprocess border -> its first/last element
-  POOL_PAD: 30 // exception subprocess -> pool bottom
+  POOL_PAD: 30, // exception subprocess -> pool bottom
+  LOCAL_GAP: 60 // pool -> the next local process pool below it (or its receivers)
 }
 
 const num = (n) => (Number.isInteger(n) ? n.toFixed(1) : String(n))
@@ -197,17 +201,9 @@ function chain(nodes, nextId) {
 
 /** Copy of the spec with the code of attached scripts filled in (groovyScript steps without code) */
 function injectAttachments(spec, attachments = {}) {
-  const fillCode = (s) =>
-    s?.type === 'groovyScript' && s.code == null && attachments[`${s.fileName}.groovy`] != null
-      ? { ...s, code: attachments[`${s.fileName}.groovy`] }
-      : s?.type === 'router' && Array.isArray(s.routes)
-        ? { ...s, routes: s.routes.map((r) => (Array.isArray(r?.steps) ? { ...r, steps: r.steps.map(fillCode) } : r)) }
-        : s
-  return {
-    ...spec,
-    ...(Array.isArray(spec.steps) && { steps: spec.steps.map(fillCode) }),
-    ...(spec.exceptionSubprocess && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: (spec.exceptionSubprocess.steps || []).map(fillCode) } })
-  }
+  return specSteps.mapSteps(spec, (s) =>
+    s?.type === 'groovyScript' && s.code == null && attachments[`${s.fileName}.groovy`] != null ? { ...s, code: attachments[`${s.fileName}.groovy`] } : s
+  )
 }
 
 /**
@@ -230,32 +226,31 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const nextId = (prefix) => `${prefix}_${++counter}`
 
   // --- flow graph ------------------------------------------------------------------
-  // Nodes in column order: every node gets its own column, so a receiver connector straight up never
-  // crosses another step; lanes: 0 is the main line, each route with steps or an end gets a lane below.
-  // A router's routes either end (their end event) or stay open: the next main-line element (or the main
-  // end) takes up every open route, which is how routes join again.
-  const named = new Map(names.flat.map((x) => [x.step, x]))
-  const nodes = []
-  const flows = []
-  const addNode = (n, lane) => {
-    Object.assign(n, { id: nextId(n.prefix), lane, col: nodes.length, incoming: [], outgoing: [] })
-    nodes.push(n)
+  // A line (the main line, or a local process) is drawn the same way. Nodes in column order: every node gets its
+  // own column, so a receiver connector straight up (or down) never crosses another step; lanes: 0 is the line
+  // itself, each route with steps or an end gets a lane below. A router's routes either end (their end event) or
+  // stay open: the next element of the line (or its end) takes up every open route, which is how routes join again.
+  const named = new Map([...names.flat, ...names.local].map((x) => [x.step, x]))
+  const newLine = () => ({ nodes: [], flows: [], lanes: 0 })
+  const addNode = (line, n, lane) => {
+    Object.assign(n, { id: nextId(n.prefix), lane, col: line.nodes.length, incoming: [], outgoing: [] })
+    line.nodes.push(n)
     return n
   }
   // target may come later: a route that continues without steps gets its flow now, so the router's routes keep
-  // the spec's order (CPI evaluates them in order), and the next main-line element becomes its target
-  const connect = (source, target, route) => {
+  // the spec's order (CPI evaluates them in order), and the next element of the line becomes its target
+  const connect = (line, source, target, route) => {
     const f = { id: nextId('SequenceFlow'), source, target, route }
     source.outgoing.push(f.id)
     if (target) target.incoming.push(f.id)
-    flows.push(f)
+    line.flows.push(f)
     return f
   }
-  const reach = (o, target) => {
+  const reach = (line, o, target) => {
     if (o.pending) {
       o.pending.target = target
       target.incoming.push(o.pending.id)
-    } else connect(o.node, target, o.route)
+    } else connect(line, o.node, target, o.route)
   }
   let endCount = 1 // End, End 2, End 3, ... (names given in the spec win)
   const endNode = (end, fallback) => ({
@@ -267,41 +262,49 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     w: L.EVENT,
     h: L.EVENT
   })
+  // a local process ends with its own plain End (the validator allows only that in its routes)
+  const localEnd = (end) => ({ kind: 'localEnd', name: end?.name || `End ${++endCount}`, prefix: 'EndEvent', w: L.EVENT, h: L.EVENT })
 
-  const start = addNode({ kind: 'start', prefix: 'StartEvent', w: L.EVENT, h: L.EVENT }, 0)
-  if (spec.trigger.type === 'timer') Object.assign(start, { name: 'Start Timer 1', timerId: nextId('TimerEventDefinition'), schedule: cpiValues.scheduleOf(spec.trigger) })
-  else start.name = 'Start'
-
-  let open = [{ node: start }] // where the next element connects from (and the route, for a flow that leaves a router)
-  let lanes = 0
-  const stepOn = (step, lane) => addNode(stepNode(step, named.get(step).name, named.get(step).system), lane)
-  for (const step of spec.steps) {
-    if (step.type !== 'router') {
-      const n = stepOn(step, 0)
-      for (const o of open) reach(o, n)
-      open = [{ node: n }]
-      continue
-    }
-    const gateway = addNode({ kind: 'router', step, name: named.get(step).name, prefix: 'ExclusiveGateway', w: L.GATEWAY, h: L.GATEWAY }, 0)
-    for (const o of open) reach(o, gateway)
-    open = []
-    for (const route of step.routes) {
-      const lane = route.steps?.length || route.end ? ++lanes : 0
-      let from = { node: gateway, route: { route, router: step } }
-      for (const s of route.steps || []) {
-        const n = stepOn(s, lane)
-        connect(from.node, n, from.route)
-        from = { node: n }
+  /** Draws start -> steps (routers with their routes) -> the line's end; returns the end node (null when every route of the last router ends) */
+  function drawLine(line, steps, start, { routeEnd, lineEnd }) {
+    addNode(line, start, 0)
+    let open = [{ node: start }] // where the next element connects from (and the route, for a flow that leaves a router)
+    const stepOn = (step, lane) => addNode(line, stepNode(step, named.get(step).name, named.get(step).system), lane)
+    for (const step of steps) {
+      if (step.type !== 'router') {
+        const n = stepOn(step, 0)
+        for (const o of open) reach(line, o, n)
+        open = [{ node: n }]
+        continue
       }
-      if (route.end) connect(from.node, addNode(endNode(route.end), lane), from.route)
-      else if (from.node === gateway) open.push({ pending: connect(gateway, null, from.route) }) // continues at once: its flow now
-      else open.push(from)
+      const gateway = addNode(line, { kind: 'router', step, name: named.get(step).name, prefix: 'ExclusiveGateway', w: L.GATEWAY, h: L.GATEWAY }, 0)
+      for (const o of open) reach(line, o, gateway)
+      open = []
+      for (const route of step.routes) {
+        const lane = route.steps?.length || route.end ? ++line.lanes : 0
+        let from = { node: gateway, route: { route, router: step } }
+        for (const s of route.steps || []) {
+          const n = stepOn(s, lane)
+          connect(line, from.node, n, from.route)
+          from = { node: n }
+        }
+        if (route.end) connect(line, from.node, addNode(line, routeEnd(route.end), lane), from.route)
+        else if (from.node === gateway) open.push({ pending: connect(line, gateway, null, from.route) }) // continues at once: its flow now
+        else open.push(from)
+      }
     }
+    const end = open.length ? addNode(line, lineEnd(), 0) : null
+    for (const o of open) reach(line, o, end)
+    for (const g of line.nodes.filter((n) => n.kind === 'router')) g.defaultFlow = line.flows.find((f) => f.source === g && f.route?.route.default)?.id
+    return end
   }
+
+  const start = { kind: 'start', prefix: 'StartEvent', w: L.EVENT, h: L.EVENT, name: spec.trigger.type === 'timer' ? 'Start Timer 1' : 'Start' }
+  const mainLine = newLine()
   // the main end: none when every route of the last router ends (the validator requires end "none" then)
-  const end = open.length ? addNode(endNode(spec.end, 'End'), 0) : null
-  for (const o of open) reach(o, end)
-  for (const g of nodes.filter((n) => n.kind === 'router')) g.defaultFlow = flows.find((f) => f.source === g && f.route?.route.default)?.id
+  const end = drawLine(mainLine, spec.steps, start, { routeEnd: (e) => endNode(e), lineEnd: () => endNode(spec.end, 'End') })
+  if (spec.trigger.type === 'timer') Object.assign(start, { timerId: nextId('TimerEventDefinition'), schedule: cpiValues.scheduleOf(spec.trigger) })
+  const { nodes, flows, lanes } = mainLine
 
   // --- layout ------------------------------------------------------------------------
   // receivers of request-reply steps sit above the pool, in their step's column; the end receiver right of it
@@ -330,6 +333,33 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     sub.flows = chain(sub.nodes, nextId)
     poolW = Math.max(poolW, sub.x + sub.w + L.SUB_PAD - L.POOL_X)
     poolH = sub.y + sub.h + L.POOL_PAD - poolY
+  }
+
+  // Local processes: a pool each below the main pool (start -> steps -> end), the receivers of its request-reply
+  // steps below it, so none crosses another pool. Their ids come after the main flow's: Process_1 is the main process.
+  const locals = (spec.localProcesses || []).map((lp) => {
+    const id = nextId('Process')
+    return { lp, id, participantId: `Participant_${id}` }
+  })
+  const processIds = new Map(locals.map((l) => [l.lp.name, l.id])) // a process call refers to the process id
+  let localY = poolY + poolH + L.LOCAL_GAP
+  for (const l of locals) {
+    const k = locals.indexOf(l) + 1
+    l.line = newLine()
+    drawLine(l.line, l.lp.steps, { kind: 'localStart', name: `Start ${k}`, prefix: 'StartEvent', w: L.EVENT, h: L.EVENT }, { routeEnd: localEnd, lineEnd: () => localEnd() })
+    l.nodes = l.line.nodes
+    l.flows = l.line.flows
+    // the same columns and lanes as the main pool, from the top of this pool
+    const cy = (lane) => localY + L.POOL_H / 2 + lane * L.LANE
+    for (const n of l.nodes) Object.assign(n, { x: colCx(n.col) - n.w / 2, y: cy(n.lane) - n.h / 2 })
+    const h = Math.max(L.POOL_H, cy(l.line.lanes) + L.TASK_H / 2 + L.POOL_PAD - localY)
+    Object.assign(l, { x: L.POOL_X, y: localY, w: Math.max(colCx(l.nodes.length - 1) + L.TASK_W / 2 + L.GAP - L.POOL_X, L.MIN_POOL_W), h })
+    localY += h + (l.nodes.some((n) => n.step?.type === 'requestReplyHttp') ? L.ABOVE_GAP + L.PART_H : 0) + L.LOCAL_GAP
+  }
+  // a process call names its local process by id; a looping one has its loop and condition ids
+  for (const n of [...nodes, ...(sub ? sub.nodes : [])].filter((x) => x.step?.type === 'processCall')) {
+    n.processId = processIds.get(n.step.process)
+    if (n.step.loop) Object.assign(n, { loopId: nextId('StandardLoopCharacteristics'), conditionId: nextId('FormalExpression') })
   }
 
   // Participants + adapters (message flows)
@@ -398,6 +428,12 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     mf.from = [n.x + L.TASK_W / 2, n.y]
     mf.to = [p.x + L.PART_W / 2, p.y + L.PART_H]
   }
+  for (const l of locals)
+    for (const n of l.nodes.filter((x) => x.step?.type === 'requestReplyHttp')) {
+      const { p, mf } = addReceiver(n, n.step, n.system, { x: n.x, y: l.y + l.h + L.ABOVE_GAP })
+      mf.from = [n.x + L.TASK_W / 2, n.y + L.TASK_H]
+      mf.to = [p.x + L.PART_W / 2, p.y]
+    }
   if (spec.end.type === 'httpReceiver') {
     const { p, mf } = addReceiver(end, spec.end, names.endSystem, { x: L.POOL_X + poolW + L.RECEIVER_GAP, y: cy0 - L.PART_H / 2 })
     mf.from = [end.x + L.EVENT / 2, cy0]
@@ -406,9 +442,9 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   for (const mf of messageFlows) if (mf.vars) mf.xml = fill('iflw/messageflow-http-receiver.xml', { ID: mf.id, ...mf.vars })
 
   // --- XML assembly ----------------------------------------------------------------
-  const participantXml = participants
-    .map((p) => fill(p.kind === 'sender' ? 'iflw/participant-sender.xml' : 'iflw/participant-receiver.xml', { ID: p.id, NAME: escAttr(p.name) }))
-    .join('')
+  const participantXml =
+    participants.map((p) => fill(p.kind === 'sender' ? 'iflw/participant-sender.xml' : 'iflw/participant-receiver.xml', { ID: p.id, NAME: escAttr(p.name) })).join('') +
+    locals.map((l) => fill('iflw/participant-process.xml', { ID: l.participantId, NAME: escAttr(l.lp.name), PROCESS: l.id })).join('')
 
   // a flow that leaves a router is a route: its name, expression type and condition (none on the default route)
   const flowXml_ = (f) => {
@@ -426,6 +462,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     : ''
   const nodeXml = nodes.map((n) => nodeToXml(n)).join('') + subXml
   const flowXml = flowsXml(flows)
+  const localXml = locals.map((l) => fill('iflw/process-local.xml', { ID: l.id, NAME: escAttr(l.lp.name), ELEMENTS: l.nodes.map((n) => nodeToXml(n)).join('') + flowsXml(l.flows) })).join('')
 
   const shape = (element, w, h, sx, sy) =>
     fill('iflw/shape.xml', { ELEMENT: element, ID: `BPMNShape_${element}`, WIDTH: num(w), HEIGHT: num(h), X: num(sx), Y: num(sy) })
@@ -434,6 +471,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     nodes.map((n) => shape(n.id, n.w, n.h, n.x, n.y)).join('') +
     (sub ? shape(sub.id, sub.w, sub.h, sub.x, sub.y) + subNodes.map((n) => shape(n.id, n.w, n.h, n.x, n.y)).join('') : '') +
     shape('Participant_Process_1', poolW, poolH, L.POOL_X, poolY) +
+    locals.map((l) => shape(l.participantId, l.w, l.h, l.x, l.y) + l.nodes.map((n) => shape(n.id, n.w, n.h, n.x, n.y)).join('')).join('') +
     participants.map((p) => shape(p.id, L.PART_W, L.PART_H, p.x, p.y)).join('')
 
   const edge = (element, source, target, points) =>
@@ -452,7 +490,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     return b[1] > a[1] ? [a, [a[0], b[1]], b] : [a, [b[0], a[1]], b]
   }
   const edges =
-    [...flows, ...(sub ? sub.flows : [])].map((f) => edge(f.id, f.source.id, f.target.id, waypoints(f))).join('') +
+    [...flows, ...(sub ? sub.flows : []), ...locals.flatMap((l) => l.flows)].map((f) => edge(f.id, f.source.id, f.target.id, waypoints(f))).join('') +
     messageFlows.map((mf) => edge(mf.id, mf.sourceShape, mf.targetShape, [mf.from, mf.to])).join('')
 
   const iflw = fill('iflw/definitions.xml', {
@@ -460,6 +498,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     MESSAGE_FLOWS: messageFlows.map((mf) => mf.xml).join(''),
     PROCESS_ELEMENTS: nodeXml,
     SEQUENCE_FLOWS: flowXml,
+    LOCAL_PROCESSES: localXml,
     SHAPES: shapes,
     EDGES: edges
   })
@@ -524,6 +563,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     exceptionSubprocess: sub
       ? { id: sub.id, name: sub.name, steps: subNodes.filter((n) => n.kind === 'step').map((n) => ({ id: n.id, type: n.step.type, name: n.name })) }
       : null,
+    localProcesses: locals.map((l) => ({ id: l.id, name: l.lp.name, steps: l.nodes.filter((n) => n.kind === 'step').map((n) => ({ id: n.id, type: n.step.type, name: n.name })) })),
     adapters,
     parameters: paramNames,
     scripts: files.filter((f) => f.path.includes('/script/')).map((f) => f.path),
@@ -551,6 +591,8 @@ function nodeToXml(n) {
       ? fill('iflw/start-timer.xml', { ...common, OUTGOING: outgoing, TIMER_ID: n.timerId, SCHEDULE: n.schedule })
       : fill('iflw/start-message.xml', { ...common, OUTGOING: outgoing })
   if (n.kind === 'errorStart') return fill('iflw/start-error.xml', { ...common, OUTGOING: outgoing })
+  if (n.kind === 'localStart') return fill('iflw/start-local.xml', { ...common, OUTGOING: outgoing })
+  if (n.kind === 'localEnd') return fill('iflw/end-local.xml', { ...common, INCOMING: incoming })
   if (n.kind === 'end') return fill(END_TEMPLATES[n.event || 'message'], { ...common, INCOMING: incoming, CATEGORY_VALUE: val(n.category || 'Others') })
   if (n.kind === 'router') return fill('iflw/router.xml', { ...common, DEFAULT: n.defaultFlow, INCOMING: incoming, OUTGOING: outgoing })
 
@@ -605,6 +647,32 @@ function nodeToXml(n) {
       return fill('iflw/step-xml-to-json.xml', io)
     case 'requestReplyHttp':
       return fill('iflw/step-request-reply.xml', io)
+    case 'splitter': {
+      // the item XPath also goes to the Iterating Splitter's token value, as the CPI editor writes it
+      const expression = val(s.expression)
+      return fill(`iflw/step-splitter-${s.kind}.xml`, {
+        ...io,
+        EXPRESSION_VALUE: expression,
+        GROUPING_VALUE: val(String(s.grouping ?? 1)),
+        STREAMING_VALUE: val(String(s.streaming ?? true)),
+        STOP_ON_EXCEPTION_VALUE: val(String(s.stopOnException)),
+        ...(s.kind === 'iterating' && { TOKEN_VALUE: expression })
+      })
+    }
+    case 'gather':
+      return fill('iflw/step-gather.xml', { ...io, SOURCE_VALUE: val(s.source), TARGET_VALUE: val(s.target) })
+    case 'processCall':
+      return s.loop
+        ? fill('iflw/step-process-call-looping.xml', {
+            ...io,
+            PROCESS_ID_VALUE: val(n.processId),
+            LOOP_ID_VALUE: val(n.loopId),
+            LOOP_ID: n.loopId,
+            MAX: String(s.loop.max),
+            CONDITION_ID: n.conditionId,
+            CONDITION: escText(s.loop.condition)
+          })
+        : fill('iflw/step-process-call.xml', { ...io, PROCESS_ID_VALUE: val(n.processId) })
     default:
       throw new Error(`Unsupported step type ${s.type}`) // unreachable after validation
   }

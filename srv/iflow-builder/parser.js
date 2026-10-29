@@ -131,7 +131,12 @@ function httpCall(adapter) {
 
 // --- steps ---------------------------------------------------------------------------
 
-function stepOf(node, adaptersBySource) {
+/**
+ * @param {Element} node
+ * @param {object} adaptersBySource - adapters by the id of the step they start from
+ * @param {Object<string, string>} [processNames] - process names by id, for Process Calls
+ */
+function stepOf(node, adaptersBySource, processNames = {}) {
   const p = props(node)
   const base = { id: node.getAttribute('id'), name: node.getAttribute('name') }
   const local = node.localName
@@ -158,8 +163,39 @@ function stepOf(node, adaptersBySource) {
       Object.defineProperty(step, 'settings', { value: p, enumerable: false })
       return step
     }
-    case 'ProcessCallElement':
-      return { ...base, type: 'processCall', processId: p.processId || p.subProcessId || null, activityType: p.activityType }
+    case 'ProcessCallElement': {
+      const processId = p.processId || p.subProcessId || null
+      const step = { ...base, type: 'processCall', processId, process: processNames[processId] ?? null, activityType: p.activityType, subActivityType: p.subActivityType || null }
+      // Looping Process Call: the condition and maximum are BPMN loop characteristics, the condition type a property
+      const loop = child(node, 'standardLoopCharacteristics')
+      if (p.subActivityType === 'LoopingProcess' && loop)
+        step.loop = { condition: text(child(loop, 'loopCondition')).trim(), max: Number(loop.getAttribute('loopMaximum')) || null, expressionType: p.expressionType || null }
+      Object.defineProperty(step, 'settings', { value: p, enumerable: false })
+      return step
+    }
+    case 'Splitter': {
+      // Iterating or General Splitter; the other split types (e.g. Tokenizer, PKCS#7) keep their splitType
+      const kind = { IteratingSplitter: 'iterating', GeneralSplitter: 'general' }[p.splitType] || null
+      const step = {
+        ...base,
+        type: 'splitter',
+        kind,
+        splitType: p.splitType || null,
+        exprType: p.exprType || null,
+        expression: p.splitExprValue ?? '',
+        grouping: Number(p.grouping) || 1,
+        streaming: p.Streaming === 'true',
+        stopOnException: p.StopOnExecution === 'true',
+        parallel: p.ParallelProcessing === 'true'
+      }
+      Object.defineProperty(step, 'settings', { value: p, enumerable: false })
+      return step
+    }
+    case 'Gather': {
+      const step = { ...base, type: 'gather', source: p.sourceXPath ?? '', target: p.targetXPath ?? '', messageType: p.messageType || null, aggregationAlgorithm: p.aggregationAlgorithm || null }
+      Object.defineProperty(step, 'settings', { value: p, enumerable: false })
+      return step
+    }
     case 'JsonToXmlConverter':
     case 'XmlToJsonConverter': {
       const step = { ...base, type: p.activityType === 'JsonToXmlConverter' ? 'jsonToXml' : 'xmlToJson' }
@@ -297,7 +333,7 @@ function mainPath({ startNode, nodes, flows }) {
  * Terminate End): { unsupported: reason }.
  * @returns {{ steps: object[], endNode: Element|null } | { unsupported: string }}
  */
-function routedFlow({ startNode, nodes, flows }, adaptersBySource) {
+function routedFlow({ startNode, nodes, flows }, stepAt) {
   const out = (id) => (flows[id] || []).filter((f) => nodes[f.target])
   const label = (n) => n.getAttribute('name') || n.getAttribute('id')
   const fail = (unsupported) => ({ unsupported })
@@ -343,7 +379,7 @@ function routedFlow({ startNode, nodes, flows }, adaptersBySource) {
     }
     if (n.localName === 'parallelGateway') return fail(`${label(n)} is a multicast or join`)
     if (n.localName !== 'exclusiveGateway') {
-      steps.push(stepOf(n, adaptersBySource))
+      steps.push(stepAt(n))
       next = out(id)
       if (next.length !== 1) return fail(`${label(n)} has ${next.length} outgoing flows without a router`)
       id = next[0].target
@@ -379,7 +415,7 @@ function routedFlow({ startNode, nodes, flows }, adaptersBySource) {
       name: r.f.name || r.f.id,
       condition: r.f.condition || '',
       default: r.f.id === defaultId,
-      steps: r.own.map((x) => stepOf(nodes[x], adaptersBySource)),
+      steps: r.own.map((x) => stepAt(nodes[x])),
       end: r.join ? null : endOf(r.endNode)
     })
     // only one route continues: its steps are the main line after the router (same flow, easier to read)
@@ -388,14 +424,14 @@ function routedFlow({ startNode, nodes, flows }, adaptersBySource) {
     if (single) single.own = []
     const parsed = routes.map(toRoute)
     steps.push({
-      ...stepOf(n, adaptersBySource),
+      ...stepAt(n),
       type: 'router',
       expressionType: types[0] || null,
       routes: [...parsed.filter((r) => !r.default), ...parsed.filter((r) => r.default)] // the default route last
     })
     for (const x of mainAfter) {
       onMain.add(x)
-      steps.push(stepOf(nodes[x], adaptersBySource))
+      steps.push(stepAt(nodes[x]))
     }
     if (!join) break // every route ends: the router is the last step
     id = join
@@ -467,6 +503,8 @@ async function parse(input) {
   // position or participant: local processes are "IntegrationProcess" participants too, and may come first.
   // A process that a (Looping, Idempotent) Process Call calls is local too: older exports may lack processType.
   const processes = childrenNamed(definitions, 'process')
+  const processNames = Object.fromEntries(processes.map((p) => [p.getAttribute('id'), p.getAttribute('name')]))
+  const stepAt = (n) => stepOf(n, adaptersBySource, processNames)
   const called = new Set([...definitions.getElementsByTagNameNS('*', 'callActivity')].map((el) => props(el).processId).filter(Boolean))
   const locals = processes.filter((p) => props(p).processType === 'directCall' || called.has(p.getAttribute('id')))
   // several: the one with a trigger (a start event with a timer or message definition) is the main flow
@@ -495,7 +533,7 @@ async function parse(input) {
       return {
         id: el.getAttribute('id'),
         name: el.getAttribute('name'),
-        steps: inner.order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepOf(n, adaptersBySource)),
+        steps: inner.order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepAt(n)),
         end: endKind(inner.order.find((n) => n.localName === 'endEvent')),
         endName: inner.order.find((n) => n.localName === 'endEvent')?.getAttribute('name') || null,
         endCategory: escalationCategory(inner.order.find((n) => n.localName === 'endEvent'))
@@ -524,7 +562,7 @@ async function parse(input) {
   }
 
   // Steps + end
-  const steps = order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepOf(n, adaptersBySource))
+  const steps = order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepAt(n))
   const endNodes = order.filter((n) => n.localName === 'endEvent')
   const endAdapter = endNodes.map((n) => adaptersBySource[n.getAttribute('id')]).find(Boolean)
   const end = !endAdapter
@@ -541,7 +579,7 @@ async function parse(input) {
   // (null when every route of the last router ends), with its kind
   let routed = null
   if (!mainLinear || endNodes.length > 1) {
-    const r = routedFlow(mainWalk, adaptersBySource)
+    const r = routedFlow(mainWalk, stepAt)
     if (r.unsupported) routed = r
     else {
       const a = r.endNode && adaptersBySource[r.endNode.getAttribute('id')]
@@ -569,7 +607,7 @@ async function parse(input) {
     const mainEndNode = path.at(-1)?.localName === 'endEvent' ? path.at(-1) : null
     const a = mainEndNode && adaptersBySource[mainEndNode.getAttribute('id')]
     branching = {
-      steps: path.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => ({ ...stepOf(n, adaptersBySource), ...(branches[n.getAttribute('id')] && { routes: branches[n.getAttribute('id')] }) })),
+      steps: path.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => ({ ...stepAt(n), ...(branches[n.getAttribute('id')] && { routes: branches[n.getAttribute('id')] }) })),
       end: !a
         ? { type: 'none' }
         : a.type === 'HTTP'
@@ -618,12 +656,27 @@ async function parse(input) {
     integrationProcesses: integrationProcesses.map((p) => p.getAttribute('name')),
     warnings, // for the user: what the parsed structure may not show correctly
     localProcesses: locals.filter((p) => p !== main).map((p) => p.getAttribute('name')),
-    // their steps, for Process Calls the import can inline: [{ id, name, steps, linear }]
+    // their steps, for Import and updates: [{ id, name, steps, linear, routed, unsupported?, end }]
     localProcessSteps: locals
       .filter((p) => p !== main)
       .map((p) => {
         const w = walk(p)
-        return { id: p.getAttribute('id'), name: p.getAttribute('name'), linear: w.linear, steps: w.order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepOf(n, adaptersBySource)) }
+        const ends = w.order.filter((n) => n.localName === 'endEvent')
+        const linear = w.linear && ends.length <= 1
+        // a local process with routers, as the spec holds it (like the main line), or { unsupported }
+        const routed = linear ? null : routedFlow(w, stepAt)
+        const routable = routed && !routed.unsupported
+        // end kinds of every end event: 'message' for a plain End; an Error or Escalation End otherwise
+        const endKinds = [...new Set(ends.map(endKind))]
+        return {
+          id: p.getAttribute('id'),
+          name: p.getAttribute('name'),
+          linear,
+          steps: routable ? routed.steps : w.order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepAt(n)),
+          routed: !linear, // its steps are routers with their routes (when not unsupported)
+          ...(routed?.unsupported && { unsupported: routed.unsupported }),
+          end: endKinds.length === 1 ? endKinds[0] : endKinds.length ? endKinds.find((k) => k !== 'message') : null
+        }
       }),
     files: Object.keys(zip.files).filter((f) => !zip.files[f].dir).map((f) => f.slice(root.length))
   }

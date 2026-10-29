@@ -7,15 +7,14 @@ What Groovy can and cannot replace:
   sets a property, e.g. `TargetHost`, and an HTTP receiver whose address uses it (`"url":
   "https://${property.TargetHost}/orders"`) is simpler; the address must still start with `http://` or
   `https://`.
-- **Splitting**: Groovy cannot split one message into many; it can only reshape the payload of the one
-  message (filter, merge or restructure records). Never claim that a script splits a message.
+- **Splitting** is a `splitter` step (see Splitters and local processes). Groovy cannot split one message
+  into many; it can only reshape the payload of the one message. Never claim that a script splits a message.
 
-When a request contains unsupported steps (splitter, multicast, join, mapping, XSLT,
-SFTP, process call...), offer to build the supported parts and to put a
+When a request contains unsupported steps (multicast, join, mapping, XSLT, SFTP...), offer to build the supported parts and to put a
 placeholder Content Modifier where each unsupported step goes:
-- name it `PH_<StepName>`, e.g. `PH_Router3` or `PH_Splitter`;
+- name it `PH_<StepName>`, e.g. `PH_Multicast` or `PH_Mapping`;
 - start its description with `REPLACE WITH`, followed by what to add manually in the CPI web editor
-  (step type, name and settings), e.g. "REPLACE WITH General Splitter 'Split Orders': XPath
-  /orders/order, then route each order to the receiver";
+  (step type, name and settings), e.g. "REPLACE WITH Parallel Multicast 'Send Orders': one branch to
+  the ERP, one to the archive";
 - set one property `REPLACE_WITH` (constant) with the same short text, so the step is valid.
 Then tell the user which placeholders they must replace before deploying.

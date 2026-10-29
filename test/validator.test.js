@@ -26,8 +26,8 @@ describe('validator', () => {
     expect(errors).toEqual(expect.arrayContaining(["spec: missing required field 'name'", "spec: missing required field 'trigger'"]))
   })
 
-  test.each(['splitter', 'messageMapping'])('rejects %s with a clear message', (type) => {
-    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' is not supported yet \\(no splitter, multicast, join or mapping\\)`))
+  test.each(['parallelMulticast', 'messageMapping'])('rejects %s with a clear message', (type) => {
+    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' is not supported yet \\(no multicast, join or mapping\\)`))
   })
 
   test('another router type points to the router format (phase 1b)', () => {
@@ -186,7 +186,7 @@ describe('validator', () => {
       steps: [
         { type: 'contentModifier', name: 'A' },
         { type: 'contentModifier', name: 'A', headers: [{ name: 'X', type: 'numberRange', value: '/a' }] },
-        { type: 'splitter' },
+        { type: 'messageMapping' },
         ...Array.from({ length: 49 }, () => ({ type: 'jsonToXml' }))
       ],
       end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'Basic' } // no credentialName
@@ -228,7 +228,7 @@ describe('duplicate names say where and what to do ((d) run: three identical fai
     const r = validate(baseSpec({ steps: [{ type: 'jsonToXml', name: 'A' }], exceptionSubprocess: { steps: [cm, script, script] } }), { attachments: ['Script_SetCustomHeaders_Exc.groovy'] })
     const fix = 'the same step was added twice: remove exceptionSubprocess.steps[2] (editDraftSpec {"op":"removeStep","index":2,"exception":true})'
     expect(r.errors).toEqual([
-      `steps: step name 'Script_SetCustomHeaders_Exc' is used more than once, at exceptionSubprocess.steps[1] and exceptionSubprocess.steps[2] — step names must be unique (main flow, routes and exception subprocess together); ${fix}`,
+      `steps: step name 'Script_SetCustomHeaders_Exc' is used more than once, at exceptionSubprocess.steps[1] and exceptionSubprocess.steps[2] — step names must be unique (main flow, routes, exception subprocess and local processes together); ${fix}`,
       `steps: Groovy fileName 'Script_SetCustomHeaders_Exc' is used more than once, at exceptionSubprocess.steps[1] and exceptionSubprocess.steps[2] — each script needs its own file; ${fix}`
     ])
   })
@@ -236,7 +236,7 @@ describe('duplicate names say where and what to do ((d) run: three identical fai
   test('different steps with one name: rename or remove', () => {
     const r = validate(baseSpec({ steps: [{ type: 'jsonToXml', name: 'Convert' }, { type: 'xmlToJson', name: 'Convert' }] }))
     expect(r.errors).toEqual([
-      `steps: step name 'Convert' is used more than once, at steps[0] and steps[1] — step names must be unique (main flow, routes and exception subprocess together); rename all but one, or remove the extra step (editDraftSpec {"op":"removeStep","index":1})`
+      `steps: step name 'Convert' is used more than once, at steps[0] and steps[1] — step names must be unique (main flow, routes, exception subprocess and local processes together); rename all but one, or remove the extra step (editDraftSpec {"op":"removeStep","index":1})`
     ])
   })
 })
@@ -307,7 +307,7 @@ describe('routers (phase 1b)', () => {
     ])
     const big = router([{ name: 'R1', condition: '${a} = 1', steps: Array.from({ length: 30 }, (_, i) => cm(`S${i}`)) }, { name: 'R2', default: true }])
     const main = Array.from({ length: 20 }, (_, i) => cm(`M${i}`))
-    expect(errs([...main, big])).toEqual(['steps: 51 steps with the routers and the steps inside routes — at most 50; merge Content Modifiers or move logic into one Groovy script'])
+    expect(errs([...main, big])).toEqual(['steps: 51 steps with the routers, the steps inside routes and the steps of local processes — at most 50; merge Content Modifiers or move logic into one Groovy script'])
   })
 
   test('end events: message, escalation or error; a receiver end is a Message End', () => {
@@ -330,5 +330,116 @@ describe('Escalation End category (phase 1b)', () => {
       'end.category: only an Escalation End has a category — remove it, or set "event": "escalation"'
     ])
     expect(errorsOf(baseSpec({ end: { type: 'none', event: 'escalation', category: 'ReceiverNotFound' } }))).toEqual(['end.category: must be one of Others, RoutingConditionNotMet'])
+  })
+})
+
+describe('splitters, gathers, process calls and local processes (phase 2)', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: name }] })
+  const split = (name, extra = {}) => ({ type: 'splitter', name, kind: 'iterating', expression: '//item', stopOnException: false, ...extra })
+  const gather = (name) => ({ type: 'gather', name, source: '//item', target: '/items' })
+  const local = (name, steps = [cm(`${name}_CM`)]) => ({ name, steps })
+  const issues = (spec) => validate(spec).issues
+
+  const router = (name = 'R') => ({ type: 'router', name, expressionType: 'NonXML', routes: [{ name: 'A', condition: '${property.x} = 1', steps: [cm(`${name}_InRoute`)] }, { name: 'D', default: true }] })
+
+  test('a split closed by a gather, a second split after it that runs to the end with a router: valid without warnings', () => {
+    const spec = baseSpec({ steps: [split('S1'), cm('B'), gather('G1'), split('S2', { kind: 'general', expression: '/a/item', stopOnException: true }), router(), cm('C')] })
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+  })
+
+  test('no router between a splitter and its gather (CPI refuses it): the message points to a local process with the router', () => {
+    expect(issues(baseSpec({ steps: [split('S1'), router(), gather('G1')] }))).toEqual([
+      {
+        code: 'ROUTER_IN_SPLIT',
+        message:
+          'steps[1]: CPI does not accept a router between a splitter and its gather (steps[2]) — route per item inside a local process instead: a processCall here, and a local process that contains the router (a router after a splitter without a gather is fine)'
+      }
+    ])
+    // the supported form
+    const perItem = baseSpec({ steps: [split('S1'), { type: 'processCall', name: 'PC', process: 'L' }, gather('G1')], localProcesses: [{ name: 'L', steps: [cm('L1'), router('LR')] }] })
+    expect(validate(perItem)).toMatchObject({ valid: true, warnings: [] })
+  })
+
+  test('routers in local processes: the main-line rules apply; no nested router; a route ends with a plain End only', () => {
+    const lp = (steps) => baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'L' }], localProcesses: [{ name: 'L', steps }] })
+    expectError(lp([{ type: 'router', name: 'LR', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a}=1' }, { name: 'D', default: true }] }]), /localProcesses\[0\]\.steps\[0\]\.routes\[0\]\.condition: put spaces around the operator/)
+    expectError(lp([{ type: 'router', name: 'LR', expressionType: 'NonXML', routes: [{ name: 'D', default: true }, { name: 'A', condition: '${a} = 1' }] }]), /localProcesses\[0\]\.steps\[0\]\.routes: list the default route 'D' last/)
+    const nested = { type: 'router', name: 'LR', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1', steps: [router('Inner')] }, { name: 'D', default: true }] }
+    expect(issues(lp([nested])).map((i) => i.code)).toEqual(['NESTED_ROUTER'])
+    const ending = (end) => ({ type: 'router', name: 'LR', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1', end }, { name: 'D', default: true }] })
+    expect(validate(lp([ending({ event: 'message' }), cm('After')]))).toMatchObject({ valid: true, warnings: [] })
+    expect(issues(lp([ending({ event: 'escalation' })]))).toEqual([
+      { code: 'LOCAL_END_EVENT', message: 'localProcesses[0].steps[0].routes[0].end: a route in a local process ends with a plain End ({ "event": "message" }) — Escalation and Error Ends in local processes are not supported yet' }
+    ])
+    // every route ends: the router is the last step of the local process
+    const allEnd = { type: 'router', name: 'LR', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1', end: { event: 'message' } }, { name: 'D', default: true, end: { event: 'message' } }] }
+    expectError(lp([allEnd, cm('Never')]), /localProcesses\[0\]\.steps\[0\]: every route ends, so the steps after the router can never run/)
+    expect(validate(lp([cm('First'), allEnd]))).toMatchObject({ valid: true })
+  })
+
+  test('stopOnException has no default: missing, the message says what true and false mean', () => {
+    const { stopOnException, ...noStop } = split('S')
+    expectError(baseSpec({ steps: [noStop] }), /steps\[0\]: missing required field 'stopOnException' — true: one failing item stops the rest; false: the other items still run/)
+  })
+
+  test('no nested split, no gather without a splitter, only on the main line', () => {
+    expect(issues(baseSpec({ steps: [split('S1'), split('S2'), gather('G')] }))).toEqual([
+      { code: 'NESTED_SPLIT', message: expect.stringMatching(/^steps\[1\]: a splitter between the splitter steps\[0\] and its gather is not supported \(no nested splits\)/) }
+    ])
+    expect(issues(baseSpec({ steps: [cm('A'), gather('G')] }))).toEqual([{ code: 'GATHER_WITHOUT_SPLITTER', message: expect.stringMatching(/^steps\[1\]: a gather combines split messages — put a splitter before it/) }])
+    const inRoute = { type: 'router', name: 'R', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${property.x} = 1', steps: [split('S')] }, { name: 'D', default: true }] }
+    expect(issues(baseSpec({ steps: [inRoute] }))).toEqual([{ code: 'MAIN_LINE_ONLY', message: expect.stringMatching(/^steps\[0\]\.routes\[0\]\.steps\[0\]: a splitter inside a route is not supported/) }])
+    expectError(baseSpec({ steps: [cm('A')], exceptionSubprocess: { steps: [split('S')] } }), /exceptionSubprocess\.steps\[0\]: 'splitter' is not supported in the exception subprocess/)
+  })
+
+  test('only the reference values: parallel processing off; streaming on or off (both confirmed in Ref_Structure)', () => {
+    expectError(baseSpec({ steps: [split('S', { parallel: true })] }), /steps\[0\]\.parallel: must be 'false'/)
+    expect(validate(baseSpec({ steps: [split('S', { streaming: false })] }))).toMatchObject({ valid: true, warnings: [] })
+  })
+
+  test('a process call names an existing local process; a loop condition is NonXML with spaces', () => {
+    expect(issues(baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'Missing' }], localProcesses: [local('L')] }))).toEqual([
+      { code: 'PROCESS_UNKNOWN', message: expect.stringMatching(/^steps\[0\]\.process: no local process 'Missing' — add it to localProcesses.*or call one of: L$/) }
+    ])
+    const loop = (condition) => baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'L', loop: { condition, max: 3 } }], localProcesses: [local('L')] })
+    expect(validate(loop("${property.more} = 'true'"))).toMatchObject({ valid: true, warnings: [] })
+    expectError(loop("${property.more}='true'"), /steps\[0\]\.loop\.condition: put spaces around the operator/)
+    expectError(loop('/root/more'), /steps\[0\]\.loop\.condition: a NonXML condition reads a header or property/)
+    expectError(baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'L', loop: { condition: '${a} = 1' } }], localProcesses: [local('L')] }), /steps\[0\]\.loop: missing required field 'max'/)
+  })
+
+  test('process calls on the main line, in routes and in the exception subprocess; not in a local process', () => {
+    const call = (name) => ({ type: 'processCall', name, process: 'L' })
+    const router = { type: 'router', name: 'R', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1', steps: [call('InRoute')], end: { event: 'escalation' } }, { name: 'D', default: true }] }
+    expect(validate(baseSpec({ steps: [call('Main'), router], exceptionSubprocess: { steps: [call('OnError')] }, localProcesses: [local('L')] }))).toMatchObject({ valid: true, warnings: [] })
+    expect(issues(baseSpec({ steps: [call('Main')], localProcesses: [local('L'), local('L2', [call('Inner')])] }))).toEqual([
+      { code: 'LOCAL_STEP_UNSUPPORTED', message: expect.stringMatching(/^localProcesses\[1\]\.steps\[0\]: a processCall inside a local process is not supported yet \(no splitters, gathers or process calls there\)/) }
+    ])
+  })
+
+  test('local processes: unique names, a warning when nothing calls one, steps count towards 50, names unique with the main flow', () => {
+    expect(validate(baseSpec({ steps: [cm('A')], localProcesses: [local('L')] })).warnings).toEqual(["localProcesses[0]: no processCall calls the local process 'L', so it never runs"])
+    expectError(baseSpec({ steps: [{ type: 'processCall', process: 'L' }], localProcesses: [local('L'), local('L', [cm('B')])] }), /local process name 'L' is used more than once/)
+    expectError(baseSpec({ steps: [cm('A'), { type: 'processCall', process: 'L' }], localProcesses: [local('L', [cm('A')])] }), /step name 'A' is used more than once, at steps\[0\] and localProcesses\[0\]\.steps\[0\]/)
+    const many = (n, prefix) => Array.from({ length: n }, (_, i) => cm(`${prefix}${i}`))
+    expect(issues(baseSpec({ steps: [{ type: 'processCall', process: 'L' }, ...many(29, 'M')], localProcesses: [local('L', many(21, 'L'))] })).map((i) => i.code)).toEqual(['TOO_MANY_STEPS'])
+    expect(validate(baseSpec({ steps: [{ type: 'processCall', process: 'L' }, ...many(29, 'M')], localProcesses: [local('L', many(20, 'L'))] })).valid).toBe(true)
+  })
+
+  test('effectiveNames: default names count over the local processes too, receivers get unique systems', () => {
+    const names = effectiveNames(
+      baseSpec({
+        steps: [{ type: 'requestReplyHttp', url: 'https://a.example.com', method: 'GET', authType: 'None' }, { type: 'processCall', process: 'L' }],
+        localProcesses: [{ name: 'L', steps: [{ type: 'requestReplyHttp', url: 'https://b.example.com', method: 'GET', authType: 'None' }, { type: 'jsonToXml' }] }]
+      })
+    )
+    expect(names.flat.map((x) => [x.name, x.system])).toEqual([['Request Reply 1', 'Receiver1'], ['Process Call 1', null]])
+    expect(names.local.map((x) => [x.name, x.system, x.where])).toEqual([['Request Reply 2', 'Receiver2', 'localProcesses[0].steps[0]'], ['JSON to XML Converter 1', null, 'localProcesses[0].steps[1]']])
+  })
+
+  test('old names for the new steps point to their format', () => {
+    expectError(baseSpec({ steps: [{ type: 'iteratingSplitter' }] }), /steps\[0\]: 'iteratingSplitter' — a splitter is \{ "type": "splitter", "kind": "iterating"\|"general"/)
+    expectError(baseSpec({ steps: [{ type: 'loopingProcessCall' }] }), /steps\[0\]: 'loopingProcessCall' — a process call is \{ "type": "processCall"/)
+    expectError(baseSpec({ steps: [{ type: 'exceptionSubprocess' }] }), /error handling is not a step/)
   })
 })

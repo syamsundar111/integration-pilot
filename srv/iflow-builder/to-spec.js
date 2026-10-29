@@ -7,7 +7,7 @@
  */
 const fs = require('fs')
 const path = require('path')
-const { validate, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS } = require('./validator')
+const { validate, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, SUPPORTED_LOCAL_STEPS } = require('./validator')
 const { AUTH_TYPES } = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
 const schema = require('./spec-schema.json')
@@ -47,6 +47,35 @@ const WRITE_VARIABLES_DEFAULTS = (() => {
   const all = Object.fromEntries([...xml.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].map((m) => [m[1], m[2] ?? '']))
   return { visibility: all.visibility, encrypt: all.encrypt, expire: all.expire }
 })()
+/**
+ * Splitter, Gather and Process Call settings the builder writes as fixed template values (the spec fields are
+ * placeholders there): an iFlow with another value (e.g. a Tokenizer expression, parallel processing, another
+ * aggregation algorithm) would be changed by an update
+ */
+const FIXED_SETTINGS = (() => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, 'templates', 'iflw', f), 'utf8')
+  const fixed = (xml) =>
+    Object.fromEntries(
+      [...xml.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)]
+        .filter((m) => !['componentVersion', 'activityType', 'cmdVariantUri'].includes(m[1]))
+        .map((m) => [m[1], m[2] ?? ''])
+    )
+  return {
+    iterating: fixed(read('step-splitter-iterating.xml')),
+    general: fixed(read('step-splitter-general.xml')),
+    gather: fixed(read('step-gather.xml')),
+    processCall: fixed(read('step-process-call.xml')),
+    loopingProcessCall: fixed(read('step-process-call-looping.xml'))
+  }
+})()
+/** Throws a blocker for a setting that differs from the builder's fixed value */
+function checkFixed(s, fixed, what) {
+  for (const [key, would] of Object.entries(fixed)) {
+    if (!s.settings || !(key in s.settings)) continue // older versions lack some keys
+    const have = String(s.settings[key] ?? '')
+    if (have !== would) throw `${what}: ${key} is '${have}'; an update would reset it to '${would || '(empty)'}'`
+  }
+}
 const LABELS = { senderAuthType: 'sender authentication', xsrfProtection: 'CSRF protection' }
 
 /** Blockers for adapter settings an update would reset */
@@ -134,6 +163,24 @@ function toStep(s, scripts, where) {
       for (const v of s.variables) if (!cpiValues.WV_TYPES.includes(v.type)) throw `${where} '${s.name}': variable '${v.name}' has type '${v.type}', which the spec cannot hold`
       return { ...base, variables: s.variables.map((v) => ({ name: v.name, type: v.type, value: v.value ?? '', ...(v.datatype && { datatype: v.datatype }), ...(v.global && { global: true }) })) }
     }
+    case 'splitter': {
+      if (!s.kind) throw `${where} '${s.name}': a ${s.splitType || 'splitter'} is not supported by the spec (only Iterating and General Splitter)`
+      checkFixed(s, FIXED_SETTINGS[s.kind], `${where} '${s.name}'`)
+      if (s.kind === 'iterating' && s.settings?.tokenValue != null && s.settings.tokenValue !== s.expression)
+        throw `${where} '${s.name}': tokenValue '${s.settings.tokenValue}' differs from the expression; an update would set it to '${s.expression}'`
+      return { ...base, kind: s.kind, expression: s.expression, ...(s.grouping !== 1 && { grouping: s.grouping }), ...(!s.streaming && { streaming: false }), stopOnException: s.stopOnException }
+    }
+    case 'gather':
+      checkFixed(s, FIXED_SETTINGS.gather, `${where} '${s.name}'`)
+      return { ...base, source: s.source, target: s.target }
+    case 'processCall': {
+      const looping = s.subActivityType === 'LoopingProcess'
+      if (!looping && s.subActivityType !== 'NonLoopingProcess') throw `${where} '${s.name}': a ${s.subActivityType || 'process call'} is not supported by the spec (only Process Call and Looping Process Call)`
+      if (!s.process) throw `${where} '${s.name}': the called process ${s.processId || ''} is not in the iFlow`
+      checkFixed(s, FIXED_SETTINGS[looping ? 'loopingProcessCall' : 'processCall'], `${where} '${s.name}'`)
+      if (looping && !(s.loop?.condition && s.loop.max)) throw `${where} '${s.name}': the loop has no condition or maximum`
+      return { ...base, process: s.process, ...(looping && { loop: { condition: s.loop.condition, max: s.loop.max } }) }
+    }
     default:
       throw `${where} '${s.name}': step type '${s.activityType || s.type}' is not supported by the spec`
   }
@@ -160,7 +207,6 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   // a branching flow: routers whose routes end or join again (parser: routed); anything else is a blocker
   const routed = !parsed.linear ? parsed.routed : null
   if (!parsed.linear && (!routed || routed.unsupported)) blockers.push(`the flow branches in a way the spec cannot hold${routed?.unsupported ? `: ${routed.unsupported}` : ''}`)
-  if (parsed.localProcesses?.length) blockers.push(`local integration processes: ${parsed.localProcesses.join(', ')}`)
   if ((parsed.integrationProcesses?.length || 0) > 1) blockers.push(`${parsed.integrationProcesses.length} integration processes: ${parsed.integrationProcesses.join(', ')} (the spec holds one)`)
 
   const t = parsed.trigger || {}
@@ -188,7 +234,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     ...(end.name && { name: end.name }),
     ...(end.kind === 'escalation' && end.category && { category: categoryOf(end.category, what) })
   })
-  const routerFrom = (r, where) => ({
+  const routerFrom = (r, where, stepOf = stepFrom) => ({
     type: 'router',
     ...(r.name && { name: r.name }),
     expressionType: r.expressionType,
@@ -197,7 +243,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
       return {
         name: route.name,
         ...(route.default ? { default: true } : { condition: route.condition }),
-        ...(route.steps.length && { steps: route.steps.map((x, k) => stepFrom(x, `${where} route ${j + 1} step ${k + 1}`)) }),
+        ...(route.steps.length && { steps: route.steps.map((x, k) => stepOf(x, `${where} route ${j + 1} step ${k + 1}`)) }),
         ...(route.end && { end: endFrom(route.end, `${where} '${r.name}': route ${route.name}`) })
       }
     })
@@ -205,6 +251,23 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   const steps = (routed && !routed.unsupported ? routed.steps : parsed.steps || []).map((s, i) =>
     s.type === 'router' && routed && !routed.unsupported ? routerFrom(s, `step ${i + 1}`) : stepFrom(s, `step ${i + 1}`)
   )
+
+  // local processes: routers as on the main line, plain End events only, steps a local process may hold
+  const localProcesses = (parsed.localProcessSteps || []).map((lp) => {
+    if (lp.unsupported) blockers.push(`local process ${lp.name} branches in a way the spec cannot hold: ${lp.unsupported}`)
+    if (lp.end && lp.end !== 'message') blockers.push(`local process ${lp.name} ends with an ${lp.end} end (only a plain End)`)
+    if (!lp.steps.length) blockers.push(`local process ${lp.name} has no steps (the spec needs at least one)`)
+    const localStep = (s, where) =>
+      SUPPORTED_LOCAL_STEPS.includes(s.type) && s.type !== 'router'
+        ? attempt(() => toStep(s, parsed.scripts || [], where))
+        : (blockers.push(`${where} '${s.name}': ${s.activityType || s.type} is not supported there`), null)
+    return {
+      name: lp.name,
+      steps: lp.steps.map((s, i) =>
+        s.type === 'router' && lp.routed && !lp.unsupported ? routerFrom(s, `local process ${lp.name} step ${i + 1}`, localStep) : localStep(s, `local process ${lp.name} step ${i + 1}`)
+      )
+    }
+  })
 
   // An empty exception subprocess that ends with an Error End (Error Start -> Error End, as the iGlow extension
   // adds one) changes nothing: a failing message ends as FAILED with or without it, so an update leaves it out
@@ -243,7 +306,14 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   // XSLT files are kept as spec.resources (their content comes back in `resources`)
   const routeSteps = (routed?.steps || []).filter((s) => s.type === 'router').flatMap((r) => r.routes.flatMap((x) => x.steps))
   const scripts = new Set(
-    [...(parsed.steps || []), ...routeSteps, ...(parsed.exceptionSubprocess?.steps || [])].filter((s) => s.type === 'groovyScript').map((s) => `script/${s.fileName}.groovy`)
+    [
+      ...(parsed.steps || []),
+      ...routeSteps,
+      ...(parsed.exceptionSubprocess?.steps || []),
+      ...(parsed.localProcessSteps || []).flatMap((lp) => lp.steps.flatMap((s) => [s, ...(s.routes || []).flatMap((r) => r.steps || [])]))
+    ]
+      .filter((s) => s.type === 'groovyScript')
+      .map((s) => `script/${s.fileName}.groovy`)
   )
   const mappings = Object.fromEntries((parsed.mappings || []).filter((m) => /^[A-Za-z][A-Za-z0-9_.-]*\.xslt?$/.test(m.fileName)).map((m) => [`mapping/${m.fileName}`, m]))
   for (const f of parsed.files || []) {
@@ -276,8 +346,9 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     rejoined.add(m[1])
     return { ...call, url: `{{${m[1]}}}` }
   }
-  const routeLists = steps.filter((s) => s?.type === 'router').flatMap((r) => r.routes.map((x) => x.steps).filter(Boolean))
-  for (const list of [steps, ...routeLists, exceptionSubprocess?.steps]) if (list) list.forEach((s, i) => (list[i] = s?.type === 'requestReplyHttp' ? rejoin(s) : s))
+  const routeLists = (list) => list.filter((s) => s?.type === 'router').flatMap((r) => r.routes.map((x) => x.steps).filter(Boolean))
+  const lines = [steps, ...localProcesses.map((lp) => lp.steps)]
+  for (const list of [...lines, ...lines.flatMap(routeLists), exceptionSubprocess?.steps]) if (list) list.forEach((s, i) => (list[i] = s?.type === 'requestReplyHttp' ? rejoin(s) : s))
   if (end?.type === 'httpReceiver') end = rejoin(end)
 
   const spec = {
@@ -289,6 +360,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     steps,
     end,
     ...(exceptionSubprocess && { exceptionSubprocess }),
+    ...(localProcesses.length && { localProcesses }),
     ...(Object.keys(parameters).length && { parameters }),
     ...(Object.keys(resources).length && { resources: Object.keys(resources) })
   }
@@ -309,6 +381,10 @@ function describeChanges(before, after) {
     if (!before.exceptionSubprocess) changes.push(`exception subprocess added: ${stepList(after.exceptionSubprocess.steps)}`)
     else if (!after.exceptionSubprocess) changes.push('exception subprocess removed')
     else changes.push(`exception subprocess: ${stepList(before.exceptionSubprocess.steps)}  ⇒  ${stepList(after.exceptionSubprocess.steps)}`)
+  }
+  if (json(before.localProcesses) !== json(after.localProcesses)) {
+    const list = (sp) => (sp.localProcesses || []).map((lp) => `${lp.name}: ${stepList(lp.steps)}`).join('; ') || '(none)'
+    changes.push(`local processes: ${list(before)}  ⇒  ${list(after)}`)
   }
   if (json(before.parameters) !== json(after.parameters)) changes.push(`parameters: ${Object.keys(before.parameters || {}).join(', ') || '(none)'} → ${Object.keys(after.parameters || {}).join(', ') || '(none)'}`)
   if (before.name !== after.name) changes.push(`name: ${before.name} → ${after.name}`)

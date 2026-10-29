@@ -1,0 +1,41 @@
+        <bpmn2:callActivity id="{{ID}}" name="{{NAME}}">
+            <bpmn2:extensionElements>
+                <ifl:property>
+                    <key>postProcessing</key>
+                    <value>throwException</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>loopId</key>
+                    {{LOOP_ID_VALUE}}
+                </ifl:property>
+                <ifl:property>
+                    <key>processId</key>
+                    {{PROCESS_ID_VALUE}}
+                </ifl:property>
+                <ifl:property>
+                    <key>expressionType</key>
+                    <value>Non XML</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>componentVersion</key>
+                    <value>1.3</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>activityType</key>
+                    <value>ProcessCallElement</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>cmdVariantUri</key>
+                    <value>ctype::FlowstepVariant/cname::LoopingProcess/version::1.3.0</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>subActivityType</key>
+                    <value>LoopingProcess</value>
+                </ifl:property>
+            </bpmn2:extensionElements>
+            <bpmn2:incoming>{{INCOMING}}</bpmn2:incoming>
+            <bpmn2:outgoing>{{OUTGOING}}</bpmn2:outgoing>
+            <bpmn2:standardLoopCharacteristics id="{{LOOP_ID}}" loopMaximum="{{MAX}}">
+                <bpmn2:loopCondition id="{{CONDITION_ID}}" xsi:type="bpmn2:tFormalExpression">{{CONDITION}}</bpmn2:loopCondition>
+            </bpmn2:standardLoopCharacteristics>
+        </bpmn2:callActivity>

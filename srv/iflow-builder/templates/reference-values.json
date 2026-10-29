@@ -252,6 +252,94 @@
       }
     }
   },
+  "Splitter": {
+    "exprType": {
+      "XPath": {
+        "references": [
+          "Ref_Structure",
+          "Ref_Structure"
+        ],
+        "confirmed": "re-selected in Ref_Structure (ITSPL_Orders and GSPL_Orders), 2026-10-29"
+      }
+    },
+    "streaming": {
+      "true": {
+        "references": [
+          "Ref_Structure"
+        ],
+        "confirmed": "re-selected in Ref_Structure (ITSPL_Orders), 2026-10-29"
+      },
+      "false": {
+        "references": [
+          "Ref_Structure"
+        ],
+        "confirmed": "re-selected in Ref_Structure (GSPL_Orders), 2026-10-29"
+      }
+    },
+    "stopOnException": {
+      "false": {
+        "references": [
+          "Ref_Structure"
+        ],
+        "confirmed": "re-selected in Ref_Structure (ITSPL_Orders), 2026-10-29"
+      },
+      "true": {
+        "references": [
+          "Ref_Structure"
+        ],
+        "confirmed": "re-selected in Ref_Structure (GSPL_Orders), 2026-10-29"
+      }
+    },
+    "parallel": {
+      "false": {
+        "references": [
+          "Ref_Structure",
+          "Ref_Structure"
+        ],
+        "confirmed": "re-selected in Ref_Structure (ITSPL_Orders and GSPL_Orders), 2026-10-29"
+      }
+    }
+  },
+  "Gather": {
+    "messageType": {
+      "DiffXMLFormat": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Multicast_Enrich"
+        ]
+      },
+      "SameXMLFormat": {
+        "references": [
+          "Ref_Structure"
+        ],
+        "confirmed": "XML (Same Format), re-selected in Ref_Structure (GA_Orders), 2026-10-29"
+      }
+    },
+    "aggregationAlgorithm": {
+      "sap-pi-multi-mapping": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Multicast_Enrich"
+        ]
+      },
+      "xpath-merge-strategy": {
+        "references": [
+          "Ref_Structure"
+        ],
+        "confirmed": "Combine at XPath, re-selected in Ref_Structure (GA_Orders), 2026-10-29"
+      }
+    }
+  },
+  "Looping Process Call": {
+    "expressionType": {
+      "Non XML": {
+        "references": [
+          "Ref_Structure"
+        ],
+        "confirmed": "re-selected in Ref_Structure (LPC_FetchPages), 2026-10-29"
+      }
+    }
+  },
   "Escalation End": {
     "category": {
       "Others": {

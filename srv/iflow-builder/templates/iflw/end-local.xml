@@ -1,0 +1,13 @@
+        <bpmn2:endEvent id="{{ID}}" name="{{NAME}}">
+            <bpmn2:extensionElements>
+                <ifl:property>
+                    <key>cmdVariantUri</key>
+                    <value>ctype::FlowstepVariant/cname::EndEvent</value>
+                </ifl:property>
+                <ifl:property>
+                    <key>activityType</key>
+                    <value>EndEvent</value>
+                </ifl:property>
+            </bpmn2:extensionElements>
+            <bpmn2:incoming>{{INCOMING}}</bpmn2:incoming>
+        </bpmn2:endEvent>

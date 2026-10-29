@@ -30,8 +30,18 @@ sap.ui.define(
       xmlToJson: 'XML to JSON',
       requestReplyHttp: 'Request Reply (HTTP)',
       writeVariables: 'Write Variables',
-      router: 'Router'
+      router: 'Router',
+      splitter: 'Splitter',
+      gather: 'Gather',
+      processCall: 'Process Call'
     }
+    /** The step type as the CPI editor names it: Iterating / General Splitter, (Looping) Process Call */
+    const typeOf = (s) =>
+      s.type === 'splitter'
+        ? `${s.kind === 'general' ? 'General' : 'Iterating'} Splitter`
+        : s.type === 'processCall' && s.loop
+          ? 'Looping Process Call'
+          : STEP_TYPES[s.type] || s.type
     // Content Modifier sources as the CPI editor names them
     const SOURCE_LABELS = { globalVariable: 'global variable', localVariable: 'local variable', xpath: 'XPath' }
     const sourceText = (e) => `${SOURCE_LABELS[e.type] || e.type}${e.datatype ? `, ${e.datatype}` : ''}${e.default ? `, default ${e.default}` : ''}`
@@ -48,6 +58,32 @@ sap.ui.define(
 
     /** Main-flow steps with the steps inside routes (after their router) */
     const flowSteps = (spec) => spec.steps.flatMap((s) => [s, ...(s.type === 'router' ? (s.routes || []).flatMap((r) => r.steps || []) : [])])
+    /** Every step: main flow with routes, exception subprocess, local processes */
+    const everyStep = (spec) => [
+      ...flowSteps(spec),
+      ...((spec.exceptionSubprocess && spec.exceptionSubprocess.steps) || []),
+      ...(spec.localProcesses || []).flatMap((lp) => flowSteps({ steps: lp.steps || [] }))
+    ]
+
+    /**
+     * Which main-line steps run per item: "Steps 3–4 run once per item; GA_Orders (step 5) combines the items
+     * again", for the splitter at index i
+     */
+    function perItemText(spec, i) {
+      const after = spec.steps.slice(i + 1)
+      const g = after.findIndex((s) => s.type === 'gather')
+      const last = g < 0 ? spec.steps.length : i + 1 + g // index after the last step that runs per item
+      const range = last - (i + 1) === 0 ? 'No step runs per item' : last - (i + 1) === 1 ? `Step ${i + 2} runs once per item` : `Steps ${i + 2}–${last} run once per item`
+      return g < 0 ? `${range}, up to the end` : `${range}; ${spec.steps[last].name || 'the gather'} (step ${last + 1}) combines the items again`
+    }
+
+    /** The note for a split that ends in a gather: properties set per item do not reach the steps after it */
+    function gatherNote(spec) {
+      const gathers = spec.steps.filter((s) => s.type === 'gather').map((s) => s.name || 'the gather')
+      return gathers.length
+        ? `Exchange properties set while processing one item do not reach the steps after ${gathers.join(', ')}: results must travel in the message body.`
+        : ''
+    }
 
     // end events as the CPI editor names them, an Escalation End with its category
     const END_EVENTS = { message: 'Message End', escalation: 'Escalation End', error: 'Error End' }
@@ -57,26 +93,32 @@ sap.ui.define(
       return event === 'escalation' ? `Escalation End (${CATEGORIES[end.category || 'Others'] || end.category})` : END_EVENTS[event]
     }
 
+    // steps CPI knows to produce XML: an XML router after one of them gets no notice
+    const XML_OUTPUT = ['jsonToXml']
+
     /**
-     * Information for an XML router after a Content Modifier or Groovy script (the step before it on the main line,
-     * routers skipped): CPI cannot prove that such a step produces XML and shows a notice on the router's routes
+     * Information for an XML router unless the step before it (routers skipped) is known to produce XML: CPI shows a
+     * notice on the router's routes after any other step (Content Modifier, Groovy script, splitter, ...) or at the
+     * start of a line. Main line and local processes.
      */
     function xmlRouterNote(spec) {
       const hits = []
-      let before = null
-      for (const s of spec.steps) {
-        if (s.type !== 'router') before = s
-        else if (s.expressionType === 'XML' && before && ['contentModifier', 'groovyScript'].includes(before.type))
-          hits.push(`${s.name || 'the XML router'} (after ${before.name || STEP_TYPES[before.type]})`)
+      for (const line of [spec.steps, ...(spec.localProcesses || []).map((lp) => lp.steps || [])]) {
+        let before = null
+        for (const s of line) {
+          if (s.type !== 'router') before = s
+          else if (s.expressionType === 'XML' && !(before && XML_OUTPUT.includes(before.type)))
+            hits.push(`${s.name || 'the XML router'} (${before ? `after ${before.name || typeOf(before)}` : 'first step'})`)
+        }
       }
       return hits.length
-        ? `CPI shows the notice "may not pass XML message to Sequence Flow. Sequence Flow supports XML input only" on the routes of ${hits.join(', ')}: it cannot tell that a Content Modifier or Groovy script produces XML. Not an error; make sure the body is XML at that point.`
+        ? `CPI may show the notice "may not pass XML message to Sequence Flow. Sequence Flow supports XML input only" on the routes of ${hits.join(', ')}: it cannot tell that the step before produces XML. Not an error; make sure the body is XML at that point.`
         : ''
     }
 
     /** The note under a proposal with HTTP receivers: credentials to deploy, receivers without authentication */
     function receiversNote(spec) {
-      const calls = [...flowSteps(spec).filter((s) => s.type === 'requestReplyHttp'), ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])]
+      const calls = [...everyStep(spec).filter((s) => s.type === 'requestReplyHttp'), ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])]
       if (!calls.length) return ''
       const label = (c) => c.system || c.name || 'Receiver'
       const withAuth = calls.filter((c) => c.authType && c.authType !== 'None')
@@ -839,12 +881,14 @@ sap.ui.define(
           resourcesText: '',
           scriptsText: '',
           receiversText: '',
-          xmlRouterText: ''
+          xmlRouterText: '',
+          gatherText: ''
         }
 
-        const stepCard = (s, prefix) => ({
-          title: `${prefix} ${s.name || STEP_TYPES[s.type]}`,
-          type: STEP_TYPES[s.type] || s.type,
+        // local: a step of a local process, where a route's End returns to the caller (the flow continues after the call)
+        const stepCard = (s, prefix, { local = false } = {}) => ({
+          title: `${prefix} ${s.name || typeOf(s)}`,
+          type: typeOf(s),
           description: s.description || '',
           lines:
             s.type === 'contentModifier'
@@ -861,12 +905,21 @@ sap.ui.define(
                   ? `script/${s.fileName}.groovy${s.code == null ? ' (attached file)' : ''}`
                   : s.type === 'router'
                     ? (s.routes || [])
-                        .map((r) => `${r.name}: ${r.default ? 'default' : r.condition} → ${r.end ? endText(r.end) : 'continues'}`)
+                        .map((r) => `${r.name}: ${r.default ? 'default' : r.condition} → ${r.end ? (local ? 'End (returns to the caller)' : endText(r.end)) : 'continues'}`)
                         .join('\n')
                     : s.type === 'writeVariables'
                     ? (s.variables || [])
                         .map((v) => `variable ${v.name} = ${v.value} (${v.type === 'xpath' ? 'XPath' : v.type}${v.datatype ? `, ${v.datatype}` : ''}, ${v.global ? 'global' : 'this iFlow only'})`)
                         .join('\n')
+                    : s.type === 'splitter'
+                    ? [
+                        `XPath ${s.expression}${s.grouping > 1 ? `, ${s.grouping} items per message` : ''}${s.streaming === false ? ', no streaming' : ''}`,
+                        s.stopOnException ? 'One failing item stops the rest' : 'One failing item does not stop the rest'
+                      ].join('\n')
+                    : s.type === 'gather'
+                    ? `Combines the items: ${s.source} into ${s.target} (XML, same format)`
+                    : s.type === 'processCall'
+                    ? `Calls local process ${s.process}${s.loop ? `\nAgain while ${s.loop.condition}, at most ${s.loop.max} times` : ''}`
                     : ''
         })
 
@@ -885,7 +938,7 @@ sap.ui.define(
             },
             // a router's route steps follow it, numbered router.route.step (3.2.1)
             ...spec.steps.flatMap((s, i) => [
-              stepCard(s, `${i + 1}.`),
+              s.type === 'splitter' ? (({ lines, ...card }) => ({ ...card, lines: `${lines}\n${perItemText(spec, i)}` }))(stepCard(s, `${i + 1}.`)) : stepCard(s, `${i + 1}.`),
               ...(s.type === 'router'
                 ? (s.routes || []).flatMap((r, j) => (r.steps || []).map((x, k) => ({ ...stepCard(x, `${i + 1}.${j + 1}.${k + 1}`), type: `${STEP_TYPES[x.type] || x.type} · route ${r.name}` })))
                 : [])
@@ -913,7 +966,24 @@ sap.ui.define(
                   },
                   ...spec.exceptionSubprocess.steps.map((s, i) => stepCard(s, `E${i + 1}.`))
                 ]
-              : [])
+              : []),
+            // local processes, numbered L1.1, L1.2, ...; who calls each
+            ...(spec.localProcesses || []).flatMap((lp, i) => {
+              const callers = everyStep(spec).filter((s) => s.type === 'processCall' && s.process === lp.name)
+              return [
+                {
+                  title: lp.name,
+                  type: 'Local Process',
+                  lines: callers.length ? `Called by ${callers.map((s) => s.name || typeOf(s)).join(', ')}` : 'No step calls it, so it never runs'
+                },
+                ...(lp.steps || []).flatMap((s, j) => [
+                  stepCard(s, `L${i + 1}.${j + 1}`, { local: true }),
+                  ...(s.type === 'router'
+                    ? (s.routes || []).flatMap((r, k) => (r.steps || []).map((x, m) => ({ ...stepCard(x, `L${i + 1}.${j + 1}.${k + 1}.${m + 1}`), type: `${typeOf(x)} · route ${r.name}` })))
+                    : [])
+                ])
+              ]
+            })
           ]
           active.params = Object.entries(spec.parameters || {}).map(([key, value]) => ({ key, value }))
           // same rule as srv/lib/proposals.js: a placeholder default is not configured on approval
@@ -922,7 +992,7 @@ sap.ui.define(
             ? `${placeholderParams.join(', ')}: the default is a placeholder. It is not configured on approval — set the real value in the CPI web editor (Configure) before deploying. Approve without deploy.`
             : ''
           const attached = p.attachments || {}
-          active.scripts = [...spec.steps, ...((spec.exceptionSubprocess && spec.exceptionSubprocess.steps) || [])]
+          active.scripts = everyStep(spec)
             .filter((s) => s.type === 'groovyScript')
             .map((s) => ({
               fileName: `${s.fileName}.groovy`,
@@ -937,6 +1007,7 @@ sap.ui.define(
             : ''
           active.receiversText = receiversNote(spec)
           active.xmlRouterText = xmlRouterNote(spec)
+          active.gatherText = gatherNote(spec)
         }
 
         // package editor defaults: closest existing package, else create under the requested id

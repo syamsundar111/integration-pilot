@@ -12,15 +12,19 @@ const specSteps = require('./spec-steps')
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'writeVariables', 'router'] // router: main line only
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'writeVariables', 'router', 'splitter', 'gather', 'processCall']
+// main line only: not inside routes, the exception subprocess or local processes
+const MAIN_LINE_ONLY = ['router', 'splitter', 'gather']
 // Steps allowed in the exception subprocess (no receivers there; Write Variables only in the main flow so far)
-const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson']
+const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall']
+// Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
+const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'writeVariables', 'router']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'timer']
-const MAX_MAIN_STEPS = 50 // main-flow steps, routers and the steps inside routes together
+const MAX_MAIN_STEPS = 50 // main-flow steps, routers, the steps inside routes and the steps of local processes together
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
 
 // Step kinds people (and LLMs) ask for that v1 deliberately does not build
-const NOT_IN_V1 = /gateway|split|mapping|multicast|join|gather|aggregat|filter|sequential|parallel|loop|localprocess|xslt/i
+const NOT_IN_V1 = /gateway|mapping|multicast|join|aggregat|filter|sequential|parallel|xslt/i
 // Error handling is supported, but as the top-level exceptionSubprocess field, not as a step
 const EXCEPTION_STEP = /exception|error|subprocess|catch/i
 // Start and end events are not steps: the trigger and the end are top-level fields
@@ -33,8 +37,15 @@ const DEFAULT_STEP_NAMES = {
   jsonToXml: 'JSON to XML Converter',
   xmlToJson: 'XML to JSON Converter',
   requestReplyHttp: 'Request Reply',
-  writeVariables: 'Write Variables'
+  writeVariables: 'Write Variables',
+  iteratingSplitter: 'Iterating Splitter',
+  generalSplitter: 'General Splitter',
+  gather: 'Gather',
+  processCall: 'Process Call',
+  loopingProcessCall: 'Looping Process Call'
 }
+/** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call */
+const defaultKey = (s) => (s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type)
 const DEFAULT_EXCEPTION_SUBPROCESS_NAME = 'Exception Subprocess 1'
 
 const GROOVY_IMPORT = /import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Message\s*;?/
@@ -56,14 +67,17 @@ function effectiveNames(spec) {
   const counters = {}
   const main = spec.steps || []
   const sub = exceptionSteps(spec)
-  const flatMain = specSteps.mainSteps(spec).filter((x) => x.step && typeof x.step === 'object') // main flow with the steps inside routes
-  const explicit = new Set([...flatMain.map((x) => x.step), ...sub].map((s) => s?.name).filter(Boolean))
-  // Defaults count per type across the main flow and the exception subprocess ("Content Modifier 1", "… 2")
-  // and skip names given explicitly
+  const isStep = (x) => x.step && typeof x.step === 'object'
+  const flatMain = specSteps.mainSteps(spec).filter(isStep) // main flow with the steps inside routes
+  const flatLocal = specSteps.localSteps(spec).filter(isStep)
+  const explicit = new Set([...flatMain.map((x) => x.step), ...sub, ...flatLocal.map((x) => x.step)].map((s) => s?.name).filter(Boolean))
+  // Defaults count per type across the main flow, the exception subprocess and the local processes
+  // ("Content Modifier 1", "… 2") and skip names given explicitly
   const name = (s) => {
     if (s.name) return s.name
+    const key = defaultKey(s)
     let n
-    do n = `${DEFAULT_STEP_NAMES[s.type] || s.type} ${(counters[s.type] = (counters[s.type] || 0) + 1)}`
+    do n = `${DEFAULT_STEP_NAMES[key] || s.type} ${(counters[key] = (counters[key] || 0) + 1)}`
     while (explicit.has(n))
     return n
   }
@@ -71,14 +85,31 @@ function effectiveNames(spec) {
   const named = new Map(flatMain.map((x) => [x.step, name(x.step)]))
   const steps = main.map((s) => named.get(s))
   const exception = sub.map(name)
+  for (const x of flatLocal) named.set(x.step, name(x.step))
   let rr = 0
-  const systemOf = new Map(flatMain.map((x) => [x.step, x.step.type === 'requestReplyHttp' ? x.step.system || `Receiver${++rr}` : null]))
+  const systemOf = new Map([...flatMain, ...flatLocal].map((x) => [x.step, x.step.type === 'requestReplyHttp' ? x.step.system || `Receiver${++rr}` : null]))
   const systems = main.map((s) => systemOf.get(s))
-  // every main-flow step with its path, name and receiver: [{ step, where, name, system }]
-  const flat = flatMain.map((x) => ({ ...x, name: named.get(x.step), system: systemOf.get(x.step) }))
+  // every main-flow step with its path, name and receiver: [{ step, where, name, system }]; local: the same for local processes
+  const withNames = (x) => ({ ...x, name: named.get(x.step), system: systemOf.get(x.step) })
+  const flat = flatMain.map(withNames)
+  const local = flatLocal.map(withNames)
   const endSystem = spec.end?.type === 'httpReceiver' ? spec.end.system || 'Receiver' : null
   const exceptionSubprocess = spec.exceptionSubprocess ? spec.exceptionSubprocess.name || DEFAULT_EXCEPTION_SUBPROCESS_NAME : null
-  return { steps, systems, flat, endSystem, exceptionSubprocess, exceptionSteps: exception }
+  return { steps, systems, flat, local, endSystem, exceptionSubprocess, exceptionSteps: exception }
+}
+
+/**
+ * What is wrong with a condition, or null: NonXML reads ${...} and has spaces around the operator
+ * (${property.x} = 'A', not ${property.x}='A'); XML is an XPath without ${...}
+ */
+function conditionProblem(c, expressionType) {
+  if (expressionType === 'NonXML') {
+    if (!c.includes('${')) return `a NonXML condition reads a header or property with \${...}, e.g. "\${property.routeKey} = 'A'"`
+    if (/\S(=|!=|<=|>=|<|>|=~)\S/.test(c.replace(/\$\{[^}]*\}/g, (m) => m.replace(/[=<>!~]/g, '_')).replace(/'[^']*'/g, "''")))
+      return `put spaces around the operator, e.g. "\${property.x} = 'A'", not "\${property.x}='A'"`
+  }
+  if (expressionType === 'XML' && c.includes('${')) return `an XML condition is an XPath, e.g. "/root/type = 'X'"; for \${...} set expressionType "NonXML"`
+  return null
 }
 
 const label = (path) =>
@@ -113,7 +144,10 @@ function schemaErrors(errors, skipPaths) {
     const field = e.instancePath.split('/').pop()
     switch (e.keyword) {
       case 'required':
-        push('MISSING_FIELD', `${where}: missing required field '${e.params.missingProperty}'`)
+        // no default on purpose: whether one failing item stops the others is the user's decision
+        if (e.params.missingProperty === 'stopOnException')
+          push('MISSING_FIELD', `${where}: missing required field 'stopOnException' — true: one failing item stops the rest; false: the other items still run. Ask the user if the request does not say`)
+        else push('MISSING_FIELD', `${where}: missing required field '${e.params.missingProperty}'`)
         break
       case 'additionalProperties':
         push('UNKNOWN_FIELD', `${where}: unknown field '${e.params.additionalProperty}'`)
@@ -149,7 +183,7 @@ function walkStrings(node, path, fn) {
  * and the value of a constant header or property (an externalized value; the other sources name a header,
  * property, variable or XPath)
  */
-const STEP_PATH = String.raw`(steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\])`
+const STEP_PATH = String.raw`(steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\]|localProcesses\[\d+\]\.steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?)`
 const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
 
 /**
@@ -174,20 +208,31 @@ function validate(spec, { attachments = [] } = {}) {
       err('NESTED_ROUTER', `${where}: a router inside a route is not supported — routers sit on the main line only; put the routing on the main line, or decide it in a groovyScript that sets a property for the next router`)
       continue
     }
+    if (route && MAIN_LINE_ONLY.includes(type)) {
+      skip.push(ptr)
+      err('MAIN_LINE_ONLY', `${where}: a ${type} inside a route is not supported — splitters and gathers sit on the main line only`)
+      continue
+    }
     if (!type || SUPPORTED_STEPS.includes(type)) continue
     skip.push(ptr)
     if (/router|gateway/i.test(type))
       err('USE_ROUTER', `${where}: '${type}' — a router is { "type": "router", "expressionType": "XML"|"NonXML", "routes": [{ "name", "condition", "steps"?, "end"? }, ..., { "name", "default": true }] }`)
+    else if (/split/i.test(type))
+      err('USE_SPLITTER', `${where}: '${type}' — a splitter is { "type": "splitter", "kind": "iterating"|"general", "expression": "//item", "stopOnException": true|false }; the steps after it run per item until a { "type": "gather", "source", "target" }`)
+    else if (/gather/i.test(type)) err('USE_GATHER', `${where}: '${type}' — a gather is { "type": "gather", "source": "//item", "target": "/items" }, after a splitter`)
     else if (END_STEP.test(type))
       err('END_AS_STEP', `${where}: '${type}' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end' (or a route's 'end'), e.g. { "type": "none" }`)
     else if (TRIGGER_STEP.test(type))
       err('TRIGGER_AS_STEP', `${where}: '${type}' is the trigger, not a step — remove it from steps; the trigger is the top-level 'trigger', e.g. { "type": "timer", "mode": "once" }`)
     else if (EXCEPTION_STEP.test(type))
       err('EXCEPTION_AS_STEP', `${where}: error handling is not a step — remove '${type}' from steps and put the error handling steps into the top-level 'exceptionSubprocess': { "steps": [...] }`)
+    // after the error handling check: "exceptionSubprocess" contains "process"
+    else if (/process|loop/i.test(type))
+      err('USE_PROCESS_CALL', `${where}: '${type}' — a process call is { "type": "processCall", "process": "<local process name>", "loop"?: { "condition", "max" } }, with the process in the top-level localProcesses`)
     else if (NOT_IN_V1.test(type))
       err(
         'STEP_NOT_IN_V1',
-        `${where}: '${type}' is not supported yet (no splitter, multicast, join or mapping). Supported step types: ${supportedList}. Mapping logic can often be done in a groovyScript step.`
+        `${where}: '${type}' is not supported yet (no multicast, join or mapping). Supported step types: ${supportedList}. Mapping logic can often be done in a groovyScript step.`
       )
     else err('UNKNOWN_STEP', `${where}: unknown step type '${type}'. Supported step types: ${supportedList}.`)
   }
@@ -203,6 +248,23 @@ function validate(spec, { attachments = [] } = {}) {
         : `exceptionSubprocess.steps[${i}]: '${type}' is not supported in the exception subprocess. Supported: ${exceptionList}.`
     )
   })
+  const localList = SUPPORTED_LOCAL_STEPS.join(', ')
+  for (const { step: s, where, ptr, route } of specSteps.localSteps(spec)) {
+    const type = s?.type
+    if (route && type === 'router') {
+      skip.push(ptr)
+      err('NESTED_ROUTER', `${where}: a router inside a route is not supported — in a local process too, routers sit on its line only`)
+      continue
+    }
+    if (!type || SUPPORTED_LOCAL_STEPS.includes(type)) continue
+    skip.push(ptr)
+    err(
+      'LOCAL_STEP_UNSUPPORTED',
+      SUPPORTED_STEPS.includes(type)
+        ? `${where}: a ${type} inside a local process is not supported yet (no splitters, gathers or process calls there). Supported: ${localList}.`
+        : `${where}: '${type}' is not supported in a local process. Supported: ${localList}.`
+    )
+  }
   if (spec.trigger?.type && !SUPPORTED_TRIGGERS.includes(spec.trigger.type)) {
     skip.push('/trigger')
     err('TRIGGER_UNSUPPORTED', `trigger: '${spec.trigger.type}' is not supported yet. Use httpsSender { address }, timer { mode: "once" } or timer { mode: "every", minutes }.`)
@@ -213,8 +275,7 @@ function validate(spec, { attachments = [] } = {}) {
   }
 
   // Receiver authentication, proxy and timeout: one actionable message per problem instead of schema noise
-  const calls = specSteps
-    .mainSteps(spec)
+  const calls = [...specSteps.mainSteps(spec), ...specSteps.localSteps(spec)]
     .filter((x) => x.step?.type === 'requestReplyHttp')
     .map((x) => [x.step, x.where, x.ptr])
   if (spec.end?.type === 'httpReceiver') calls.push([spec.end, 'end', '/end'])
@@ -252,12 +313,14 @@ function validate(spec, { attachments = [] } = {}) {
   const isObj = (s) => s && typeof s === 'object'
   const steps = Array.isArray(spec.steps) ? spec.steps : []
   const subSteps = exceptionSteps(spec)
+  const locals = specSteps.localProcesses(spec).filter(isObj)
   const names = effectiveNames({
     ...spec,
     steps: steps.filter(isObj),
-    ...(isObj(spec.exceptionSubprocess) && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: subSteps.filter(isObj) } })
+    ...(isObj(spec.exceptionSubprocess) && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: subSteps.filter(isObj) } }),
+    localProcesses: locals.map((p) => ({ ...p, steps: (Array.isArray(p.steps) ? p.steps : []).filter(isObj) }))
   })
-  // [step, path] of the main flow (with the steps inside routes) and the exception subprocess
+  // [step, path] of the main flow (with the steps inside routes), the exception subprocess and the local processes
   const allSteps = specSteps.allSteps(spec).map((x) => [x.step, x.where])
 
   const dupes = (list) => [...new Set(list.filter((v, i) => v && list.indexOf(v) !== i))]
@@ -265,6 +328,7 @@ function validate(spec, { attachments = [] } = {}) {
   const namedAt = [
     ...names.flat.map((x) => [x.name, x.where, x.step]),
     ...names.exceptionSteps.map((n, i) => [n, `exceptionSubprocess.steps[${i}]`, subSteps[i]]),
+    ...names.local.map((x) => [x.name, x.where, x.step]),
     [names.exceptionSubprocess, 'exceptionSubprocess.name', null]
   ]
   const fix = (hits) => {
@@ -276,11 +340,15 @@ function validate(spec, { attachments = [] } = {}) {
     }
     return same ? `the same step was added twice: remove ${last} (${remove(last)})` : `rename all but one, or remove the extra step (${remove(last)})`
   }
-  for (const d of dupes([...names.flat.map((x) => x.name), ...names.exceptionSteps, names.exceptionSubprocess])) {
+  for (const d of dupes([...names.flat.map((x) => x.name), ...names.exceptionSteps, ...names.local.map((x) => x.name), names.exceptionSubprocess])) {
     const hits = namedAt.filter(([n]) => n === d)
-    err('DUPLICATE_STEP_NAME', `steps: step name '${d}' is used more than once, at ${hits.map(([, p]) => p).join(' and ')} — step names must be unique (main flow, routes and exception subprocess together); ${fix(hits)}`)
+    err(
+      'DUPLICATE_STEP_NAME',
+      `steps: step name '${d}' is used more than once, at ${hits.map(([, p]) => p).join(' and ')} — step names must be unique (main flow, routes, exception subprocess and local processes together); ${fix(hits)}`
+    )
   }
-  for (const d of dupes([...names.flat.map((x) => x.system), names.endSystem]))
+  for (const d of dupes(locals.map((p) => p.name))) err('DUPLICATE_PROCESS_NAME', `localProcesses: local process name '${d}' is used more than once — give each local process its own name`)
+  for (const d of dupes([...names.flat.map((x) => x.system), ...names.local.map((x) => x.system), names.endSystem]))
     err('DUPLICATE_SYSTEM', `receiver system name '${d}' is used more than once — give each receiver a unique 'system'`)
   for (const d of dupes(allSteps.filter(([s]) => s?.type === 'groovyScript').map(([s]) => s.fileName))) {
     const hits = allSteps.filter(([s]) => s?.type === 'groovyScript' && s.fileName === d).map(([st, p]) => [d, p, st])
@@ -288,11 +356,15 @@ function validate(spec, { attachments = [] } = {}) {
   }
 
   // --- end events: an escalation category only on an Escalation End, and one the references contain ---
-  const ends = [
-    ['end', spec.end],
-    ['exceptionSubprocess.end', spec.exceptionSubprocess?.end],
-    ...steps.flatMap((r, i) => (r?.type === 'router' && Array.isArray(r.routes) ? r.routes.map((x, j) => [`steps[${i}].routes[${j}].end`, x?.end]) : []))
-  ].filter(([, e]) => isObj(e))
+  const routeEnds = (list, prefix) =>
+    list.flatMap((r, i) => (r?.type === 'router' && Array.isArray(r.routes) ? r.routes.map((x, j) => [`${prefix}[${i}].routes[${j}].end`, x?.end]) : []))
+  const ends = [['end', spec.end], ['exceptionSubprocess.end', spec.exceptionSubprocess?.end], ...routeEnds(steps, 'steps')].filter(([, e]) => isObj(e))
+  // a route in a local process ends with the plain End of a local process (the only end event the references have there)
+  locals.forEach((p, i) => {
+    for (const [where, e] of routeEnds(Array.isArray(p.steps) ? p.steps : [], `localProcesses[${i}].steps`).filter(([, e]) => isObj(e)))
+      if ((e.event && e.event !== 'message') || e.category != null)
+        err('LOCAL_END_EVENT', `${where}: a route in a local process ends with a plain End ({ "event": "message" }) — Escalation and Error Ends in local processes are not supported yet`)
+  })
   for (const [where, e] of ends) {
     if (e.category != null && e.event !== 'escalation') err('CATEGORY_WITHOUT_ESCALATION', `${where}.category: only an Escalation End has a category — remove it, or set "event": "escalation"`)
     else if (e.event === 'escalation' && (e.category == null || schema.definitions.endEvent.properties.category.enum.includes(e.category)))
@@ -300,38 +372,83 @@ function validate(spec, { attachments = [] } = {}) {
   }
 
   // --- routers, ends, size ------------------------------------------------------------
-  // Steps count together: main-flow steps, routers and the steps inside routes (route ends do not count)
-  const total = names.flat.length
-  if (total > MAX_MAIN_STEPS && steps.length <= MAX_MAIN_STEPS) err('TOO_MANY_STEPS', `steps: ${total} steps with the routers and the steps inside routes — at most ${MAX_MAIN_STEPS}; merge Content Modifiers or move logic into one Groovy script`)
-  steps.forEach((r, i) => {
-    if (r?.type !== 'router' || !Array.isArray(r.routes)) return
-    const where = `steps[${i}]`
-    const routes = r.routes.filter(isObj)
-    if (['XML', 'NonXML'].includes(r.expressionType)) valueCheck('Router', [['expressionType', r.expressionType]], where) // written on every route
-    const defaults = routes.filter((x) => x.default === true)
-    if (defaults.length !== 1) err('ROUTER_DEFAULT', `${where}.routes: exactly one route needs "default": true (found ${defaults.length}) — the default route takes every message no other condition matches`)
-    else if (routes.at(-1) !== defaults[0]) err('ROUTER_DEFAULT_LAST', `${where}.routes: list the default route '${defaults[0].name}' last — CPI evaluates it last`)
-    for (const d of dupes(routes.map((x) => x.name))) err('DUPLICATE_ROUTE_NAME', `${where}.routes: route name '${d}' is used more than once — route names must be unique within a router`)
-    routes.forEach((route, j) => {
-      const at = `${where}.routes[${j}]`
-      if (route.default === true && route.condition != null) err('DEFAULT_WITH_CONDITION', `${at}: the default route has no condition — remove 'condition'`)
-      if (route.default !== true && !(typeof route.condition === 'string' && route.condition.trim())) err('CONDITION_MISSING', `${at}: a route that is not the default needs a 'condition'`)
-      if (typeof route.condition !== 'string' || !route.condition.trim()) return
-      const c = route.condition
-      if (r.expressionType === 'NonXML') {
-        if (!c.includes('${')) err('CONDITION_FORMAT', `${at}.condition: a NonXML condition reads a header or property with \${...}, e.g. "\${property.routeKey} = 'A'"`)
-        // operators need spaces on both sides: ${property.x} = 'A', not ${property.x}='A'
-        else if (/\S(=|!=|<=|>=|<|>|=~)\S/.test(c.replace(/\$\{[^}]*\}/g, (m) => m.replace(/[=<>!~]/g, '_')).replace(/'[^']*'/g, "''")))
-          err('CONDITION_FORMAT', `${at}.condition: put spaces around the operator, e.g. "\${property.x} = 'A'", not "\${property.x}='A'"`)
+  // Steps count together: main-flow steps, routers, the steps inside routes and the steps of local processes
+  // (route ends do not count)
+  const total = names.flat.length + names.local.length
+  if (total > MAX_MAIN_STEPS && steps.length <= MAX_MAIN_STEPS)
+    err('TOO_MANY_STEPS', `steps: ${total} steps with the routers, the steps inside routes and the steps of local processes — at most ${MAX_MAIN_STEPS}; merge Content Modifiers or move logic into one Groovy script`)
+  /** The router rules for one line: the main line, or a local process (which has no end of its own to set) */
+  const checkRouters = (list, prefix, isMain) =>
+    list.forEach((r, i) => {
+      if (r?.type !== 'router' || !Array.isArray(r.routes)) return
+      const where = `${prefix}[${i}]`
+      const routes = r.routes.filter(isObj)
+      if (['XML', 'NonXML'].includes(r.expressionType)) valueCheck('Router', [['expressionType', r.expressionType]], where) // written on every route
+      const defaults = routes.filter((x) => x.default === true)
+      if (defaults.length !== 1) err('ROUTER_DEFAULT', `${where}.routes: exactly one route needs "default": true (found ${defaults.length}) — the default route takes every message no other condition matches`)
+      else if (routes.at(-1) !== defaults[0]) err('ROUTER_DEFAULT_LAST', `${where}.routes: list the default route '${defaults[0].name}' last — CPI evaluates it last`)
+      for (const d of dupes(routes.map((x) => x.name))) err('DUPLICATE_ROUTE_NAME', `${where}.routes: route name '${d}' is used more than once — route names must be unique within a router`)
+      routes.forEach((route, j) => {
+        const at = `${where}.routes[${j}]`
+        if (route.default === true && route.condition != null) err('DEFAULT_WITH_CONDITION', `${at}: the default route has no condition — remove 'condition'`)
+        if (route.default !== true && !(typeof route.condition === 'string' && route.condition.trim())) err('CONDITION_MISSING', `${at}: a route that is not the default needs a 'condition'`)
+        if (typeof route.condition !== 'string' || !route.condition.trim()) return
+        const problem = conditionProblem(route.condition, r.expressionType)
+        if (problem) err('CONDITION_FORMAT', `${at}.condition: ${problem}`)
+      })
+      // a router whose routes all end must be the last step, and the main flow has no end of its own
+      if (routes.length && routes.every((x) => x.end)) {
+        if (i < list.length - 1) err('ROUTER_ALL_END', `${where}: every route ends, so the steps after the router can never run — make the router the last step, or let a route continue (no 'end')`)
+        if (isMain && spec.end && (spec.end.type !== 'none' || (spec.end.event && spec.end.event !== 'message')))
+          err('ROUTER_ALL_END', `end: every route of the last router ends, so the main flow has no end of its own — set "end": { "type": "none" }`)
       }
-      if (r.expressionType === 'XML' && c.includes('${')) err('CONDITION_FORMAT', `${at}.condition: an XML condition is an XPath, e.g. "/root/type = 'X'"; for \${...} set expressionType "NonXML"`)
     })
-    // a router whose routes all end must be the last step, and the main flow has no end of its own
-    if (routes.length && routes.every((x) => x.end)) {
-      if (i < steps.length - 1) err('ROUTER_ALL_END', `${where}: every route ends, so the steps after the router can never run — make the router the last step, or let a route continue (no 'end')`)
-      if (spec.end && (spec.end.type !== 'none' || (spec.end.event && spec.end.event !== 'message')))
-        err('ROUTER_ALL_END', `end: every route of the last router ends, so the main flow has no end of its own — set "end": { "type": "none" }`)
+  checkRouters(steps, 'steps', true)
+  locals.forEach((p, i) => checkRouters(Array.isArray(p.steps) ? p.steps : [], `localProcesses[${i}].steps`, false))
+
+  // --- splitters and gathers: main line; a gather closes the split of the splitter before it -------------
+  let split = null // [splitter, path] whose items are still split
+  let routersInSplit = [] // paths of the routers since that splitter: CPI refuses a router before its gather
+  steps.forEach((s, i) => {
+    const where = `steps[${i}]`
+    if (s?.type === 'router' && split) routersInSplit.push(where)
+    if (s?.type === 'splitter') {
+      if (split) err('NESTED_SPLIT', `${where}: a splitter between the splitter ${split[1]} and its gather is not supported (no nested splits) — add a gather before this splitter, or split once`)
+      else split = [s, where]
+      if (['iterating', 'general'].includes(s.kind) && typeof s.stopOnException === 'boolean')
+        valueCheck('Splitter', [['exprType', 'XPath'], ['streaming', String(s.streaming ?? true)], ['stopOnException', String(s.stopOnException)], ['parallel', 'false']], where)
     }
+    if (s?.type === 'gather') {
+      if (!split) err('GATHER_WITHOUT_SPLITTER', `${where}: a gather combines split messages — put a splitter before it, or remove the gather`)
+      for (const at of routersInSplit)
+        err(
+          'ROUTER_IN_SPLIT',
+          `${at}: CPI does not accept a router between a splitter and its gather (${where}) — route per item inside a local process instead: a processCall here, and a local process that contains the router (a router after a splitter without a gather is fine)`
+        )
+      split = null
+      routersInSplit = []
+      valueCheck('Gather', [['messageType', 'SameXMLFormat'], ['aggregationAlgorithm', 'xpath-merge-strategy']], where)
+    }
+  })
+
+  // --- process calls: a local process that exists; a looping one with a NonXML condition -------------------
+  const processNames = new Set(locals.map((p) => p.name))
+  const calledNames = new Set()
+  for (const [s, where] of allSteps) {
+    if (s?.type !== 'processCall') continue
+    if (typeof s.process === 'string') {
+      calledNames.add(s.process)
+      if (!processNames.has(s.process))
+        err('PROCESS_UNKNOWN', `${where}.process: no local process '${s.process}' — add it to localProcesses: [{ "name": "${s.process}", "steps": [...] }], or call one of: ${[...processNames].join(', ') || '(none)'}`)
+    }
+    if (isObj(s.loop) && typeof s.loop.condition === 'string' && s.loop.condition.trim()) {
+      const problem = conditionProblem(s.loop.condition, 'NonXML')
+      if (problem) err('CONDITION_FORMAT', `${where}.loop.condition: ${problem}`)
+      valueCheck('Looping Process Call', [['expressionType', 'Non XML']], where)
+    }
+  }
+  locals.forEach((p, i) => {
+    if (typeof p.name === 'string' && !calledNames.has(p.name)) referenceWarnings.push(`localProcesses[${i}]: no processCall calls the local process '${p.name}', so it never runs`)
   })
 
   // --- attached files: scripts without code, XSLT resources --------------------------
@@ -357,8 +474,7 @@ function validate(spec, { attachments = [] } = {}) {
     }
   }
 
-  const httpCalls = steps.map((s, i) => [s, `steps[${i}]`]).filter(([s]) => s?.type === 'requestReplyHttp')
-  if (spec.end?.type === 'httpReceiver') httpCalls.push([spec.end, 'end'])
+  const httpCalls = calls.map(([call, where]) => [call, where])
   // Timer: "every" needs its interval; values of timers, Content Modifier sources and Write Variables must be
   // in the reference exports (a value seen once and not confirmed is a warning)
   if (spec.trigger?.type === 'timer') {
@@ -425,7 +541,7 @@ function validate(spec, { attachments = [] } = {}) {
 
   // --- externalized parameters --------------------------------------------------
   const params = spec.parameters && typeof spec.parameters === 'object' ? spec.parameters : {}
-  walkStrings({ trigger: spec.trigger, steps, end: spec.end, exceptionSubprocess: spec.exceptionSubprocess }, '', (value, path) => {
+  walkStrings({ trigger: spec.trigger, steps, end: spec.end, exceptionSubprocess: spec.exceptionSubprocess, localProcesses: spec.localProcesses }, '', (value, path) => {
     const refs = [...value.matchAll(PARAM_REF)]
     if (!refs.length) return
     // Groovy code, body and descriptions (documentation, not configuration) may contain {{ }} text
@@ -464,25 +580,12 @@ function normalizeTypes(spec) {
           return { ...r, type: 'constant' }
         })
       : rows
-  const fixStep = (s, i, prefix) =>
+  const out = specSteps.mapSteps(spec, (s, where) =>
     s?.type === 'contentModifier'
-      ? { ...s, ...(s.headers && { headers: fixRows(s.headers, `${s.name || `${prefix}[${i}]`}: header`) }), ...(s.properties && { properties: fixRows(s.properties, `${s.name || `${prefix}[${i}]`}: property`) }) }
-      : s?.type === 'router' && Array.isArray(s.routes)
-        ? {
-            ...s,
-            routes: s.routes.map((r, j) =>
-              Array.isArray(r?.steps) ? { ...r, steps: r.steps.map((x, k) => fixStep(x, k, `${prefix}[${i}].routes[${j}].steps`)) } : r
-            )
-          }
-        : s
-  const out = {
-    ...spec,
-    ...(Array.isArray(spec.steps) && { steps: spec.steps.map((s, i) => fixStep(s, i, 'steps')) }),
-    ...(Array.isArray(spec.exceptionSubprocess?.steps) && {
-      exceptionSubprocess: { ...spec.exceptionSubprocess, steps: spec.exceptionSubprocess.steps.map((s, i) => fixStep(s, i, 'exceptionSubprocess.steps')) }
-    })
-  }
+      ? { ...s, ...(s.headers && { headers: fixRows(s.headers, `${s.name || where}: header`) }), ...(s.properties && { properties: fixRows(s.properties, `${s.name || where}: property`) }) }
+      : s
+  )
   return { spec: out, fixes }
 }
 
-module.exports = { validate, normalizeTypes, effectiveNames, hasScriptSecret, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }
+module.exports = { validate, normalizeTypes, effectiveNames, hasScriptSecret, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, SUPPORTED_LOCAL_STEPS, MAIN_LINE_ONLY, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }

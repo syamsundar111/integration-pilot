@@ -15,15 +15,16 @@ turns into extra questions.
 | | Supported | Not supported |
 |---|---|---|
 | Trigger | HTTPS sender (with a path), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, SOAP, other senders |
-| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP request-reply, Router (on the main line) | Router inside a route, splitter, gather, join step, multicast, mapping, XSLT step, process call |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP request-reply, Router, Iterating and General Splitter, Gather (these three on the main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; nested splits; join step, multicast, mapping, XSLT step, Idempotent Process Call |
+| Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP request-reply and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
-| Error handling | One exception subprocess (Content Modifier, Groovy, converters), ending with a Message, Escalation or Error End | Request-reply inside the exception subprocess |
+| Error handling | One exception subprocess (Content Modifier, Groovy, converters, Process Call), ending with a Message, Escalation or Error End | Request-reply inside the exception subprocess |
 
 Hard limits:
 
-- At most **50 steps** in the main flow, counting routers and the steps inside routes (route ends do
-  not count); 10 in the exception subprocess. Large flows are written and checked in parts of up to
+- At most **50 steps** in the main flow, counting routers, the steps inside routes and the steps of
+  local processes (route ends do not count); 10 in the exception subprocess. Large flows are written and checked in parts of up to
   8 steps, so their size does not cause timeouts.
 - A router: routes are evaluated in order; each has a condition (XML: an XPath; Non-XML:
   `${property.x} = 'A'` with spaces around the operator), except one **default route**, listed last.
@@ -31,9 +32,18 @@ Hard limits:
   where the continuing routes join again. If every route ends, the router is the last step.
   An Escalation End has a category shown in monitoring: "Others - not further qualified" (the default)
   or "Routing condition not met"; the receiver categories are not supported yet.
-  An XML router right after a Content Modifier or Groovy script gets CPI's notice "may not pass XML
-  message to Sequence Flow. Sequence Flow supports XML input only" on its routes: CPI cannot tell that
-  the step produces XML. It is not an error; make sure the body is XML there.
+  An XML router may get CPI's notice "may not pass XML message to Sequence Flow. Sequence Flow supports
+  XML input only" on its routes unless the step before it is a JSON to XML converter (e.g. after a
+  Content Modifier, Groovy script or splitter): CPI cannot tell that the step produces XML. It is not an
+  error; make sure the body is XML there.
+- A splitter (Iterating or General, XPath) makes the steps after it run once per item, until a Gather
+  (XML, same format, combine at XPath) or the end. Say whether **one failing item stops the rest**
+  (Stop on Exception): it has no default. No second splitter and no router before the Gather (CPI
+  refuses a router there): to route each item, call a local process that contains the router. A
+  router after a splitter without a Gather is fine. Exchange properties set while processing one item do not reach the steps after the
+  Gather: results must travel in the message body (the proposal panel says so too).
+- A Looping Process Call runs its local process again while a Non-XML condition is true
+  (`${property.hasMore} = 'true'`, spaces around the operator), at most a maximum number of times.
 - Step names, receiver names and Groovy file names must be **unique**.
 - `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver,
   or as a whole **constant** header or property value. "Default" for a parameter means its value
@@ -65,7 +75,7 @@ Error handling: <exception subprocess: what to set, log or return when a step fa
 
 Before sending, the chat checks the request without calling the model. It warns about:
 
-- steps v1 cannot build (splitter, gather, join step, multicast, XSLT, mapping, SFTP, process call)
+- steps v1 cannot build (join step, multicast, XSLT, mapping, SFTP)
 - more than 25 numbered steps
 - `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID
 - template fields that are still unfilled
@@ -120,8 +130,9 @@ spec:
   router, the route with a condition), and the other routes are described in the router's placeholder.
 - `{{Param}}` values outside receiver URLs, credential names, location IDs and constant values become
   the parameter's default; a receiver URL combined from parameters becomes one `<Receiver>_URL` parameter.
-- A Process Call in the exception subprocess is replaced by the steps of the local process it calls,
-  if they are Content Modifiers and Groovy scripts.
+- Iterating and General Splitters, Gathers, (Looping) Process Calls and the local processes they call
+  are kept. A splitter's settings given as parameters take their defaults. What a local process cannot
+  hold becomes a placeholder inside it.
 - The import gets a new iFlow id (`<original>_Imported`); duplicate names are made unique.
 - Content Modifier sources (header, property, XPath, global and local variables), Write Variables, a
   timer every N minutes and the end event of the exception subprocess are kept as they are.

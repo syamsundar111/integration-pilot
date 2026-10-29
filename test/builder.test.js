@@ -236,7 +236,7 @@ describe('builder', () => {
   })
 
   test('throws INVALID_SPEC with readable errors', async () => {
-    await expect(build(baseSpec({ steps: [{ type: 'splitter' }] }))).rejects.toMatchObject({ code: 'INVALID_SPEC', errors: [expect.stringContaining("'splitter' is not supported yet")] })
+    await expect(build(baseSpec({ steps: [{ type: 'messageMapping' }] }))).rejects.toMatchObject({ code: 'INVALID_SPEC', errors: [expect.stringContaining("'messageMapping' is not supported yet")] })
   })
 
   test('helpers: java date, properties escaping, manifest folding', () => {
@@ -346,5 +346,178 @@ describe('routers (phase 1b): graph, joins, end events and layout', () => {
     const { doc } = await built(lastRouter)
     const ends = all(doc, 'endEvent').filter((e) => e.parentNode.localName === 'process')
     expect(ends).toHaveLength(2) // one per route, no main end
+  })
+})
+
+describe('splitters, gathers, process calls and local processes (phase 2)', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: name }] })
+  const rr = (name, system) => ({ type: 'requestReplyHttp', name, system, url: `https://${system.toLowerCase()}.example.com/api`, method: 'POST', authType: 'None' })
+  const spec = baseSpec({
+    steps: [
+      cm('A'),
+      { type: 'splitter', name: 'Split', kind: 'iterating', expression: '//item', stopOnException: false },
+      { type: 'processCall', name: 'Handle', process: 'LIP_Handle' },
+      { type: 'gather', name: 'Gather', source: '//item', target: '/items' },
+      { type: 'processCall', name: 'Loop', process: 'LIP_Page', loop: { condition: "${property.more} = 'a&b' and ${property.n} < 5", max: 3 } }
+    ],
+    exceptionSubprocess: { steps: [{ type: 'processCall', name: 'OnError', process: 'LIP_Handle' }], end: { event: 'escalation' } },
+    localProcesses: [
+      { name: 'LIP_Handle', steps: [cm('H1'), rr('H2', 'Backend'), cm('H3')] },
+      { name: 'LIP_Page', steps: [cm('P1'), rr('P2', 'Pages')] }
+    ]
+  })
+  const box = (doc, id) => {
+    const b = all(all(doc, 'BPMNShape').find((s) => s.getAttribute('bpmnElement') === id), 'Bounds')[0]
+    return { id, x: +b.getAttribute('x'), y: +b.getAttribute('y'), w: +b.getAttribute('width'), h: +b.getAttribute('height') }
+  }
+  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+  const inside = (a, b) => a.x >= b.x && a.x + a.w <= b.x + b.w && a.y >= b.y && a.y + a.h <= b.y + b.h
+
+  test('every id once; each local process is a process with its own pool; process calls name it by id', async () => {
+    const { doc, result } = await built(spec)
+    const ids = [...doc.getElementsByTagName('*')].map((e) => e.getAttribute('id')).filter(Boolean)
+    expect(ids.filter((v, i) => ids.indexOf(v) !== i)).toEqual([])
+    const processes = all(doc, 'process').map((p) => [p.getAttribute('id'), p.getAttribute('name')])
+    expect(processes[0]).toEqual(['Process_1', 'Integration Process'])
+    const idOf = (name) => processes.find(([, n]) => n === name)[0]
+    const pools = all(doc, 'participant').filter((p) => p.getAttribute('ifl:type') === 'IntegrationProcess')
+    expect(pools.map((p) => [p.getAttribute('name'), p.getAttribute('processRef')])).toEqual(
+      expect.arrayContaining([['LIP_Handle', idOf('LIP_Handle')], ['LIP_Page', idOf('LIP_Page')]])
+    )
+    // main line, loop and the exception subprocess
+    expect(props(stepElement(doc, 'Handle')).processId).toBe(idOf('LIP_Handle'))
+    expect(props(stepElement(doc, 'Loop')).processId).toBe(idOf('LIP_Page'))
+    expect(props(stepElement(doc, 'OnError')).processId).toBe(idOf('LIP_Handle'))
+    expect(result.summary.localProcesses.map((p) => [p.name, p.steps.map((s) => s.name)])).toEqual([
+      ['LIP_Handle', ['H1', 'H2', 'H3']],
+      ['LIP_Page', ['P1', 'P2']]
+    ])
+  })
+
+  test('a Looping Process Call: loop characteristics with the escaped condition and the maximum', async () => {
+    const { doc, iflw } = await built(spec)
+    const loop = all(stepElement(doc, 'Loop'), 'standardLoopCharacteristics')[0]
+    expect(loop.getAttribute('loopMaximum')).toBe('3')
+    expect(props(stepElement(doc, 'Loop')).loopId).toBe(loop.getAttribute('id'))
+    expect(all(loop, 'loopCondition')[0].textContent).toBe("${property.more} = 'a&b' and ${property.n} < 5")
+    expect(iflw).toContain("${property.more} = 'a&amp;b' and ${property.n} &lt; 5")
+    expect(all(stepElement(doc, 'Handle'), 'standardLoopCharacteristics')).toHaveLength(0)
+  })
+
+  test('layout: local pools below the main pool, their nodes inside, their receivers below them; nothing overlaps', async () => {
+    const { doc } = await built(spec)
+    const main = box(doc, 'Participant_Process_1')
+    const pools = all(doc, 'participant')
+      .filter((p) => p.getAttribute('ifl:type') === 'IntegrationProcess' && p.getAttribute('id') !== 'Participant_Process_1')
+      .map((p) => ({ ...box(doc, p.getAttribute('id')), process: p.getAttribute('processRef') }))
+    let above = main
+    for (const pool of pools) {
+      expect(pool.y).toBeGreaterThanOrEqual(above.y + above.h)
+      const process = all(doc, 'process').find((p) => p.getAttribute('id') === pool.process)
+      const nodes = [...process.childNodes].filter((n) => n.nodeType === 1 && /Event$|callActivity|serviceTask/.test(n.localName)).map((n) => box(doc, n.getAttribute('id')))
+      expect(nodes.length).toBeGreaterThan(2)
+      for (const n of nodes) expect(inside(n, pool)).toBe(true)
+      above = pool
+    }
+    // receivers: of the main line above the main pool (none here), of local steps below their pool; none overlaps a pool
+    const receivers = all(doc, 'participant').filter((x) => x.getAttribute('ifl:type') === 'EndpointRecevier').map((p) => box(doc, p.getAttribute('id')))
+    expect(receivers).toHaveLength(2)
+    for (const r of receivers) for (const pool of [main, ...pools]) expect(overlap(r, pool)).toBe(false)
+    for (const p of all(doc, 'participant').filter((x) => x.getAttribute('ifl:type') === 'EndpointRecevier')) {
+      const flow = all(doc, 'messageFlow').find((f) => f.getAttribute('targetRef') === p.getAttribute('id'))
+      const step = box(doc, flow.getAttribute('sourceRef'))
+      const r = box(doc, p.getAttribute('id'))
+      expect(r.y).toBeGreaterThan(step.y + step.h) // below its step
+      expect(r.x + r.w / 2).toBe(step.x + step.w / 2) // in its column
+    }
+    // every edge points to shapes that exist
+    for (const e of all(doc, 'BPMNEdge')) expect(byId(doc, e.getAttribute('sourceElement'))).toBeDefined()
+  })
+
+  test('default names as in the CPI editor: Iterating / General Splitter, Gather, (Looping) Process Call', async () => {
+    const { result } = await built(
+      baseSpec({
+        steps: [
+          { type: 'splitter', kind: 'general', expression: '/a/b', stopOnException: true },
+          { type: 'processCall', process: 'L' },
+          { type: 'gather', source: '//b', target: '/a' },
+          { type: 'splitter', kind: 'iterating', expression: '//b', stopOnException: true },
+          { type: 'processCall', process: 'L', loop: { condition: '${property.x} = 1', max: 2 } }
+        ],
+        localProcesses: [{ name: 'L', steps: [cm('X')] }]
+      })
+    )
+    expect(result.summary.steps.map((s) => s.name)).toEqual(['General Splitter 1', 'Process Call 1', 'Gather 1', 'Iterating Splitter 1', 'Looping Process Call 1'])
+  })
+})
+
+describe('routers in local processes (phase 2 tenant check: route per item inside a local process)', () => {
+  const { parse } = require('../srv/iflow-builder/parser')
+  const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+  const { importIflow } = require('../srv/iflow-builder/import')
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: name }] })
+  const spec = baseSpec({
+    steps: [
+      { type: 'splitter', name: 'Split', kind: 'iterating', expression: '//order', stopOnException: false },
+      { type: 'processCall', name: 'PC', process: 'LIP_Route' },
+      { type: 'gather', name: 'Gather', source: '//order', target: '/orders' }
+    ],
+    end: { type: 'none' },
+    localProcesses: [
+      {
+        name: 'LIP_Route',
+        steps: [
+          cm('L_Before'),
+          {
+            type: 'router',
+            name: 'LR',
+            expressionType: 'XML',
+            routes: [
+              { name: 'R_A', condition: "/order/type = 'A'", steps: [{ type: 'requestReplyHttp', name: 'RR_A', system: 'SysA', url: 'https://a.example.com/x', method: 'POST', authType: 'None' }] },
+              { name: 'R_Skip', condition: "/order/type = 'C'", end: { event: 'message', name: 'End_Skip' } },
+              { name: 'R_Other', default: true }
+            ]
+          },
+          cm('L_After')
+        ]
+      }
+    ]
+  })
+  const box = (doc, id) => {
+    const b = all(all(doc, 'BPMNShape').find((s) => s.getAttribute('bpmnElement') === id), 'Bounds')[0]
+    return { x: +b.getAttribute('x'), y: +b.getAttribute('y'), w: +b.getAttribute('width'), h: +b.getAttribute('height') }
+  }
+
+  test('lanes inside the local pool: nothing overlaps, the route end is a plain End, the receiver below the pool', async () => {
+    const { doc } = await built(spec)
+    const process = all(doc, 'process').find((p) => p.getAttribute('name') === 'LIP_Route')
+    const pool = box(doc, all(doc, 'participant').find((p) => p.getAttribute('processRef') === process.getAttribute('id')).getAttribute('id'))
+    const nodes = [...process.childNodes].filter((n) => n.nodeType === 1 && /Event$|callActivity|serviceTask|Gateway$/.test(n.localName))
+    const boxes = nodes.map((n) => box(doc, n.getAttribute('id')))
+    const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+    for (const b of boxes) {
+      expect(b.x >= pool.x && b.x + b.w <= pool.x + pool.w && b.y >= pool.y && b.y + b.h <= pool.y + pool.h).toBe(true)
+      for (const c of boxes) if (c !== b) expect(overlap(b, c)).toBe(false)
+    }
+    // two plain End events (the route's and the process's), no message end definition
+    const ends = nodes.filter((n) => n.localName === 'endEvent')
+    expect(ends.map((n) => n.getAttribute('name')).sort()).toEqual(['End 2', 'End_Skip'])
+    for (const e of ends) expect(props(e).activityType).toBe('EndEvent')
+    const receiver = box(doc, all(doc, 'participant').find((p) => p.getAttribute('name') === 'SysA').getAttribute('id'))
+    expect(receiver.y).toBeGreaterThan(pool.y + pool.h)
+  })
+
+  test('parse, update and import give the same local process back', async () => {
+    const zip = (await build(spec)).zipBase64
+    const parsed = await parse(zip)
+    const lip = parsed.localProcessSteps.find((p) => p.name === 'LIP_Route')
+    expect(lip).toMatchObject({ routed: true, end: 'message' })
+    expect(lip.steps.map((s) => s.name)).toEqual(['L_Before', 'LR', 'L_After'])
+    const update = specFromParsed(parsed, { packageId: spec.packageId })
+    expect(update.blockers).toEqual([])
+    expect(update.spec.localProcesses).toEqual(spec.localProcesses)
+    const imported = await importIflow(Buffer.from(zip, 'base64'), { fileName: 'lr.zip', packageId: spec.packageId })
+    expect(imported).toMatchObject({ valid: true, placeholders: 0 })
+    expect(imported.spec.localProcesses).toEqual(spec.localProcesses)
   })
 })

@@ -12,7 +12,7 @@ Main integration process:
 6. LPC_FetchPages - Looping Process Call to local integration process LIP_FetchPage,
    condition expression ${property.hasMore} = 'true', max. iterations 5.
 7. GSPL_Orders - General Splitter: expression type XPath, /orders/order, grouping 1,
-   streaming on, stop on exception on, parallel processing off.
+   streaming off, stop on exception on, parallel processing off.
 8. End - Message End.
 
 Local integration process LIP_HandleOrder:

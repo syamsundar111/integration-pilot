@@ -34,7 +34,7 @@ prompt and the tokens used reported per prompt.
 | c2 | Credential name and location ID as externalized parameters, with the regression test update | Ref_Receivers (new version: RR_OAuth's credential name and RR_OnPrem's location ID externalized) | done |
 | 1a | No change to the flow structure: Content Modifier sources (Global/Local Variable, Header, Property, XPath with data type), a constant as an externalized parameter, the Default column; Write Variables (global and local scope); Timer start every N minutes (UTC) | Ref_Variables, Ref_Router_Ends (timer) | done |
 | 1b | Branching: Router with conditions and a default route; routes that end (Message, Escalation or Error End) or join again; Error and Escalation End in the exception subprocess (format agreed, see below) | Ref_Router_Ends | done |
-| 2 | General and Iterating Splitter, Gather; local integration process with Process Call and Looping Process Call | Ref_Structure | open |
+| 2 | General and Iterating Splitter, Gather; local integration process with Process Call and Looping Process Call | Ref_Structure | done |
 | 3 | SOAP 1.x and Mail receivers | Ref_Receivers | open |
 | 4 | Message Mapping that refers to an existing mapping artifact (a `PH_` placeholder if it does not exist); XSLT Mapping step | Ref_Mapping, MM_DummyOrderToNotif | open |
 | 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern | Ref_Sender_* | waits for the user's go |
@@ -48,10 +48,12 @@ prompt and the tokens used reported per prompt.
 - **Confirmed values per phase** (add to `reference/confirmed-values.json` when the phase starts):
   phase 3: the Mail values in Ref_Receivers. In: step c's (OAuth2 Client Credentials, On-Premise), 1a's
   (Global/Local Variable source types, Write Variables types, scopes and data type, timer every 15 minutes,
-  Header and Property sources) and 1b's (the expression type XML of the default route `R_Other`).
+  Header and Property sources), 1b's (the expression type XML of the default route `R_Other`) and phase
+  2's (re-selected in Ref_Structure, 2026-10-29: both splitters' expression type XPath, Parallel
+  Processing off, Streaming (on in `ITSPL_Orders`, off in `GSPL_Orders`) and Stop On Exception (off in
+  `ITSPL_Orders`, on in `GSPL_Orders`); the Gather
+  `GA_Orders` with Same Format and Combine at XPath; the Looping Process Call's expression type Non XML).
   Not confirmed yet, so it warns: the Content Modifier data type java.lang.Boolean.
-- **Phase 2:** re-select the Gather values of `GA_Orders` in Ref_Structure in the CPI editor
-  (Ref_Multicast_Enrich's Gathers matter only for phase 9).
 - **Phase 3:** check whether `RR_S4HANA` in the original iFlow uses a WSDL; if so, add a WSDL variant
   to Ref_Receivers (today: no WSDL, no operation name).
 - **Phase 8:** Ref_Transform refers to `DummyItems.xsd` and `DummyItem.xsd`, which are missing in
@@ -62,13 +64,36 @@ prompt and the tokens used reported per prompt.
 Since 1b the spec is a main line of steps in which a step may hold nested step lists that either end or
 continue with the next main-line step (a router's routes). Later phases use the same shape, so the
 validator (step paths, names, the 50-step count over all nested steps), the builder (a lane per nested
-list, one column per node, receivers above the pool) and import/update need no rework:
+list, one column per node, receivers above the pool) and import/update need no rework.
 
-- **Splitter and Gather (phase 2):** a `splitter` step on the main line with the per-item `steps`; the
-  items continue to a `gather` (the join), or each item runs to the end without one.
-- **Local processes and Process Call (phase 2):** a top-level `localProcesses: [{ name, steps }]`; a
-  `processCall` step (also looping: condition, maximum) names one, on the main line or inside a route
-  (as `PC_Exception Subprocess` inside Router 2's default route of the original interface).
+Phase 2 (format agreed 2026-10-29):
+
+- **Splitter and Gather: flat.** A `splitter` is a plain main-line step, as CPI stores it: the steps
+  after it run once per item until a `gather`, or to the end. Fields: `name`, `kind` (iterating |
+  general), `expression` (XPath; the only expression type in the references), `grouping` (default 1),
+  `streaming` (default on), `parallel` (off only) and `stopOnException`, which has no default: the AI
+  always sets it, and the panel says it in plain words ("one failing item stops / does not stop the
+  rest"). A `gather` has `name`, `source` and `target` XPath (XML Same Format, Combine at XPath; the
+  Different Format gathers of Ref_Multicast_Enrich come with phase 9).
+- **Main line only.** Splitters and gathers sit on the main line; a gather needs a splitter before it;
+  a second splitter between a splitter and its gather (nested split) is refused with a clear message.
+  So is a router between them (tenant check: CPI says "You cannot use Router with gather"); the message
+  suggests a Process Call per item to a local process that contains the router. A router after a
+  splitter that runs to the end (no gather) is fine.
+- **Information note** (panel and prompt guide): exchange properties set while processing one item do
+  not reach the steps after the Gather; results must travel in the message body.
+- **Local processes:** a top-level `localProcesses: [{ name, steps }]`, each in its own pool below the
+  main pool. Their steps are the existing step types and routers (the main-line router rules; no nested
+  routers; a route continues or ends with the local process's plain End, the only end event the
+  references have there; that End returns to the caller, the flow goes on after the Process Call), without splitters and process calls. A local process nothing calls gives a
+  warning. Their steps count towards the 50-step limit.
+- **XML router notice:** the panel shows it for every XML router unless the step before it is known to
+  produce XML (a JSON to XML converter); the tenant check showed it after a splitter too.
+- **Process Call:** a `processCall` step with `name` and `process` (the local process's name), on the
+  main line, inside a route, or in the exception subprocess (the original interface calls its local
+  process from there: Error Start -> Process Call -> Escalation End). `loop: { condition, max }` makes
+  it a Looping Process Call (Non-XML condition with spaces around the operator). Options are objects
+  on the step, so phase 7's Idempotent Process Call fits as another option beside `loop`.
 - **Multicast and Join (phase 9):** a `multicast` step like a router without conditions: `branches`
   that all run, and join again at the step after it (with a Gather).
 
@@ -91,6 +116,9 @@ From the former reference export checklist; each needs a reference export first.
 - Proposal panel, diagram summary: show the Escalation End category on the route lines and the "On error"
   line, as the step cards do.
 - User-facing notes: phrase them without the builder version ("For a method v1 does not set…").
+- Looping Process Call: "Action when Max. Iterations Reached" is fixed to Throw Exception (as in
+  Ref_Structure); add End Loop as a choice when a real interface needs it.
+- Escalation and Error End in local processes (needs a reference export).
 - More timer schedules: every N hours, daily, weekly and monthly at a time, other time zones, and the
   scheduler externalized as `{{Scheduler}}`.
 

@@ -1,10 +1,10 @@
 ## Hard limits
 
 Every spec must respect these limits; the validator rejects anything else:
-- At most 50 steps in the main flow, counting routers and the steps inside routes (route ends do not
-  count); 10 in the exception subprocess.
-- Step names are unique (main flow and exception subprocess together), receiver `system` names are
-  unique, and Groovy `fileName`s are unique.
+- At most 50 steps in the main flow, counting routers, the steps inside routes and the steps of local
+  processes (route ends do not count); 10 in the exception subprocess.
+- Step names are unique (main flow, exception subprocess and local processes together), receiver
+  `system` names are unique, and Groovy `fileName`s are unique.
 - `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver,
   or as the whole value of a `constant` header or property; literal values everywhere else.
 - Header and property `type`: `constant` for a plain value, `expression` only when the value contains
@@ -16,8 +16,8 @@ Every spec must respect these limits; the validator rejects anything else:
   `default` (the Content Modifier's Default Value column) only when the user asks for that column
   explicitly, e.g. "Default Value column = X".
 - `body` is a string.
-- The flow runs trigger, steps in order, end; a `router` step branches (see Routers). No splitter,
-  multicast or join step.
+- The flow runs trigger, steps in order, end; a `router` step branches (see Routers), a `splitter` step
+  splits (see Splitters and local processes). No multicast or join step.
 - Start and end events are not steps: the trigger and the end are the top-level `trigger` and `end`.
 - `spec` is a JSON object, never a JSON string. Propose or validate only the real spec, never test
   specs, and write only the scripts the flow uses (no test or trial scripts).
@@ -83,15 +83,16 @@ or deployed unless a tool result says so.
 - Triggers: `httpsSender { address }`, `timer { mode: "once" }` (run once after deployment), or
   `timer { mode: "every", minutes }` (every N minutes, all day, UTC; only intervals the references
   contain, e.g. 15 — the validator says which).
-- Steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `requestReplyHttp`,
-  `writeVariables` (main flow only): `variables: [{ name, type: property|xpath, value, datatype?,
+- Steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `requestReplyHttp`, `router`,
+  `splitter`, `gather`, `processCall` (see the sections below), and `writeVariables` (main flow and local
+  processes): `variables: [{ name, type: property|xpath, value, datatype?,
   global? }]`; `global: true` is Global Scope (all iFlows of the tenant), else this iFlow only. Use it to
   remember a value between runs, e.g. the last run time, and read it back with a Content Modifier
   `globalVariable` / `localVariable` source.
 - End: `httpReceiver { url, method, authType, ... }` (receiver settings as in Authentication) or `none`.
 - Error handling: an optional **Exception Subprocess** (`exceptionSubprocess { name?, steps }`, a
   top-level field, not a step). It runs when any step fails. Its steps (`contentModifier`,
-  `groovyScript`, `jsonToXml`, `xmlToJson`) run in order and end with its `end` event, so for an HTTPS
+  `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`) run in order and end with its `end` event, so for an HTTPS
   trigger the result is returned to the sender. Use `${exception.message}` for the error text, and set
   header `CamelHttpResponseCode` (e.g. `500`) so the sender gets an HTTP error status, not 200.
   When the user asks to "catch errors", "add exception handling" or "return an error response",
@@ -99,7 +100,7 @@ or deployed unless a tool result says so.
 - The subprocess `end` is `{ "event": "message" | "escalation" | "error", "name"?, "category"? }`. A Message End (the
   default) makes a failed message look completed in monitoring: for a new iFlow use `escalation` (or
   `error`) unless the user asks for a response to the sender as the result, and say which in one line.
-- Splitter and mapping are not supported. Say so plainly, and offer an alternative (see
+- Mapping, multicast and join are not supported. Say so plainly, and offer an alternative (see
   "When something is not supported").
 
 ## Routers
@@ -115,8 +116,33 @@ If every route ends, the router must be the last step and the main `end` is `{ "
 An Escalation End has a `category` shown in monitoring: `Others` (the default, "Others - not further
 qualified") or `RoutingConditionNotMet` ("Routing condition not met", e.g. for a route taken because no
 expected value matched); other categories are not supported yet. Only an Escalation End has a category.
-Routers sit on the main line only; nested routing is not supported (decide it in a groovyScript that
-sets a property for the next router on the main line).
+Routers sit on the main line or on the line of a local process; nested routing is not supported (decide
+it in a groovyScript that sets a property for the next router on the line).
+
+## Splitters and local processes
+
+A `splitter` step on the main line splits the message: `{ "type": "splitter", "name", "kind": "iterating"
+| "general", "expression": "//order", "stopOnException": true | false }` (`grouping` default 1,
+`streaming` default true). Iterating sends each item on its own; General keeps the enveloping elements
+above each item. The steps after it run once per item, until a `gather` (`{ "type": "gather", "name",
+"source": "//order", "target": "/orders" }`, XML Same Format, Combine at XPath), or to the end when there
+is no gather. Always set `stopOnException`: `true` = one failing item stops the rest, `false` = the other
+items still run; if the request does not say, ask. Splitters and gathers sit on the main line only, and
+there is no second splitter and **no router** between a splitter and its gather (CPI refuses a router
+there): to route each item, call a local process that contains the router (a `processCall` between the
+splitter and the gather). A router after a splitter without a gather is fine. Exchange
+properties set while processing one item do not reach the steps after the gather: results must travel in
+the message body.
+
+Reusable steps go into a local process: the top-level `localProcesses: [{ "name": "LIP_HandleOrder",
+"steps": [...] }]` (steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`,
+`requestReplyHttp`, `writeVariables` and `router`, with the router rules of the main line; a route there
+continues or ends with a plain End, `{ "event": "message" }`, which returns to the caller: the flow goes on
+after the `processCall`; no splitters or process calls inside). A `processCall`
+step runs one: `{ "type": "processCall", "name", "process": "LIP_HandleOrder" }`, on the main line, in a
+route or in the exception subprocess. With `"loop": { "condition": "${property.hasMore} = 'true'",
+"max": 5 }` it is a Looping Process Call: it runs the process again while the condition (NonXML, spaces
+around the operator) is true, at most `max` times.
 
 ## Attached files
 

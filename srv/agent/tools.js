@@ -14,7 +14,7 @@ const attachmentStore = require('../lib/attachments')
 const { sampleResponse } = require('../lib/sample-response')
 const { parse } = require('../iflow-builder/parser')
 const { specFromParsed, describeChanges } = require('../iflow-builder/to-spec')
-const { allSteps } = require('../iflow-builder/spec-steps')
+const { allSteps, mapSteps } = require('../iflow-builder/spec-steps')
 
 const LOG = cds.log('agent')
 const MAX_RESULT_CHARS = 12_000
@@ -104,7 +104,7 @@ At most ${MAX_STEPS_PER_EDIT} steps per call. Returns the outline and open error
 
 /** The spec format in short (getSupportedSteps); test/agent.test.js keeps it in line with spec-schema.json */
 const SPEC_FORMAT = {
-  spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50 with routers and the steps inside routes), end, exceptionSubprocess?, parameters?, resources? }',
+  spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50, counting route and local process steps), end, exceptionSubprocess?, localProcesses?, parameters?, resources? }',
   trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
   steps: {
     contentModifier:
@@ -116,10 +116,15 @@ const SPEC_FORMAT = {
     router:
       '{ type, name?, description?, expressionType: XML|NonXML, routes: [{ name, condition (XPath, or ${…} with spaces around the operator), steps?: [step], end?: { event: message|escalation|error, name?, category? (escalation: Others|RoutingConditionNotMet) } }, …, { name, default: true, steps?, end? } (last)] } — main line only; a route without end continues with the step after the router; if every route ends, the router is the last step and end is { "type": "none" }',
     requestReplyHttp:
-      '{ type, name?, description?, system?, url: "https://…" | "{{Param}}", method: GET|POST|PUT|PATCH|DELETE, authType: None|Basic|"OAuth2 Client Credentials", credentialName? (deployed credential name or "{{Param}}", never a secret; required unless None), proxyType?: Internet|On-Premise, locationId? (On-Premise only; name or "{{Param}}"), timeout? (ms, default 60000) }'
+      '{ type, name?, description?, system?, url: "https://…" | "{{Param}}", method: GET|POST|PUT|PATCH|DELETE, authType: None|Basic|"OAuth2 Client Credentials", credentialName? (deployed credential name or "{{Param}}", never a secret; required unless None), proxyType?: Internet|On-Premise, locationId? (On-Premise only; name or "{{Param}}"), timeout? (ms, default 60000) }',
+    splitter:
+      '{ type, name?, description?, kind: iterating|general, expression (XPath, e.g. //order), grouping? (1), streaming? (true), stopOnException: true|false (always set), parallel?: false } — main line; the next steps run per item until a gather or the end (no nested split, no router before the gather: route in a called local process); properties set per item are lost after the gather',
+    gather: '{ type, name?, description?, source (XPath, e.g. //order), target (e.g. /orders) } — closes a split',
+    processCall: '{ type, name?, description?, process (localProcesses name), loop?: { condition (as NonXML), max } } — main line, routes, exceptionSubprocess'
   },
   end: ['{ "type": "none", event?: message|escalation|error, category? (escalation: Others|RoutingConditionNotMet) }', '{ "type": "httpReceiver", system?, url, method, authType, credentialName?, proxyType?, locationId?, timeout? } (as requestReplyHttp)'],
-  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson, end?: { event: message|escalation|error, name?, category? } (new iFlows: escalation or error) }',
+  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson | processCall, end?: { event: message|escalation|error, name?, category? } (new iFlows: escalation or error) }',
+  localProcesses: '[{ name, description?, steps: [step] (routers as on the main line, route ends only { event: message }, which returns to the caller; no splitter, gather, processCall) }]',
   parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId, or a constant header/property value "{{Name}}"',
   resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
   names: 'id: letters, digits, _ · packageId: letters, digits, dots (a Name with _ or spaces is turned into the ID) · fileName, system: letter first, then letters, digits, _ · step names unique'
@@ -419,14 +424,8 @@ async function detachFiles(ctx, spec, resources = {}) {
   const replaceAi = files.map((f) => f.fileName).filter((f) => otherIflows.has(f))
   const stored = new Set(files.length ? await attachmentStore.save(ctx.user, ctx.sessionId, files, 'iflow', { replaceAi }) : [])
   ctx.attachments = undefined // reload: new files
-  const strip = (s) =>
-    s.type === 'groovyScript' && s.code != null
-      ? (({ code, ...rest }) => rest)(s)
-      : s.type === 'router'
-        ? { ...s, routes: s.routes.map((r) => (r.steps ? { ...r, steps: r.steps.map(strip) } : r)) }
-        : s
   return {
-    spec: { ...spec, steps: spec.steps.map(strip), ...(spec.exceptionSubprocess && { exceptionSubprocess: { ...spec.exceptionSubprocess, steps: spec.exceptionSubprocess.steps.map(strip) } }) },
+    spec: mapSteps(spec, (s) => (s.type === 'groovyScript' && s.code != null ? (({ code, ...rest }) => rest)(s) : s)),
     attachedFiles: files.map((f) => f.fileName).filter((f) => stored.has(f)),
     // files of the conversation that replace the iFlow's: uploads of the user and scripts written with writeScript
     keptFiles: files.map((f) => f.fileName).filter((f) => !stored.has(f)),
@@ -785,10 +784,7 @@ const handlers = {
       }
 
     // steps are compared without script code (fileName only): a script change is reported once, as the script
-    const withoutCode = (sp) => {
-      const strip = (steps = []) => steps.map(({ code, ...s }) => s)
-      return { ...sp, resources: undefined, steps: strip(sp.steps), ...(sp.exceptionSubprocess && { exceptionSubprocess: { ...sp.exceptionSubprocess, steps: strip(sp.exceptionSubprocess.steps) } }) }
-    }
+    const withoutCode = (sp) => ({ ...mapSteps(sp, ({ code, ...s }) => s), resources: undefined })
     // both sides typed alike, so rows the user did not touch are not reported as changed …
     const currentTyped = normalizeTypes(current.spec)
     const changes = describeChanges(withoutCode(currentTyped.spec), withoutCode(spec))

@@ -353,3 +353,90 @@ describe('Ref_Router_Ends: routers, routes, end events and the join (phase 1b)',
     expect(withoutIglow.exceptionSubprocess).toEqual({ ...spec.exceptionSubprocess, name: 'Exception Subprocess 1' })
   })
 })
+
+describe('Ref_Structure: splitters, gather, process calls and local processes (phase 2)', () => {
+  // test/reference-prompts/Ref_Structure.txt in the agreed format
+  const spec = {
+    id: 'Ref_Structure',
+    name: 'Ref_Structure',
+    packageId: 'PilotReference',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [
+      { type: 'contentModifier', name: 'CM_SetBody', body: '<orders><order><id>1</id></order><order><id>2</id></order></orders>' },
+      { type: 'splitter', name: 'ITSPL_Orders', kind: 'iterating', expression: '//order', stopOnException: false },
+      { type: 'processCall', name: 'PC_HandleOrder', process: 'LIP_HandleOrder' },
+      { type: 'gather', name: 'GA_Orders', source: '//order', target: '/orders' },
+      { type: 'processCall', name: 'LPC_FetchPages', process: 'LIP_FetchPage', loop: { condition: "${property.hasMore} = 'true'", max: 5 } },
+      { type: 'splitter', name: 'GSPL_Orders', kind: 'general', expression: '/orders/order', streaming: false, stopOnException: true }
+    ],
+    end: { type: 'none' },
+    localProcesses: [
+      { name: 'LIP_FetchPage', steps: [{ type: 'contentModifier', name: 'CM_SetHasMore', properties: [{ name: 'hasMore', type: 'constant', value: 'false', datatype: 'java.lang.String' }] }] },
+      { name: 'LIP_HandleOrder', steps: [{ type: 'contentModifier', name: 'CM_MarkOrder', headers: [{ name: 'orderId', type: 'xpath', value: '/order/id', datatype: 'java.lang.String' }] }] }
+    ]
+  }
+  const STEPS = ['ITSPL_Orders', 'PC_HandleOrder', 'GA_Orders', 'LPC_FetchPages', 'GSPL_Orders']
+
+  let builtZip, built, reference
+  beforeAll(async () => {
+    builtZip = Buffer.from((await build(spec)).zipBase64, 'base64')
+    built = await parse(builtZip)
+    reference = await parse(readRef('Ref_Structure.zip'))
+  })
+
+  /** Parsed steps without ids; a process call's processId differs by design (generated ids) */
+  const steps = (list) => JSON.parse(JSON.stringify(list, (k, v) => (k === 'id' || k === 'processId' ? undefined : v)))
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('the same main line as the reference: splitters, process calls with their process and loop, the gather', () => {
+    expect(steps(built.steps)).toEqual(steps(reference.steps))
+    expect(built.linear).toBe(true)
+  })
+
+  test('the same local processes with their steps', () => {
+    const locals = (p) => steps(p.localProcessSteps).sort((a, b) => a.name.localeCompare(b.name))
+    expect(locals(built)).toEqual(locals(reference))
+    expect(built.localProcesses.sort()).toEqual(reference.localProcesses.sort())
+  })
+
+  test('every property of the splitters, the gather and the process calls is as in the reference', async () => {
+    for (const name of STEPS) {
+      const want = await elementProps(readRef('Ref_Structure.zip'), name)
+      const have = await elementProps(builtZip, name)
+      // generated ids: the called process and the loop characteristics
+      for (const p of [want, have]) for (const k of ['processId', 'loopId']) if (k in p) p[k] = '(id)'
+      expect([name, have]).toEqual([name, want])
+    }
+  })
+
+  test('each process call refers to its local process by id, and the loop is as in the reference', async () => {
+    const zip = await JSZip.loadAsync(builtZip)
+    const xml = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+    const processId = (name) => xml.match(new RegExp(`<bpmn2:process id="([^"]+)" name="${name}">`))[1]
+    expect(built.steps.find((s) => s.name === 'PC_HandleOrder').processId).toBe(processId('LIP_HandleOrder'))
+    expect(built.steps.find((s) => s.name === 'LPC_FetchPages').processId).toBe(processId('LIP_FetchPage'))
+    expect(processId('Integration Process')).toBe('Process_1')
+    const ids = [...xml.matchAll(/ id="([^"]+)"/g)].map((m) => m[1])
+    expect(ids.filter((v, i) => ids.indexOf(v) !== i)).toEqual([]) // no id twice
+  })
+
+  test('an update of the reference gives the same spec back (no blockers)', () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const r = specFromParsed(reference, { packageId: 'PilotReference' })
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps).toEqual(spec.steps)
+    expect(r.spec.localProcesses).toEqual(spec.localProcesses)
+  })
+
+  test('Import gives the same steps and local processes (the iGlow exception subprocess left out)', async () => {
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const r = await importIflow(readRef('Ref_Structure.zip'), { fileName: 'Ref_Structure.zip', packageId: 'PilotReference' })
+    expect(r).toMatchObject({ valid: true, errors: [], placeholders: 0 })
+    expect(r.spec.steps).toEqual(spec.steps)
+    expect(r.spec.localProcesses).toEqual(spec.localProcesses)
+  })
+})

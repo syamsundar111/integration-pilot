@@ -62,9 +62,9 @@ describe('system prompt: unsupported steps', () => {
     // the placeholder as the prompt describes it is a valid step, counted as a placeholder like imported ones
     const ph = {
       type: 'contentModifier',
-      name: 'PH_Splitter',
-      description: "REPLACE WITH General Splitter 'Split Orders': XPath /orders/order",
-      properties: [{ name: 'REPLACE_WITH', type: 'constant', value: "General Splitter 'Split Orders'" }]
+      name: 'PH_Multicast',
+      description: "REPLACE WITH Parallel Multicast 'Send Orders': one branch to the ERP, one to the archive",
+      properties: [{ name: 'REPLACE_WITH', type: 'constant', value: "Parallel Multicast 'Send Orders'" }]
     }
     const spec = { ...sample, id: 'Prompt_Placeholder', name: 'Prompt_Placeholder', steps: [sample.steps[0], ph] }
     expect(validate(spec)).toMatchObject({ valid: true })
@@ -225,3 +225,33 @@ describe('system prompt: scripts in batches ((d) run)', () => {
   })
 })
 
+
+describe('system prompt: splitters and local processes (phase 2)', () => {
+  test('the rules are in the prompt', () => {
+    expect(flat).toMatch(/Always set `stopOnException`: `true` = one failing item stops the rest, `false` = the other items still run; if the request does not say, ask/)
+    expect(flat).toMatch(/there is no second splitter and \*\*no router\*\* between a splitter and its gather \(CPI refuses a router there\): to route each item, call a local process that contains the router/)
+    expect(flat).toMatch(/A router after a splitter without a gather is fine/)
+    expect(flat).toMatch(/Exchange properties set while processing one item do not reach the steps after the gather: results must travel in the message body/)
+    expect(flat).toMatch(/on the main line, in a route or in the exception subprocess/)
+    expect(flat).toMatch(/a route there continues or ends with a plain End, `\{ "event": "message" \}`, which returns to the caller: the flow goes on after the `processCall`/)
+    expect(flat).not.toMatch(/Splitter and mapping are not supported/)
+  })
+
+  test('a spec from the examples in the prompt validates and builds', async () => {
+    const spec = {
+      ...sample,
+      id: 'Prompt_Split',
+      name: 'Prompt_Split',
+      steps: [
+        { type: 'splitter', name: 'Split Orders', kind: 'iterating', expression: '//order', stopOnException: true },
+        { type: 'processCall', name: 'Handle Order', process: 'LIP_HandleOrder' },
+        { type: 'gather', name: 'Gather Orders', source: '//order', target: '/orders' },
+        { type: 'processCall', name: 'Fetch Pages', process: 'LIP_HandleOrder', loop: { condition: "${property.hasMore} = 'true'", max: 5 } }
+      ],
+      exceptionSubprocess: { steps: [{ type: 'processCall', process: 'LIP_HandleOrder' }], end: { event: 'escalation' } },
+      localProcesses: [{ name: 'LIP_HandleOrder', steps: [{ type: 'contentModifier', properties: [{ name: 'hasMore', type: 'constant', value: 'false' }] }] }]
+    }
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+    await expect(build(spec)).resolves.toBeTruthy()
+  })
+})

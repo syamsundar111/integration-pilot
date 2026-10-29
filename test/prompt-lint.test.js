@@ -36,7 +36,7 @@ describe('prompt linter', () => {
   test('unsupported step kinds, ignoring quoted text', () => {
     const w = lint('Build an iFlow on a timer in package P: use a router, then a General Splitter, an XSLT, a message mapping and an SFTP receiver, a Write Variables step and a Process Call. No auth.')
     expect(keys(w)).toEqual(['unsupported'])
-    expect(w[0].message).toMatch(/Not supported yet: splitter, XSLT, mapping, SFTP, process call\./) // Write Variables (1a) and routers (1b) are supported
+    expect(w[0].message).toMatch(/Not supported yet: XSLT, mapping, SFTP\./) // Write Variables (1a), routers (1b), splitters and process calls (2) are supported
     expect(w[0].message).toMatch(/Attach the .xsl file/)
     expect(lint('Build an iFlow on a timer in package P that sets property Kind = "router mapping". No auth.')).toEqual([])
     expect(keys(lint('Add a multicast after step 2, then gather and join the branches'))).toEqual(['unsupported'])
@@ -84,15 +84,15 @@ describe('prompt linter', () => {
     ].join('\n')
     expect(lint(request)).toEqual([])
     // outside quotes they are still found
-    expect(keys(lint(`${request}\n5. Add a splitter after step 4. Set header X = {{Other}}.`))).toEqual(['unsupported', 'params'])
+    expect(keys(lint(`${request}\n5. Add a multicast after step 4. Set header X = {{Other}}.`))).toEqual(['unsupported', 'params'])
   })
 
   describe('follow-up messages (manual test 9)', () => {
     const first = 'Create an iFlow in package Pilot, HTTPS sender /orders, no authentication. Split the orders with a splitter and send them via SFTP, then post to https://example.org/orders.'
 
     test('the check runs on the whole conversation: a step kind warned about before is not repeated', () => {
-      expect(keys(lint('Build it with the splitter.'))).toEqual(['unsupported'])
-      expect(lint('Build it with the splitter.', { history: [first] })).toEqual([])
+      expect(keys(lint('Build it with SFTP.'))).toEqual(['unsupported'])
+      expect(lint('Build it with SFTP.', { history: [first] })).toEqual([])
     })
 
     test('unsupported step names in a negation are not flagged', () => {
@@ -101,11 +101,12 @@ describe('prompt linter', () => {
       expect(lint('Build an iFlow on a timer in package P, no auth. Use a Groovy script instead of a message mapping.')).toEqual([])
       expect(lint('Build an iFlow on a timer in package P, no router and no SFTP, no auth.')).toEqual([])
       // a new clause ends the negation
-      const w = lint('Build an iFlow on a timer in package P without a router, but add a splitter. No auth.')
-      expect(w.map((x) => x.message)).toEqual([expect.stringMatching(/Not supported yet: splitter\./)])
-      expect(keys(lint('Build an iFlow on a timer in package P, no authentication, use a splitter.'))).toEqual(['unsupported'])
-      // routers are supported (phase 1b)
+      const w = lint('Build an iFlow on a timer in package P without a router, but add a multicast. No auth.')
+      expect(w.map((x) => x.message)).toEqual([expect.stringMatching(/Not supported yet: multicast\./)])
+      expect(keys(lint('Build an iFlow on a timer in package P, no authentication, use a multicast.'))).toEqual(['unsupported'])
+      // routers (phase 1b), splitters, gathers and process calls (phase 2) are supported
       expect(lint('Build an iFlow on a timer in package P, no authentication, use a router.')).toEqual([])
+      expect(lint('Build an iFlow on a timer in package P, no authentication: a General Splitter, a Process Call to a local process, then a Gather.')).toEqual([])
     })
 
     test('the reply "skip them" does not repeat the warning of the first message', () => {
