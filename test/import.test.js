@@ -448,3 +448,29 @@ describe('import: the step limit is per process (real iFlow with large local pro
     await expect(importIflow(main, { fileName: 'big.zip' })).rejects.toMatchObject({ message: 'Main flow has 51 steps after merging placeholders; its limit is 50.' })
   })
 })
+
+describe('import: data types in the case of the references (a real export has java.lang.string)', () => {
+  test('java.lang.string becomes java.lang.String with a note, in Content Modifier rows and Write Variables', async () => {
+    const spec = baseSpec({
+      steps: [
+        { type: 'contentModifier', name: 'CM', headers: [{ name: 'H', type: 'xpath', value: '/a/b' }] },
+        { type: 'writeVariables', name: 'WV', variables: [{ name: 'V', type: 'xpath', value: '/a/c' }] }
+      ]
+    })
+    const r = await importIflow(await zipWith(spec, (x) => x.replaceAll('java.lang.String', 'java.lang.string')), { fileName: 'dt.zip', packageId: 'PilotReference' })
+    expect(r).toMatchObject({ valid: true, errors: [] })
+    expect(r.spec.steps[0].headers[0].datatype).toBe('java.lang.String')
+    expect(r.spec.steps[1].variables[0].datatype).toBe('java.lang.String')
+    expect(r.notes).toContain('CM, header H: the data type java.lang.string became java.lang.String (Java class names are case-sensitive)')
+    expect(r.notes).toContain('WV, variable V: the data type java.lang.string became java.lang.String (Java class names are case-sensitive)')
+  })
+
+  test('the right case gets no note; another data type stays as it is', async () => {
+    const spec = baseSpec({ steps: [{ type: 'contentModifier', name: 'CM', headers: [{ name: 'H', type: 'xpath', value: '/a/b' }] }] })
+    const r = await importIflow(await zipWith(spec), { fileName: 'dt.zip', packageId: 'PilotReference' })
+    expect(r.notes.join('\n')).not.toMatch(/data type/)
+    const other = await importIflow(await zipWith(spec, (x) => x.replaceAll('java.lang.String', 'java.lang.Unknown')), { fileName: 'dt.zip', packageId: 'PilotReference' })
+    expect(other.spec.steps[0].headers[0].datatype).toBe('java.lang.Unknown')
+    expect(other.notes.join('\n')).not.toMatch(/data type/)
+  })
+})

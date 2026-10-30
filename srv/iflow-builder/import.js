@@ -18,6 +18,9 @@ const cpiValues = require('./cpi-values')
 const { validate } = require('./validator')
 
 const MAX_STEPS = 50
+// data types of the reference exports; Java class names are case-sensitive
+const REFERENCE_VALUES = require('./templates/reference-values.json')
+const KNOWN_DATATYPES = [...new Set(['Content Modifier', 'Write Variables'].flatMap((c) => Object.keys(REFERENCE_VALUES[c]?.datatype || {})))]
 const MAX_EXCEPTION_STEPS = 10
 const IFLOW_DIR = 'src/main/resources/scenarioflows/integrationflow/'
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -178,6 +181,14 @@ async function importIflow(buffer, { fileName, packageId }) {
     resources.push(name)
   }
 
+  /** A data type in the case the references have (java.lang.string -> java.lang.String), with a note */
+  const datatypeOf = (datatype, where) => {
+    const known = KNOWN_DATATYPES.find((d) => d.toLowerCase() === String(datatype).toLowerCase())
+    if (!known || known === datatype) return datatype
+    notes.push(`${where}: the data type ${datatype} became ${known} (Java class names are case-sensitive)`)
+    return known
+  }
+
   // Local processes a Process Call may run: by processId, else the only one there is
   const locals = parsed.localProcessSteps || []
   const localProcessOf = (s) => locals.find((l) => l.id === s.processId) || (locals.length === 1 ? locals[0] : null)
@@ -203,7 +214,7 @@ async function importIflow(buffer, { fileName, packageId }) {
             const whole = type === 'constant' && String(r.value ?? '').match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
             const value = whole && Object.hasOwn(params, whole) ? r.value : inlineParams(r.value, was)
             if (['header', 'property', 'globalVariable', 'localVariable', 'xpath'].includes(type) && !value.trim()) return dropped.push(`${table} ${r.name} (${r.type} is empty)`), []
-            return [{ name: r.name, type, value, ...(r.datatype && { datatype: r.datatype }), ...(r.default && { default: r.default }) }]
+            return [{ name: r.name, type, value, ...(r.datatype && { datatype: datatypeOf(r.datatype, `${s.name}, ${table} ${r.name}`) }), ...(r.default && { default: r.default }) }]
           })
         const cm = { type: 'contentModifier', ...(name && { name }) }
         const headers = rows(s.headers, 'header')
@@ -226,7 +237,7 @@ async function importIflow(buffer, { fileName, packageId }) {
         const step = {
           type: 'writeVariables',
           ...(name && { name }),
-          variables: variables.map((v) => ({ name: v.name, type: v.type, value: v.value, ...(v.datatype && { datatype: v.datatype }), ...(v.global && { global: true }) }))
+          variables: variables.map((v) => ({ name: v.name, type: v.type, value: v.value, ...(v.datatype && { datatype: datatypeOf(v.datatype, `${s.name}, variable ${v.name}`) }), ...(v.global && { global: true }) }))
         }
         const left = s.variables.filter((v) => !variables.includes(v))
         if (left.length) step.description = truncate(`Add in the CPI web editor: ${left.map((v) => `variable ${v.name} (type ${v.type})`).join('; ')} (not supported by the spec)`, 500)
