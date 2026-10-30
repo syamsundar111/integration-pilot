@@ -148,7 +148,9 @@ Phase 9 (format agreed 2026-10-30, branch contents decided by the tenant experim
 - **Branches:** plain steps, process calls and routers; every branch reaches the Join. **In a branch one route of a
   router continues and the others end:** with two continuing routes that joined again at a step in the branch, CPI
   marked the Join with "Multicast does not exist for join" (tenant check, 2026-10-30), and the warning went away when
-  one of them ended. Import makes such a router a placeholder, and an update is blocked.
+  one of them ended. Import makes such a router a placeholder, and an update is blocked. To join routes again, route
+  inside a local process called with a Process Call: CPI checks a local process as its own process (Ref_Structure's
+  `LIP_HandleOrder`, called per item, has two routes that join again, without a warning).
   **A router before a gather is refused**, in a branch even before the splitter: in Ref_Multicast CPI marks
   `GA_Items` with "You cannot use Router with gather; use gather after splitter or join", even when only one route
   reaches it. A split in a branch is closed by a gather there (CPI: "always use gather in between splitter - join")

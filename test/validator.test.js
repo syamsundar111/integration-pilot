@@ -607,7 +607,7 @@ describe('multicast (phase 9)', () => {
   test('in a branch one route continues: routes that join again are refused, before a step or at the Join', () => {
     const two = router('RT', [{ name: 'A', condition: "${property.a} = '1'", steps: [cm('X')] }, { name: 'D', default: true }])
     const result = validate(baseSpec({ steps: [mc([[two, cm('C')], [cm('B')]]), gather] }))
-    expect(result.issues).toEqual([{ code: 'BRANCH_ROUTES_JOIN', message: expect.stringMatching(/^steps\[0\]\.branches\[0\]\.steps\[0\]: the routes 'A', 'D' all continue, .*let at most one route continue to the Join/) }])
+    expect(result.issues).toEqual([{ code: 'BRANCH_ROUTES_JOIN', message: expect.stringMatching(/^steps\[0\]\.branches\[0\]\.steps\[0\]: the routes 'A', 'D' all continue, .*let at most one route continue to the Join .*route inside a local process called with a Process Call$/) }])
     expect(codes(baseSpec({ steps: [mc([[two], [cm('B')]]), gather] }))).toEqual(['BRANCH_ROUTES_JOIN'])
     // on the main line and in a local process they still may
     expect(codes(baseSpec({ steps: [two, cm('C')] }))).toEqual([])

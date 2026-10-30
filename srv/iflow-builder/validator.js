@@ -479,7 +479,7 @@ function validate(spec, { attachments = [] } = {}) {
     list.forEach((r, i) => {
       const continuing = r.type === 'router' && Array.isArray(r.routes) ? r.routes.filter((x) => isObj(x) && !x.end) : []
       if (continuing.length > 1)
-        err('BRANCH_ROUTES_JOIN', `${prefix}[${i}]: the routes ${continuing.map((x) => `'${x.name}'`).join(', ')} all continue, but CPI does not accept routes that join again inside a multicast branch — let at most one route continue to the Join, and give the others an 'end'`)
+        err('BRANCH_ROUTES_JOIN', `${prefix}[${i}]: the routes ${continuing.map((x) => `'${x.name}'`).join(', ')} all continue, but CPI does not accept routes that join again inside a multicast branch — let at most one route continue to the Join and give the others an 'end', or, to join routes again, route inside a local process called with a Process Call`)
     })
   }
   locals.forEach((p, i) => checkRouters(Array.isArray(p.steps) ? p.steps : [], `localProcesses[${i}].steps`, false))
