@@ -127,7 +127,9 @@ const SPEC_FORMAT = {
     splitter:
       '{ type, name?, description?, kind: iterating|general, expression (XPath, e.g. //order), grouping? (1), streaming? (true), stopOnException: true|false (always set), parallel?: false } — main line; the next steps run per item until a gather or the end (no nested split, no router before the gather: route in a called local process); properties set per item are lost after the gather',
     gather: '{ type, name?, description?, source?, target? } — closes a split: Combine; with source (XPath, e.g. //order) and target (e.g. /orders): Combine at XPath',
-    processCall: '{ type, name?, description?, process (localProcesses name), loop?: { condition (as NonXML), max } } — main line, routes, exceptionSubprocess',
+    processCall: '{ type, name?, description?, process (localProcesses name), loop?: { condition (as NonXML), max } } — main line, routes, branches, exceptionSubprocess',
+    multicast:
+      '{ type, name?, description?, mode: parallel|sequential, join? (name of the Join, which the builder adds), branches: [{ name?, steps: [step] }] (2-20) } — main line only; the next step must be a gather with only a name. Every branch reaches the Join: no multicast in a branch, a router in a branch has exactly one continuing route (the others end) and no gather after it, a splitter in a branch has its gather there',
     requestReplySoap: '{ type, name?, description?, system?, url ("{{Param}}" allowed), authType: Basic, credentialName, proxyType: On-Premise, locationId?, timeout? } — no WSDL: the body is sent as it is; not in exceptionSubprocess',
     messageMapping: '{ type, name?, description?, mapping (artifact id) } — or file (.mmap) and schemas from an imported or existing iFlow, never written by you',
     xsltMapping: '{ type, name?, description?, file (an attached .xsl) }',
@@ -170,7 +172,8 @@ const TOPICS = {
   splitting: { steps: ['splitter', 'gather', 'processCall'], summary: 'splitter / gather: steps per item; local processes run by a processCall (also looping)' },
   soap: { steps: ['requestReplySoap'], summary: 'requestReplySoap: a SOAP 1.x call' },
   mail: { steps: ['sendMail'], summary: 'sendMail: send a mail, one-way' },
-  mapping: { steps: ['messageMapping', 'xsltMapping'], summary: 'messageMapping (an artifact) and xsltMapping (an attached file)' }
+  mapping: { steps: ['messageMapping', 'xsltMapping'], summary: 'messageMapping (an artifact) and xsltMapping (an attached file)' },
+  multicast: { steps: ['multicast'], summary: 'multicast: send the message down several branches, in parallel or in sequence; a gather combines them after the Join' }
 }
 for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
 

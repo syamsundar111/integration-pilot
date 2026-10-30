@@ -27,10 +27,10 @@ describe('prompt linter', () => {
     expect(lint('Create an iFlow that posts the order to https://example.org/orders')).toEqual([])
   })
 
-  test('a join of routes is no step; a Join step is (phase 1b)', () => {
+  test('multicast and join are supported (phase 9); Content Enricher and Poll Enrich are not yet', () => {
     expect(lint('Create an iFlow on a timer, package P, no auth: a router; both routes join again at CM_Join.')).toEqual([])
-    expect(keys(lint('Create an iFlow on a timer, package P, no auth: a multicast, then a join step and a gather.'))).toEqual(['unsupported'])
-    expect(lint('Create an iFlow on a timer, package P, no auth: a multicast, then a join step.')[0].message).toMatch(/Not supported yet: join, multicast\./)
+    expect(lint('Create an iFlow on a timer, package P, no auth: a multicast, then a join step and a gather.')).toEqual([])
+    expect(lint('Create an iFlow on a timer, package P, no auth: a content enricher, then a poll enrich.')[0].message).toMatch(/Not supported yet: content enricher, poll enrich\./)
   })
 
   test('unsupported step kinds, ignoring quoted text', () => {
@@ -38,7 +38,7 @@ describe('prompt linter', () => {
     expect(keys(w)).toEqual(['unsupported'])
     expect(w[0].message).toMatch(/Not supported yet: SFTP\./) // Write Variables (1a), routers (1b), splitters and process calls (2), mappings (4) are supported
     expect(lint('Build an iFlow on a timer in package P that sets property Kind = "router mapping". No auth.')).toEqual([])
-    expect(keys(lint('Add a multicast after step 2, then gather and join the branches'))).toEqual(['unsupported'])
+    expect(keys(lint('Add a content enricher after step 2'))).toEqual(['unsupported'])
   })
 
   test('a mail server, credential and recipients can be parameters (phase 3); a subject cannot', () => {
@@ -90,7 +90,7 @@ describe('prompt linter', () => {
     ].join('\n')
     expect(lint(request)).toEqual([])
     // outside quotes they are still found
-    expect(keys(lint(`${request}\n5. Add a multicast after step 4. Set header X = {{Other}}.`))).toEqual(['unsupported', 'params'])
+    expect(keys(lint(`${request}\n5. Add a content enricher after step 4. Set header X = {{Other}}.`))).toEqual(['unsupported', 'params'])
   })
 
   describe('follow-up messages (manual test 9)', () => {
@@ -107,9 +107,9 @@ describe('prompt linter', () => {
       expect(lint('Build an iFlow on a timer in package P, no auth. Use a Groovy script instead of a message mapping.')).toEqual([])
       expect(lint('Build an iFlow on a timer in package P, no router and no SFTP, no auth.')).toEqual([])
       // a new clause ends the negation
-      const w = lint('Build an iFlow on a timer in package P without a router, but add a multicast. No auth.')
-      expect(w.map((x) => x.message)).toEqual([expect.stringMatching(/Not supported yet: multicast\./)])
-      expect(keys(lint('Build an iFlow on a timer in package P, no authentication, use a multicast.'))).toEqual(['unsupported'])
+      const w = lint('Build an iFlow on a timer in package P without a router, but add a content enricher. No auth.')
+      expect(w.map((x) => x.message)).toEqual([expect.stringMatching(/Not supported yet: content enricher\./)])
+      expect(keys(lint('Build an iFlow on a timer in package P, no authentication, use a content enricher.'))).toEqual(['unsupported'])
       // routers (phase 1b), splitters, gathers and process calls (phase 2) are supported
       expect(lint('Build an iFlow on a timer in package P, no authentication, use a router.')).toEqual([])
       expect(lint('Build an iFlow on a timer in package P, no authentication: a General Splitter, a Process Call to a local process, then a Gather.')).toEqual([])
@@ -124,9 +124,9 @@ describe('prompt linter', () => {
     test('only warnings that are new compared with the first message are shown', () => {
       expect(lint('Also add a Content Modifier that sets header Source = SF.', { history: [first] })).toEqual([])
       // a step kind not named before is new; the ones already warned about are not repeated
-      const w = lint('Add a multicast after step 2 and a mapping step.', { history: [first] })
+      const w = lint('Add a content enricher after step 2 and a mapping step.', { history: [first] })
       expect(keys(w)).toEqual(['unsupported'])
-      expect(w[0].message).toMatch(/Not supported yet: multicast\./)
+      expect(w[0].message).toMatch(/Not supported yet: content enricher\./)
       // new {{Param}} outside a URL
       expect(keys(lint('Add header Source = {{SourceSystem}}.', { history: [first] }))).toEqual(['params'])
     })

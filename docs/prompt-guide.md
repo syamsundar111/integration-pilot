@@ -15,7 +15,7 @@ turns into extra questions.
 | | Supported | Not supported |
 |---|---|---|
 | Trigger | HTTPS sender (with a path), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, SOAP, other senders |
-| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (these three on the main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; nested splits; join step, multicast, mapping, XSLT step, Idempotent Process Call |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
 | Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
@@ -48,6 +48,12 @@ Hard limits:
   `//order`, not `/orders/order` (not yet confirmed on a deployed run).
 - A Looping Process Call runs its local process again while a Non-XML condition is true
   (`${property.hasMore} = 'true'`, spaces around the operator), at most a maximum number of times.
+- A **Multicast** sends the message down at least 2 branches, in parallel or in sequence (name the order for
+  sequence). The builder adds the Join; the next step must be a **Gather** (Combine). Branches hold ordinary steps,
+  process calls and routers, and every branch must reach the Join. In a branch exactly one route of a router continues
+  and the others end: CPI does not accept routes that join again there. CPI also refuses a router before a gather,
+  even if only one route reaches it: to route each item of a split, call a local process that contains the router.
+  Multicasts sit on the main line only.
 - A Message Mapping refers to a mapping artifact on the tenant, which must exist and be deployed before
   the iFlow can run; if it doesn't exist, the assistant puts a placeholder there. An XSLT Mapping runs
   a file you attach. Mappings inside an iFlow (`.mmap` with its schemas) come only from Import or an
@@ -84,7 +90,7 @@ Error handling: <exception subprocess: what to set, log or return when a step fa
 
 Before sending, the chat checks the request without calling the model. It warns about:
 
-- steps v1 cannot build (join step, multicast, SFTP)
+- steps v1 cannot build (Content Enricher, Poll Enrich, SFTP)
 - more than 25 numbered steps
 - `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID
 - template fields that are still unfilled

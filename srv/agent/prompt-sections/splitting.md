@@ -8,7 +8,7 @@ XML Same Format, Combine; with `"source": "//order", "target": "/orders"` only w
 Combine at XPath), or to the end when there is no gather. After a Combine gather the items may sit in a
 multi-mapping envelope (multimap:Messages / multimap:Message1) instead of the original root: read them
 with `//order`, not `/orders/order`. Always set `stopOnException`: `true` = one failing item stops the rest, `false` = the other
-items still run; if the request does not say, ask. Splitters and gathers sit on the main line only, and
+items still run; if the request does not say, ask. Splitters and gathers sit on the main line (or in a multicast branch, see Multicast), and
 there is no second splitter and **no router** between a splitter and its gather (CPI refuses a router
 there): to route each item, call a local process that contains the router (a `processCall` between the
 splitter and the gather). A router after a splitter without a gather is fine. Exchange

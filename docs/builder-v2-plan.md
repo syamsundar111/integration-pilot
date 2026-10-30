@@ -37,9 +37,10 @@ prompt and the tokens used reported per prompt.
 | 2 | General and Iterating Splitter, Gather; local integration process with Process Call and Looping Process Call | Ref_Structure | done |
 | 3 | SOAP 1.x and Mail receivers (format below) | Ref_Receivers | done |
 | 4 | Message Mapping: an existing artifact (a `PH_` placeholder if it does not exist) or a mapping inside the iFlow carried from Import; XSLT Mapping step (format below) | Ref_Mapping, MM_DummyOrderToNotif | done |
-| 9 | Multicast, Join, Content Enricher, Poll Enrich | Ref_Multicast_Enrich | next (the real iFlows need multicast and join) |
+| 9 | Multicast and Join (format below) | Ref_Multicast | done |
 | 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern | Ref_Sender_* | waits for the user's go |
 | 6 | Receivers 2: OData V2, RFC, IDoc, SFTP, JDBC, ProcessDirect | Ref_Receivers_2 | waits for the user's go |
+| 6b | Content Enricher and Poll Enrich (they need phase 6's OData and SFTP adapters; neither real iFlow uses them) | Ref_Multicast_Enrich, to be re-selected first | after phase 6 |
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS | Ref_Persistence | waits for the user's go |
 | 8 | Transforms: XML Validator, Filter, CSV converters, encoders | Ref_Transform | waits for the user's go |
 
@@ -51,7 +52,7 @@ A linear request must not pay for features it does not use. Each phase puts its 
 section (`srv/agent/prompt-sections/<topic>.md`, added by `agent.js` when the request's words or the
 draft need it, sticky per conversation) and its step formats under the same topic in `getSupportedSteps`
 (`tools.js` TOPICS; the model can also ask for a topic). The core prompt keeps one pointer line per
-topic. Topics so far: `routing` (1b), `splitting` (2), `soap` and `mail` (3), `mapping` (4). Measured on 2026-10-29 (scenario b, one live
+topic. Topics so far: `routing` (1b), `splitting` (2), `soap` and `mail` (3), `mapping` (4), `multicast` (9). Measured on 2026-10-29 (scenario b, one live
 run): 30k input tokens before, 25k after; largest prompt 12k -> 9k. A request that needs both topics
 without their trigger words ("send every order separately; type A also goes to ...") fetched both
 through `getSupportedSteps` and proposed a valid splitter with a router (25.6k input tokens).
@@ -75,7 +76,7 @@ through `getSupportedSteps` and proposed a valid splitter with a router (25.6k i
 Since 1b the spec is a main line of steps in which a step may hold nested step lists that either end or
 continue with the next main-line step (a router's routes). Later phases use the same shape, so the
 validator (step paths, names, the 50-step limit per process over its nested steps), the builder (a lane per nested
-list, one column per node, receivers above the pool) and import/update need no rework.
+list, one column per node, receivers above the pool, below it for multicast branches) and import/update need no rework.
 
 Phase 2 (format agreed 2026-10-29):
 
@@ -86,7 +87,7 @@ Phase 2 (format agreed 2026-10-29):
   always sets it, and the panel says it in plain words ("one failing item stops / does not stop the
   rest"). A `gather` with only `name` is Combine (XML Same Format; all 18 Gathers of the real iFlows); with
   `source` and `target` XPath it is Combine at XPath. The Different Format gathers of Ref_Multicast_Enrich
-  come with phase 9.
+  come later, only from a re-selected export.
 - **Main line only.** Splitters and gathers sit on the main line; a gather needs a splitter before it;
   a second splitter between a splitter and its gather (nested split) is refused with a clear message.
   So is a router between them (tenant check: CPI says "You cannot use Router with gather"); the message
@@ -107,8 +108,6 @@ Phase 2 (format agreed 2026-10-29):
   process from there: Error Start -> Process Call -> Escalation End). `loop: { condition, max }` makes
   it a Looping Process Call (Non-XML condition with spaces around the operator). Options are objects
   on the step, so phase 7's Idempotent Process Call fits as another option beside `loop`.
-- **Multicast and Join (phase 9):** a `multicast` step like a router without conditions: `branches`
-  that all run, and join again at the step after it (with a Gather).
 
 Not in 1b: routers inside routes (refused, Import makes them a placeholder). They fit the same shape and
 come when a real interface needs them.
@@ -138,6 +137,27 @@ Phase 4 (format agreed 2026-10-30):
 - **Panel note, as confirmed in the tenant check:** CPI's notice says XML or JSON input on a Message
   Mapping and XML input on an XSLT Mapping; the note stays "may".
 
+Phase 9 (format agreed 2026-10-30, branch contents decided by the tenant experiment in Ref_Multicast):
+
+- **`multicast`:** `{ name, mode: parallel | sequential, join, branches: [{ name, steps }] }` with 2-20 branches of
+  at least one step. The builder adds the Join (`join` is its name), and the next step must be a `gather` with
+  only a name: Combine, XML Same Format. Different Format comes later, only from a re-selected export.
+- **Where:** the main line only. Not in a route, a branch, a local process or the exception subprocess (no
+  reference has one there). The shape of a real iFlow with an SFTP sender, a router choosing between two multicasts that share 14 branches, is
+  a graph, not a tree: Import keeps its main path with placeholders.
+- **Branches:** plain steps, process calls and routers; every branch reaches the Join. **In a branch one route of a
+  router continues and the others end:** with two continuing routes that joined again at a step in the branch, CPI
+  marked the Join with "Multicast does not exist for join" (tenant check, 2026-10-30), and the warning went away when
+  one of them ended. Import makes such a router a placeholder, and an update is blocked.
+  **A router before a gather is refused**, in a branch even before the splitter: in Ref_Multicast CPI marks
+  `GA_Items` with "You cannot use Router with gather; use gather after splitter or join", even when only one route
+  reaches it. A split in a branch is closed by a gather there (CPI: "always use gather in between splitter - join")
+  and routes per item through a Process Call to a local process, as in phase 2.
+- **Layout:** receivers of steps in a branch sit below the pool, as for local processes; a line up would cross the
+  branches above. A line down can still cross the lanes of later branches, or an exception subprocess in that column.
+- **Ref_Multicast's `RT_Item` is kept as exported:** the reference shows the shapes and values; its own branch is a
+  shape the spec refuses, so an update of it is blocked and Import makes the splitter and the gather placeholders.
+
 ## Later (no phase yet)
 
 From the former reference export checklist; each needs a reference export first.
@@ -159,6 +179,11 @@ From the former reference export checklist; each needs a reference export first.
 - Looping Process Call: "Action when Max. Iterations Reached" is fixed to Throw Exception (as in
   Ref_Structure); add End Loop as a choice when a real interface needs it.
 - Escalation and Error End in local processes (needs a reference export).
+- Multicast in a local process (needs a reference export).
+- Multicast: a router before a splitter in a branch, its own tenant test. It is refused today, but CPI's message only
+  covers a router between a splitter and its gather.
+- Multicast: confirm on a deployed run whether exchange properties set in a branch reach the steps after the Join
+  (the panel says "may not"), and how the branch output is combined.
 - SOAP receiver: Internet, no authentication, a WSDL with service, port and operation (needs `.wsdl` and
   its `.xsd` files as uploads, refused since phase 4); the credential name and location ID as parameters.
 - Mail: other protection, authentication and body types, attachments; a mail or SOAP receiver at the end.

@@ -84,6 +84,32 @@ describe('flow diagram: SOAP and Mail receivers (phase 3)', () => {
   })
 })
 
+describe('flow diagram: multicasts (phase 9)', () => {
+  test('from a spec: default names, the mode and the branches up to the Join', () => {
+    const cm = (name) => ({ type: 'contentModifier', name })
+    const model = flowDiagram.fromSpec({
+      trigger: { type: 'timer', mode: 'once' },
+      steps: [{ type: 'multicast', mode: 'sequential', branches: [{ steps: [cm('A')] }, { name: 'Other', steps: [{ type: 'router', name: 'RT', expressionType: 'NonXML', routes: [{ name: 'R', condition: 'x', steps: [cm('B')], end: {} }, { name: 'D', default: true }] }, cm('C')] }] }, { type: 'gather', name: 'GA' }],
+      end: { type: 'none' }
+    })
+    expect(model.steps[0]).toMatchObject({ name: 'Sequential Multicast 1', detail: 'Sequential', branches: [{ name: 'Branch 1', steps: ['A'] }, { name: 'Other', steps: ['RT', 'B', 'C'] }] })
+    expect(flowDiagram.toHtml(model)).toContain('Other</span> RT → B → C → Join')
+  })
+
+  test('from a parsed iFlow (Ref_Multicast)', async () => {
+    const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Multicast.zip')))
+    const steps = flowDiagram.fromParsed(parsed).steps
+    expect(steps.map((s) => [s.name, s.type, s.detail || ''])).toEqual([
+      ['CM_SetBody', 'contentModifier', ''],
+      ['MC_Parallel', 'multicast', 'Parallel'],
+      ['GA_Parallel', 'gather', 'Combine'],
+      ['MC_Sequential', 'multicast', 'Sequential'],
+      ['GA_Sequential', 'gather', 'Combine']
+    ])
+    expect(steps[1].branches).toEqual([{ name: 'Branch 1', steps: ['CM_BranchA'] }, { name: 'Branch 2', steps: ['RT_Branch', 'CM_BranchB'] }])
+  })
+})
+
 describe('flow diagram: mappings (phase 4)', () => {
   test('the type and the artifact or file', async () => {
     const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Mapping.zip')))

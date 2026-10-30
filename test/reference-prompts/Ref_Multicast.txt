@@ -1,0 +1,29 @@
+Create iFlow Ref_Multicast.
+
+Main integration process:
+1. Timer 1 - Timer start event, Run Once.
+2. CM_SetBody - Content Modifier, property stop = constant false.
+   Body = <orders><order><id>1</id><type>A</type></order><order><id>2</id><type>B</type></order></orders>
+3. MC_Parallel - Parallel Multicast with two branches:
+   Branch 1 -> CM_BranchA (property branch = constant A) -> JN_Parallel.
+   Branch 2 -> RT_Branch - Router:
+     R_Stop, condition (Non XML) ${property.stop} = 'true' -> End_Stop (Message End).
+     R_Go, default route -> CM_BranchB (property branch = constant B) -> JN_Parallel.
+4. JN_Parallel - Join.
+5. GA_Parallel - Gather: incoming format XML (Same Format), aggregation algorithm Combine.
+6. MC_Sequential - Sequential Multicast with two branches, in this order:
+   Branch 1 -> CM_SeqA (property seq = constant A) -> JN_Sequential.
+   Branch 2 -> ITSPL_Items - Iterating Splitter: expression type XPath, //order, grouping 1,
+     streaming on, stop on exception off, parallel processing off.
+     -> RT_Item - Router:
+     R_TypeA, condition (XML) /order/type = 'A' -> CM_ItemA (property item = constant A)
+       -> End_ItemA (Message End).
+     R_ItemOther, default route -> GA_Items - Gather: incoming format XML (Same Format),
+       aggregation algorithm Combine -> JN_Sequential.
+7. JN_Sequential - Join.
+8. GA_Sequential - Gather: incoming format XML (Same Format), aggregation algorithm Combine.
+9. End - Message End.
+
+Tenant check (kept for the record): CPI marks GA_Items with "You cannot use Router with gather; use
+gather after splitter or join", even though only R_ItemOther reaches it. So the spec refuses a router
+before a gather in a branch; this reference shows the shapes and values, not a shape to build.

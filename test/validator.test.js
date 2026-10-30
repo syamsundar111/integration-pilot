@@ -26,8 +26,12 @@ describe('validator', () => {
     expect(errors).toEqual(expect.arrayContaining(["spec: missing required field 'name'", "spec: missing required field 'trigger'"]))
   })
 
-  test.each(['parallelMulticast', 'joinStep'])('rejects %s with a clear message', (type) => {
-    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' is not supported yet \\(no multicast or join\\)`))
+  test.each(['contentFilter', 'aggregatorStep'])('rejects %s with a clear message', (type) => {
+    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' is not supported yet`))
+  })
+
+  test.each(['parallelMulticast', 'joinStep', 'sequential'])('%s points to the multicast format (phase 9)', (type) => {
+    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' — a multicast is `))
   })
 
   test('another router type points to the router format (phase 1b)', () => {
@@ -186,7 +190,7 @@ describe('validator', () => {
       steps: [
         { type: 'contentModifier', name: 'A' },
         { type: 'contentModifier', name: 'A', headers: [{ name: 'X', type: 'numberRange', value: '/a' }] },
-        { type: 'parallelMulticast' },
+        { type: 'contentFilter' },
         ...Array.from({ length: 49 }, () => ({ type: 'jsonToXml' }))
       ],
       end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'Basic' } // no credentialName
@@ -352,7 +356,7 @@ describe('splitters, gathers, process calls and local processes (phase 2)', () =
       {
         code: 'ROUTER_IN_SPLIT',
         message:
-          'steps[1]: CPI does not accept a router between a splitter and its gather (steps[2]) — route per item inside a local process instead: a processCall here, and a local process that contains the router (a router after a splitter without a gather is fine)'
+          'steps[1]: CPI does not accept a router between a splitter and its gather (steps[2]), even if only one route reaches it — route per item inside a local process instead: a processCall here, and a local process that contains the router (a router after a splitter without a gather is fine)'
       }
     ])
     // the supported form
@@ -558,3 +562,70 @@ describe('Message Mapping and XSLT Mapping (phase 4)', () => {
     expectError(baseSpec({ steps: [{ type: 'graphicalMapping' }] }), /'graphicalMapping' — a Message Mapping is \{ "type": "messageMapping"/)
   })
 })
+
+describe('multicast (phase 9)', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: 'x' }] })
+  const router = (name = 'RT', routes) => ({ type: 'router', name, expressionType: 'NonXML', routes: routes || [{ name: 'A', condition: "${property.a} = '1'", end: { event: 'message', name: `End_${name}` } }, { name: 'D', default: true }] })
+  const mc = (branches, extra = {}) => ({ type: 'multicast', name: 'MC', mode: 'parallel', join: 'JN', branches: branches.map((steps) => ({ steps })), ...extra })
+  const gather = { type: 'gather', name: 'GA' }
+  const codes = (spec) => validate(spec).issues.map((i) => i.code)
+
+  test('branches with steps, process calls, routers and a closed split are valid', () => {
+    const spec = baseSpec({
+      steps: [mc([[cm('A'), { type: 'processCall', name: 'PC', process: 'L' }], [router(), cm('B')], [{ type: 'splitter', name: 'SP', kind: 'iterating', expression: '//o', stopOnException: false }, { type: 'processCall', name: 'PC2', process: 'L' }, { type: 'gather', name: 'GB' }]]), gather],
+      localProcesses: [{ name: 'L', steps: [cm('L1')] }]
+    })
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+  })
+
+  test('the step after a multicast is a Combine gather', () => {
+    expect(codes(baseSpec({ steps: [mc([[cm('A')], [cm('B')]])] }))).toEqual(['JOIN_WITHOUT_GATHER'])
+    expect(codes(baseSpec({ steps: [mc([[cm('A')], [cm('B')]]), cm('C')] }))).toEqual(['JOIN_WITHOUT_GATHER'])
+    expect(codes(baseSpec({ steps: [mc([[cm('A')], [cm('B')]]), { type: 'gather', name: 'GA', source: '//o', target: '/os' }] }))).toEqual(['JOIN_GATHER_COMBINE'])
+  })
+
+  test('a router before a gather is refused in a branch, even if only one route reaches it, and even before the splitter', () => {
+    const split = { type: 'splitter', name: 'SP', kind: 'iterating', expression: '//o', stopOnException: false }
+    const inSplit = validate(baseSpec({ steps: [mc([[split, router(), { type: 'gather', name: 'GB' }], [cm('B')]]), gather] }))
+    expect(inSplit.issues).toEqual([{ code: 'ROUTER_IN_SPLIT', message: expect.stringMatching(/^steps\[0\]\.branches\[0\]\.steps\[1\]: CPI does not accept a router between a splitter and its gather \(steps\[0\]\.branches\[0\]\.steps\[2\]\), even if only one route reaches it — route per item inside a local process/) }])
+    expect(codes(baseSpec({ steps: [mc([[router(), split, { type: 'gather', name: 'GB' }], [cm('B')]]), gather] }))).toEqual(['ROUTER_IN_SPLIT'])
+  })
+
+  test('a split in a branch closes before the Join; a gather in a branch needs its splitter', () => {
+    const split = { type: 'splitter', name: 'SP', kind: 'iterating', expression: '//o', stopOnException: false }
+    expect(codes(baseSpec({ steps: [mc([[split, cm('A')], [cm('B')]]), gather] }))).toEqual(['SPLIT_WITHOUT_GATHER'])
+    expect(codes(baseSpec({ steps: [mc([[{ type: 'gather', name: 'GB' }], [cm('B')]]), gather] }))).toEqual(['GATHER_WITHOUT_SPLITTER'])
+  })
+
+  test('every branch reaches the Join', () => {
+    const allEnd = router('RT', [{ name: 'A', condition: "${property.a} = '1'", end: { event: 'message', name: 'E1' } }, { name: 'D', default: true, end: { event: 'message', name: 'E2' } }])
+    expect(codes(baseSpec({ steps: [mc([[allEnd], [cm('B')]]), gather] }))).toContain('BRANCH_MUST_REACH_JOIN')
+    expect(codes(baseSpec({ steps: [mc([[], [cm('B')]]), gather] }))).toEqual(['INVALID'])
+    expect(codes(baseSpec({ steps: [mc([[cm('A')]]), gather] }))).toEqual(['INVALID'])
+  })
+
+  test('in a branch one route continues: routes that join again are refused, before a step or at the Join', () => {
+    const two = router('RT', [{ name: 'A', condition: "${property.a} = '1'", steps: [cm('X')] }, { name: 'D', default: true }])
+    const result = validate(baseSpec({ steps: [mc([[two, cm('C')], [cm('B')]]), gather] }))
+    expect(result.issues).toEqual([{ code: 'BRANCH_ROUTES_JOIN', message: expect.stringMatching(/^steps\[0\]\.branches\[0\]\.steps\[0\]: the routes 'A', 'D' all continue, .*let at most one route continue to the Join/) }])
+    expect(codes(baseSpec({ steps: [mc([[two], [cm('B')]]), gather] }))).toEqual(['BRANCH_ROUTES_JOIN'])
+    // on the main line and in a local process they still may
+    expect(codes(baseSpec({ steps: [two, cm('C')] }))).toEqual([])
+    expect(codes(baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'L' }], localProcesses: [{ name: 'L', steps: [two, cm('C')] }] }))).toEqual([])
+  })
+
+  test('a multicast only on the main line, and not inside a split', () => {
+    const split = { type: 'splitter', name: 'SP', kind: 'iterating', expression: '//o', stopOnException: false }
+    expect(codes(baseSpec({ steps: [mc([[mc([[cm('A')], [cm('B')]], { name: 'MC2', join: 'JN2' }), gather], [cm('C')]]), { type: 'gather', name: 'G2' }] }))).toContain('NESTED_MULTICAST')
+    expect(codes(baseSpec({ steps: [router('RT', [{ name: 'A', condition: "${property.a} = '1'", steps: [mc([[cm('A')], [cm('B')]])] }, { name: 'D', default: true }])] }))).toContain('MAIN_LINE_ONLY')
+    expect(codes(baseSpec({ steps: [split, mc([[cm('A')], [cm('B')]]), gather, { type: 'gather', name: 'G2' }] }))).toEqual(['MULTICAST_IN_SPLIT'])
+    expect(codes(baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'L' }], localProcesses: [{ name: 'L', steps: [mc([[cm('A')], [cm('B')]]), gather] }] }))).toContain('LOCAL_STEP_UNSUPPORTED')
+  })
+
+  test('step names: the Join counts, and branch steps count toward the limit of the process', () => {
+    expect(codes(baseSpec({ steps: [mc([[cm('A')], [cm('JN')]]), gather] }))).toEqual(['DUPLICATE_STEP_NAME'])
+    const many = Array.from({ length: 49 }, (_, i) => cm(`S${i}`))
+    expect(codes(baseSpec({ steps: [mc([many, [cm('B')]]), gather] }))).toEqual(['TOO_MANY_STEPS'])
+  })
+})
+

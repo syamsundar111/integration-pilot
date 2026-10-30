@@ -37,11 +37,14 @@ sap.ui.define(
       requestReplySoap: 'Request Reply (SOAP)',
       sendMail: 'Send (Mail)',
       messageMapping: 'Message Mapping',
-      xsltMapping: 'XSLT Mapping'
+      xsltMapping: 'XSLT Mapping',
+      multicast: 'Multicast'
     }
     /** The step type as the CPI editor names it: Iterating / General Splitter, (Looping) Process Call */
     const typeOf = (s) =>
-      s.type === 'splitter'
+      s.type === 'multicast'
+        ? `${s.mode === 'sequential' ? 'Sequential' : 'Parallel'} Multicast`
+        : s.type === 'splitter'
         ? `${s.kind === 'general' ? 'General' : 'Iterating'} Splitter`
         : s.type === 'processCall' && s.loop
           ? 'Looping Process Call'
@@ -60,8 +63,18 @@ sap.ui.define(
         .filter(Boolean)
         .join(' · ')
 
-    /** Main-flow steps with the steps inside routes (after their router) */
-    const flowSteps = (spec) => spec.steps.flatMap((s) => [s, ...(s.type === 'router' ? (s.routes || []).flatMap((r) => r.steps || []) : [])])
+    /** Main-flow steps with the steps inside routes (after their router) and branches (after their multicast) */
+    const flowSteps = (spec) =>
+      spec.steps.flatMap((s) => [
+        s,
+        ...(s.type === 'router' ? (s.routes || []).flatMap((r) => r.steps || []) : []),
+        ...(s.type === 'multicast' ? (s.branches || []).flatMap((b) => flowSteps({ steps: b.steps || [] })) : [])
+      ])
+    /** The gathers that close a split, on the main line and in branches; a gather right after a multicast combines its branches */
+    const splitGathers = (spec) => {
+      const inLine = (list) => list.filter((s, i) => s.type === 'gather' && (i === 0 || list[i - 1].type !== 'multicast'))
+      return [...inLine(spec.steps), ...spec.steps.filter((s) => s.type === 'multicast').flatMap((m) => (m.branches || []).flatMap((b) => inLine(b.steps || [])))]
+    }
     /** Every step: main flow with routes, exception subprocess, local processes */
     const everyStep = (spec) => [
       ...flowSteps(spec),
@@ -94,7 +107,7 @@ sap.ui.define(
      * instead of the original root. Not confirmed yet on a deployed run, so the wording stays "may".
      */
     function combineNote(spec) {
-      const gathers = spec.steps.filter((s) => s.type === 'gather' && !s.source).map((s) => s.name || 'the gather')
+      const gathers = flowSteps(spec).filter((s) => s.type === 'gather' && !s.source).map((s) => s.name || 'the gather')
       return gathers.length
         ? `After ${gathers.join(', ')} (Combine), CPI may wrap the combined items in a multi-mapping envelope (multimap:Messages / multimap:Message1) instead of the original root. An XPath like /orders/order may then find nothing; //order works. Check the output in a test run.`
         : ''
@@ -102,10 +115,14 @@ sap.ui.define(
 
     /** The note for a split that ends in a gather: properties set per item do not reach the steps after it */
     function gatherNote(spec) {
-      const gathers = spec.steps.filter((s) => s.type === 'gather').map((s) => s.name || 'the gather')
-      return gathers.length
-        ? `Exchange properties set while processing one item do not reach the steps after ${gathers.join(', ')}: results must travel in the message body.`
-        : ''
+      const gathers = splitGathers(spec).map((s) => s.name || 'the gather')
+      return [
+        gathers.length ? `Exchange properties set while processing one item do not reach the steps after ${gathers.join(', ')}: results must travel in the message body.` : '',
+        // not confirmed yet on a deployed run, so the wording stays "may"
+        spec.steps.some((s) => s.type === 'multicast') ? 'Exchange properties set in a multicast branch may not reach the other branches or the steps after the Join: results must travel in the message body. Check it in a test run.' : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
     }
 
     // end events as the CPI editor names them, an Escalation End with its category
@@ -122,18 +139,20 @@ sap.ui.define(
     /**
      * Information for an XML router unless the step before it (routers skipped) is known to produce XML: CPI shows a
      * notice on the router's routes after any other step (Content Modifier, Groovy script, splitter, ...) or at the
-     * start of a line. Main line and local processes.
+     * start of a line. Main line, multicast branches and local processes.
      */
     function xmlRouterNote(spec) {
       const hits = []
-      for (const line of [spec.steps, ...(spec.localProcesses || []).map((lp) => lp.steps || [])]) {
-        let before = null
+      const walk = (line, from) => {
+        let before = from
         for (const s of line) {
+          if (s.type === 'multicast') for (const b of s.branches || []) walk(b.steps || [], s)
           if (s.type !== 'router') before = s
           else if (s.expressionType === 'XML' && !(before && XML_OUTPUT.includes(before.type)))
             hits.push(`${s.name || 'the XML router'} (${before ? `after ${before.name || typeOf(before)}` : 'first step'})`)
         }
       }
+      for (const line of [spec.steps, ...(spec.localProcesses || []).map((lp) => lp.steps || [])]) walk(line, null)
       return hits.length
         ? `CPI may show the notice "may not pass XML message to Sequence Flow. Sequence Flow supports XML input only" on the routes of ${hits.join(', ')}: it cannot tell that the step before produces XML. Not an error; make sure the body is XML at that point.`
         : ''
@@ -141,16 +160,16 @@ sap.ui.define(
 
     /**
      * The same for steps that take XML (SOAP receivers, mapping steps): CPI may show a notice on them unless the step
-     * before (in its route: the one before the route's router at first) is known to produce XML. Routes and local
-     * processes too. @returns the steps of those types, with the step before each
+     * before (in its route: the one before the route's router at first) is known to produce XML. Routes, multicast
+     * branches and local processes too. @returns the steps of those types, with the step before each
      */
     function xmlInputHits(spec, types) {
       const hits = []
       const check = (s, before) => {
         if (types.includes(s.type) && !(before && XML_OUTPUT.includes(before.type))) hits.push(`${s.name || typeOf(s)} (${before ? `after ${before.name || typeOf(before)}` : 'first step'})`)
       }
-      for (const line of [spec.steps, ...(spec.localProcesses || []).map((lp) => lp.steps || [])]) {
-        let before = null
+      const walk = (line, from) => {
+        let before = from
         for (const s of line) {
           if (s.type === 'router') {
             for (const r of s.routes || []) {
@@ -162,10 +181,12 @@ sap.ui.define(
             }
             continue
           }
+          if (s.type === 'multicast') for (const b of s.branches || []) walk(b.steps || [], s)
           check(s, before)
           before = s
         }
       }
+      for (const line of [spec.steps, ...(spec.localProcesses || []).map((lp) => lp.steps || [])]) walk(line, null)
       return hits
     }
 
@@ -1008,6 +1029,11 @@ sap.ui.define(
                     ? s.source
                       ? `Combines the items: ${s.source} into ${s.target} (XML, same format)`
                       : 'Combines the items (XML, same format)'
+                    : s.type === 'multicast'
+                    ? [
+                        ...(s.branches || []).map((b, j) => `${b.name || `Branch ${j + 1}`}: ${(b.steps || []).length} step${(b.steps || []).length === 1 ? '' : 's'}`),
+                        `${s.mode === 'sequential' ? 'The branches run one after the other, in this order' : 'The branches run at the same time'}; they meet at ${s.join || 'a Join'}`
+                      ].join('\n')
                     : s.type === 'processCall'
                     ? `Calls local process ${s.process}${s.loop ? `\nAgain while ${s.loop.condition}, at most ${s.loop.max} times` : ''}`
                     : ''
@@ -1026,11 +1052,26 @@ sap.ui.define(
                     ? `Every ${spec.trigger.minutes} minutes, all day, UTC`
                     : 'Runs once after deployment'
             },
-            // a router's route steps follow it, numbered router.route.step (3.2.1)
+            // a router's route steps follow it, numbered router.route.step (3.2.1); a multicast's branch steps too (3.B2.1)
             ...spec.steps.flatMap((s, i) => [
-              s.type === 'splitter' ? (({ lines, ...card }) => ({ ...card, lines: `${lines}\n${perItemText(spec, i)}` }))(stepCard(s, `${i + 1}.`)) : stepCard(s, `${i + 1}.`),
+              s.type === 'splitter'
+                ? (({ lines, ...card }) => ({ ...card, lines: `${lines}\n${perItemText(spec, i)}` }))(stepCard(s, `${i + 1}.`))
+                : s.type === 'gather' && i > 0 && spec.steps[i - 1].type === 'multicast'
+                  ? { ...stepCard(s, `${i + 1}.`), lines: `Combines the branches after ${spec.steps[i - 1].join || 'the Join'} (XML, same format)` }
+                  : stepCard(s, `${i + 1}.`),
               ...(s.type === 'router'
                 ? (s.routes || []).flatMap((r, j) => (r.steps || []).map((x, k) => ({ ...stepCard(x, `${i + 1}.${j + 1}.${k + 1}`), type: `${STEP_TYPES[x.type] || x.type} · route ${r.name}` })))
+                : []),
+              ...(s.type === 'multicast'
+                ? (s.branches || []).flatMap((b, j) => {
+                    const where = b.name || `Branch ${j + 1}`
+                    return (b.steps || []).flatMap((x, k) => [
+                      { ...stepCard(x, `${i + 1}.B${j + 1}.${k + 1}`), type: `${typeOf(x)} · ${where}` },
+                      ...(x.type === 'router'
+                        ? (x.routes || []).flatMap((r, m) => (r.steps || []).map((y, n) => ({ ...stepCard(y, `${i + 1}.B${j + 1}.${k + 1}.${m + 1}.${n + 1}`), type: `${typeOf(y)} · ${where}, route ${r.name}` })))
+                        : [])
+                    ])
+                  })
                 : [])
             ]),
             {

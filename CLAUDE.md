@@ -56,9 +56,10 @@ Because turns and approvals live in the process, the backend must stay at **`ins
 
 **iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender |
 timer once | timer every N minutes), steps (contentModifier, groovyScript, writeVariables, jsonToXml, xmlToJson,
-requestReplyHttp, requestReplySoap, sendMail, messageMapping, xsltMapping, router, splitter, gather, processCall) and an end (httpReceiver | none, with a Message/Escalation/Error
-End), plus optional `exceptionSubprocess` and `localProcesses`. Splitters and gathers sit on the main line, routers on
-the main line or a local process's line; a router's routes end or continue with the step after it; a splitter is flat
+requestReplyHttp, requestReplySoap, sendMail, messageMapping, xsltMapping, router, splitter, gather, processCall, multicast) and an end (httpReceiver | none, with a Message/Escalation/Error
+End), plus optional `exceptionSubprocess` and `localProcesses`. Multicasts sit on the main line (the builder adds the Join, a gather follows, a branch holds steps, process calls, routers
+with one continuing route and a closed split), splitters and gathers on the main line or a branch, routers on
+the main line, a branch or a local process's line; a router's routes end or continue with the step after it; a splitter is flat
 (the steps after it run per item until a gather, with no router in between); a processCall runs a local process (`spec-steps.js` lists all steps with their paths, `mapSteps` changes them). Spec values
 that CPI stores differently are mapped in `cpi-values.js` (Content Modifier sources, Write Variables, timer schedules) and
 `receiver-settings.js` (HTTP receivers).

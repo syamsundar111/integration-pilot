@@ -325,6 +325,20 @@ async function main() {
     attrs: { 'id="EndEvent_1"': 'id="{{ID}}"', 'name="ERR_Route"': 'name="{{NAME}}"', '>SequenceFlow_8<': '>{{INCOMING}}<' }
   })
 
+  // Multicast, Join and the flow into a branch (Ref_Multicast)
+  const mc = (await readZip('Ref_Multicast.zip')).iflw
+  const gateway = (id, name, incoming, outgoing) =>
+    apply(block(mc, `id="${id}"`), id, {
+      attrs: { [`id="${id}"`]: 'id="{{ID}}"', [`name="${name}"`]: 'name="{{NAME}}"' },
+      texts: [[incoming.map((f) => `<bpmn2:incoming>${f}</bpmn2:incoming>`).join('\n            '), '<bpmn2:incoming>{{INCOMING}}</bpmn2:incoming>'], [outgoing.map((f) => `<bpmn2:outgoing>${f}</bpmn2:outgoing>`).join('\n            '), '<bpmn2:outgoing>{{OUTGOING}}</bpmn2:outgoing>']]
+    })
+  t['iflw/multicast-parallel.xml'] = gateway('ParallelGateway_8', 'MC_Parallel', ['SequenceFlow_7'], ['SequenceFlow_44430', 'SequenceFlow_8'])
+  t['iflw/multicast-sequential.xml'] = apply(gateway('ParallelGateway_717066', 'MC_Sequential', ['SequenceFlow_327527'], ['SequenceFlow_717066', 'SequenceFlow_717069']), 'multicast-sequential', { props: { routingSequenceTable: 'ROUTING_SEQUENCE_VALUE' } })
+  t['iflw/join.xml'] = gateway('ParallelGateway_327523', 'JN_Parallel', ['SequenceFlow_327524', 'SequenceFlow_327522'], ['SequenceFlow_327526'])
+  t['iflw/branch-flow.xml'] = apply(block(mc, 'id="SequenceFlow_8"'), 'branch-flow', {
+    attrs: { 'id="SequenceFlow_8"': 'id="{{ID}}"', 'name="Branch 1"': 'name="{{NAME}}"', 'sourceRef="ParallelGateway_8"': 'sourceRef="{{SOURCE}}"', 'targetRef="CallActivity_44428"': 'targetRef="{{TARGET}}"' }
+  })
+
   // Splitters, Gather, Process Calls and local processes (Ref_Structure). Expression type XPath, Parallel
   // Processing off, the timeout and thread count stay as exported (the only values in the references)
   const structure = await readZip('Ref_Structure.zip')

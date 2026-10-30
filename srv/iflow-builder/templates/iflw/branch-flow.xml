@@ -1,0 +1,1 @@
+        <bpmn2:sequenceFlow id="{{ID}}" name="{{NAME}}" sourceRef="{{SOURCE}}" targetRef="{{TARGET}}"/>

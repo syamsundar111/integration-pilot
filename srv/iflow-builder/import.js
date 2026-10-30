@@ -479,22 +479,32 @@ async function importIflow(buffer, { fileName, packageId }) {
       }
     })
   })
-  let steps = routed
-    ? routed.steps.flatMap((s) => (s.type === 'router' ? [routerOf(s)] : convert(s)))
-    : (branching ? branching.steps : parsed.steps || []).flatMap((s) => convert(s))
-  // a gather needs the splitter before it, and there is no second splitter until then: else a placeholder
+  // a gather needs the splitter before it, and there is no second splitter until then: else a placeholder.
+  // In a branch a router before a gather, a router whose routes join again and a split without a gather become
+  // placeholders too (the validator's rules)
   const gatherText = (g) => (g.source ? ` (combine at ${g.source} into ${g.target})` : ' (combine)')
+  const splitterText = (s) => `${s.kind === 'general' ? 'General' : 'Iterating'} Splitter '${s.name || ''}' (${s.expression})`
+  const routeText = (r) => `${r.name}${r.condition ? ` (${r.condition})` : ''}: ${(r.steps || []).map((x) => x.name || x.type).join(', ') || 'no steps'}${r.end ? ', then it ends' : ''}`
+  const closeSplits = (list, inBranch = false) => {
   let split = null
   let routed_ = false // a router since the splitter: CPI refuses one before the gather
-  steps = steps.map((s) => {
-    if (s.type === 'router' && split) routed_ = true
+  const out = list.map((s, i) => {
+    if (s.type === 'router' && inBranch && s.routes.filter((r) => !r.end).length > 1) return placeholder(s.name, `Router '${s.name || ''}' whose routes join again in a multicast branch, which CPI does not accept (${s.routes.map(routeText).join('; ')})`)
+    if (s.type === 'router' && (split || inBranch)) routed_ = true
+    if (s.type === 'multicast') {
+      const next = list[i + 1]
+      if (!split && next?.type === 'gather' && !next.source) return s
+      const branches = s.branches.map((b) => `${b.name || 'a branch'}: ${b.steps.map((x) => x.name || x.type).join(', ')}`).join('; ')
+      return placeholder(s.name, `${s.mode === 'sequential' ? 'Sequential' : 'Parallel'} Multicast '${s.name || ''}' with its Join ${s.join || ''} (${branches})${split ? ' inside a split' : ', not followed by a Combine gather'}`)
+    }
+    if (s.type === 'gather' && list[i - 1]?.type === 'multicast' && !split && !s.source) return s
     if (s.type === 'splitter') {
       if (split) {
         notes.push(`${s.name || 'A splitter'}: a split inside the split of ${split.name || 'the splitter before it'} is not supported; it became a placeholder`)
         return placeholder(s.name, `${s.kind === 'general' ? 'General' : 'Iterating'} Splitter '${s.name || ''}' (${s.expression}) inside the split of ${split.name || 'the splitter before it'}`)
       }
       split = s
-      routed_ = false
+      routed_ = inBranch && routed_
     }
     if (s.type === 'gather') {
       if (!split) return placeholder(s.name, `Gather '${s.name || ''}'${gatherText(s)} without a splitter before it`)
@@ -503,6 +513,24 @@ async function importIflow(buffer, { fileName, packageId }) {
     }
     return s
   })
+  // a split the branch does not close (its gather is a placeholder, or missing)
+  if (inBranch) {
+    const closes = (i) => out.slice(i + 1).some((x) => x.type === 'gather')
+    return out.map((s, i) => (s.type === 'splitter' && !closes(i) ? placeholder(s.name, `${splitterText(s)} without a gather in its branch`) : s))
+  }
+  return out
+  }
+  const multicastOf = (m) => ({
+    type: 'multicast',
+    ...(m.name && { name: truncate(m.name, 100) }),
+    mode: m.mode,
+    ...(m.join && { join: truncate(m.join, 100) }),
+    branches: m.branches.map((b) => ({ ...(b.name && { name: truncate(b.name, 100) }), steps: closeSplits(b.steps.flatMap((s) => (s.type === 'router' ? [routerOf(s)] : convert(s))), true) }))
+  })
+  let steps = routed
+    ? routed.steps.flatMap((s) => (s.type === 'router' ? [routerOf(s)] : s.type === 'multicast' ? [multicastOf(s)] : convert(s)))
+    : (branching ? branching.steps : parsed.steps || []).flatMap((s) => convert(s))
+  steps = closeSplits(steps)
   if (routed) notes.push(`The flow branches: ${routed.steps.filter((s) => s.type === 'router').length} router(s) were imported with their routes`)
   else if (branching) {
     if (parsed.routed?.unsupported) notes.push(`The routers could not be imported as routers: ${parsed.routed.unsupported}`)
@@ -590,8 +618,10 @@ async function importIflow(buffer, { fileName, packageId }) {
       )
     return out
   }
-  // each process has its own limit: routers and the steps inside its routes count; only placeholders on its line are merged
-  const inRoutes = (list) => list.filter((s) => s.type === 'router').reduce((n, r) => n + r.routes.reduce((m, x) => m + (x.steps?.length || 0), 0), 0)
+  // each process has its own limit: routers, the steps inside its routes and its multicasts' branches count; only placeholders on its line are merged
+  const nestedSteps = (list) =>
+    list.flatMap((s) => (s.type === 'router' ? s.routes.flatMap((x) => x.steps || []) : s.type === 'multicast' ? s.branches.flatMap((b) => [...b.steps, ...nestedSteps(b.steps)]) : []))
+  const inRoutes = (list) => nestedSteps(list).length
   steps = mergeRuns(steps, MAX_STEPS, 'Main flow', inRoutes(steps))
   for (const lp of localProcesses) lp.steps = mergeRuns(lp.steps, MAX_STEPS, `Local process ${lp.name}`, inRoutes(lp.steps))
   if (exceptionSubprocess) exceptionSubprocess.steps = mergeRuns(exceptionSubprocess.steps, MAX_EXCEPTION_STEPS, 'Exception subprocess')
@@ -601,10 +631,16 @@ async function importIflow(buffer, { fileName, packageId }) {
     const { placeholder: what, ...step } = s
     return { ...step, name: uniqueName(s.name || (what ? 'Placeholder' : step.type === 'groovyScript' ? 'Groovy Script' : step.type === 'contentModifier' ? 'Content Modifier' : words(step.type))) }
   }
-  const routeSteps = steps.filter((s) => s.type === 'router').flatMap((r) => r.routes.flatMap((x) => x.steps || []))
-  const withRoutes = (list) => list.flatMap((s) => [s, ...(s.type === 'router' ? s.routes.flatMap((x) => x.steps || []) : [])])
-  const placeholders = [...steps, ...routeSteps, ...(exceptionSubprocess?.steps || []), ...localProcesses.flatMap((lp) => withRoutes(lp.steps))].filter((s) => s.placeholder).length
-  const finishLine = (list) => list.map((s) => (s.type === 'router' ? { ...finish(s), routes: s.routes.map((x) => (x.steps ? { ...x, steps: x.steps.map(finish) } : x)) } : finish(s)))
+  const withNested = (list) => [...list, ...nestedSteps(list)]
+  const placeholders = [...withNested(steps), ...(exceptionSubprocess?.steps || []), ...localProcesses.flatMap((lp) => withNested(lp.steps))].filter((s) => s.placeholder).length
+  const finishLine = (list) =>
+    list.map((s) =>
+      s.type === 'router'
+        ? { ...finish(s), routes: s.routes.map((x) => (x.steps ? { ...x, steps: x.steps.map(finish) } : x)) }
+        : s.type === 'multicast'
+          ? { ...finish(s), ...(s.join && { join: uniqueName(s.join) }), branches: s.branches.map((b) => ({ ...b, steps: finishLine(b.steps) })) }
+          : finish(s)
+    )
   steps = finishLine(steps)
 
   if (exceptionSubprocess) {

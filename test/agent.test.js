@@ -111,11 +111,11 @@ describe('agent', () => {
   })
 
   test('invalid specs are returned to the model with errors, not stored', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, steps: [{ type: 'parallelMulticast' }] } })).mockResolvedValueOnce(answer('fixed later'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, steps: [{ type: 'contentFilter' }] } })).mockResolvedValueOnce(answer('fixed later'))
     const data = await chat({ sessionId, message: 'add a splitter' })
     expect(data.proposals).toEqual([])
     const toolMsg = llm.chat.mock.calls[1][0].messages.at(-1)
-    expect(JSON.parse(toolMsg.content)).toMatchObject({ valid: false, errors: [expect.stringContaining("'parallelMulticast' is not supported yet")] })
+    expect(JSON.parse(toolMsg.content)).toMatchObject({ valid: false, errors: [expect.stringContaining("'contentFilter' is not supported yet")] })
   })
 
   test('history is sent back on the next turn (no orphaned tool messages)', async () => {
@@ -247,7 +247,7 @@ describe('async turns', () => {
     const gate = deferred()
     llm.chat
       .mockResolvedValueOnce(toolCall('listPackages', {}))
-      .mockImplementationOnce(() => gate.promise.then(() => toolCall('proposeIflow', { spec: { ...spec, steps: [{ type: 'parallelMulticast' }] } })))
+      .mockImplementationOnce(() => gate.promise.then(() => toolCall('proposeIflow', { spec: { ...spec, steps: [{ type: 'contentFilter' }] } })))
       .mockResolvedValueOnce(toolCall('proposeIflow', { spec }))
       .mockResolvedValueOnce(answer('ready'))
 
@@ -759,7 +759,7 @@ describe('package, trigger and authentication have defaults (the session default
 describe('validate, then propose', () => {
   test('validateSpec returns compact codes; proposeIflow reuses the validated spec', async () => {
     const spec = { ...sample, id: 'Agent_Validated_1', name: 'Agent Validated 1' }
-    const broken = { ...spec, steps: [...spec.steps, { type: 'parallelMulticast' }] }
+    const broken = { ...spec, steps: [...spec.steps, { type: 'contentFilter' }] }
     llm.chat
       .mockResolvedValueOnce(toolCall('proposeIflow', { useValidatedSpec: true })) // nothing validated yet
       .mockResolvedValueOnce(toolCall('validateSpec', { spec: broken }))
@@ -771,7 +771,7 @@ describe('validate, then propose', () => {
 
     const results = llm.chat.mock.calls[4][0].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content))
     expect(results[0]).toMatchObject({ valid: false, errors: [expect.stringMatching(/^NO_VALIDATED_SPEC /)] })
-    expect(results[1]).toMatchObject({ valid: false, errors: [expect.stringMatching(/^STEP_NOT_IN_V1 steps\[\d+\]: 'parallelMulticast'/)] })
+    expect(results[1]).toMatchObject({ valid: false, errors: [expect.stringMatching(/^STEP_NOT_IN_V1 steps\[\d+\]: 'contentFilter'/)] })
     expect(results[2]).toEqual({ valid: true, next: expect.stringContaining('useValidatedSpec') })
     expect(results[3]).toMatchObject({ valid: true, iflowId: 'Agent_Validated_1' })
     // tool results never echo the spec
@@ -895,7 +895,7 @@ describe('import an iFlow', () => {
 describe('history trimming and the latest spec as session state', () => {
   test('earlier tool exchanges are not re-sent; a spec validated last turn can still be proposed', async () => {
     const spec = { ...sample, id: 'Agent_State_1', name: 'Agent State 1' }
-    const broken = { ...spec, steps: [...spec.steps, { type: 'parallelMulticast' }] }
+    const broken = { ...spec, steps: [...spec.steps, { type: 'contentFilter' }] }
     llm.chat
       .mockResolvedValueOnce(toolCall('getSupportedSteps', {}))
       .mockResolvedValueOnce(toolCall('validateSpec', { spec: broken }))
@@ -1129,7 +1129,7 @@ describe('editDraftSpec: building a large spec in parts', () => {
   test('set, add in chunks of 8, fix one step, validate the draft and propose it', async () => {
     llm.chat
       .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Big_1', name: 'Agent Big 1', packageId: 'PilotReference', trigger: { type: 'timer', mode: 'once' }, end: { type: 'none' } } }, { op: 'addSteps', steps: range(1, 8) }] }))
-      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'addSteps', steps: [...range(9, 15), { type: 'parallelMulticast', name: 'Oops' }] }] }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'addSteps', steps: [...range(9, 15), { type: 'contentFilter', name: 'Oops' }] }] }))
       .mockResolvedValueOnce(toolCall('validateSpec', { useDraftSpec: true }))
       .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'replaceStep', index: 15, step: cm(16) }, { op: 'addSteps', steps: [{ type: 'contentModifier', name: 'Set Error' }], exception: true }] }))
       .mockResolvedValueOnce(toolCall('validateSpec', { useDraftSpec: true }))
@@ -1140,7 +1140,7 @@ describe('editDraftSpec: building a large spec in parts', () => {
 
     expect(results[0]).toMatchObject({ saved: true, id: 'Agent_Big_1', steps: expect.arrayContaining(['0. Step 1 (contentModifier)', '7. Step 8 (contentModifier)']) })
     expect(results[0].next).toMatch(/propose it with \{ "useDraftSpec": true \}/)
-    expect(results[1].openIssues).toEqual([expect.stringMatching(/^STEP_NOT_IN_V1 steps\[15\]: 'parallelMulticast'/)])
+    expect(results[1].openIssues).toEqual([expect.stringMatching(/^STEP_NOT_IN_V1 steps\[15\]: 'contentFilter'/)])
     expect(results[2]).toMatchObject({ valid: false, errors: [expect.stringMatching(/^STEP_NOT_IN_V1 steps\[15\]/)] })
     expect(results[3]).toMatchObject({ saved: true, exceptionSteps: ['0. Set Error (contentModifier)'] })
     expect(results[3].openIssues).toBeUndefined()
@@ -1272,7 +1272,7 @@ describe('fewer and smaller model inputs', () => {
     expect(content.length).toBeLessThan(5200) // ~4.9k: before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
     const result = JSON.parse(content)
     expect(Object.keys(result.format.steps)).toEqual(['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'writeVariables', 'requestReplyHttp'])
-    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail', 'mapping'])
+    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast'])
     expect(result.rules).toBeUndefined()
   })
 
@@ -1283,7 +1283,7 @@ describe('fewer and smaller model inputs', () => {
     expect(Object.keys(result.format.steps)).toEqual(expect.arrayContaining(['splitter', 'gather', 'processCall']))
     expect(result.format.steps.router).toBeUndefined()
     expect(result.rules.splitting).toMatch(/^## Splitters and local processes/)
-    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'soap', 'mail', 'mapping'])
+    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'soap', 'mail', 'mapping', 'multicast'])
     // the next message has the section in the prompt, and the tool sends no rules twice
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['splitting'] })).mockResolvedValueOnce(answer('ok'))
     await chat({ sessionId: first.sessionId, message: 'ok' })
@@ -1292,7 +1292,7 @@ describe('fewer and smaller model inputs', () => {
   })
 
   test('getSupportedSteps names every field of the schema (all topics)', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['routing', 'splitting', 'soap', 'mail', 'mapping'] })).mockResolvedValueOnce(answer('ok'))
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast'] })).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     const content = llm.chat.mock.calls.at(-1)[0].messages.at(-1).content
     const { format } = JSON.parse(content)

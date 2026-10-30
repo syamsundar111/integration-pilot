@@ -265,7 +265,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     if (!(a.type === 'HTTPS' && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
 
   const stepFrom = (s, where) =>
-    SUPPORTED_STEPS.includes(s.type) && s.type !== 'router'
+    SUPPORTED_STEPS.includes(s.type) && s.type !== 'router' && s.type !== 'multicast'
       ? attempt(() => toStep(s, parsed.scripts || [], parsed.resourceFiles || [], where))
       : (blockers.push(`${where} '${s.name}': ${s.activityType || s.type} is not supported by the spec`), null)
   const END_EVENTS = { message: 'message', escalation: 'escalation', error: 'error' } // terminate: not in the spec
@@ -293,9 +293,15 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
       }
     })
   })
-  const steps = (routed && !routed.unsupported ? routed.steps : parsed.steps || []).map((s, i) =>
-    s.type === 'router' && routed && !routed.unsupported ? routerFrom(s, `step ${i + 1}`) : stepFrom(s, `step ${i + 1}`)
-  )
+  const lineStep = (s, where) => (s.type === 'router' ? routerFrom(s, where) : s.type === 'multicast' ? multicastFrom(s, where) : stepFrom(s, where))
+  const multicastFrom = (m, where) => ({
+    type: 'multicast',
+    ...(m.name && { name: m.name }),
+    mode: m.mode,
+    ...(m.join && { join: m.join }),
+    branches: m.branches.map((b, j) => ({ ...(b.name && { name: b.name }), steps: b.steps.map((x, k) => lineStep(x, `${where} branch ${j + 1} step ${k + 1}`)) }))
+  })
+  const steps = (routed && !routed.unsupported ? routed.steps : parsed.steps || []).map((s, i) => (routed && !routed.unsupported ? lineStep(s, `step ${i + 1}`) : stepFrom(s, `step ${i + 1}`)))
 
   // local processes: routers as on the main line, plain End events only, steps a local process may hold
   const localProcesses = (parsed.localProcessSteps || []).map((lp) => {
@@ -349,10 +355,10 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
 
   // Resources the builder does not write (mappings, schemas, other scripts) would be deleted
   // XSLT files are kept as spec.resources (their content comes back in `resources`)
-  const routeSteps = (routed?.steps || []).filter((s) => s.type === 'router').flatMap((r) => r.routes.flatMap((x) => x.steps))
+  const nested = (list) => list.flatMap((s) => (s.type === 'router' ? s.routes.flatMap((x) => x.steps) : s.type === 'multicast' ? s.branches.flatMap((b) => [...b.steps, ...nested(b.steps)]) : []))
   const everyStep = [
     ...(parsed.steps || []),
-    ...routeSteps,
+    ...nested(routed?.steps || []),
     ...(parsed.exceptionSubprocess?.steps || []),
     ...(parsed.localProcessSteps || []).flatMap((lp) => lp.steps.flatMap((s) => [s, ...(s.routes || []).flatMap((r) => r.steps || [])]))
   ]
@@ -393,7 +399,8 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     rejoined.add(m[1])
     return { ...call, url: `{{${m[1]}}}` }
   }
-  const routeLists = (list) => list.filter((s) => s?.type === 'router').flatMap((r) => r.routes.map((x) => x.steps).filter(Boolean))
+  const routeLists = (list) =>
+    list.flatMap((s) => (s?.type === 'router' ? s.routes.map((x) => x.steps).filter(Boolean) : s?.type === 'multicast' ? s.branches.flatMap((b) => [b.steps, ...routeLists(b.steps)]) : []))
   const lines = [steps, ...localProcesses.map((lp) => lp.steps)]
   for (const list of [...lines, ...lines.flatMap(routeLists), exceptionSubprocess?.steps]) if (list) list.forEach((s, i) => (list[i] = s?.type === 'requestReplyHttp' ? rejoin(s) : s))
   if (end?.type === 'httpReceiver') end = rejoin(end)

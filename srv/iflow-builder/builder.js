@@ -149,7 +149,7 @@ const L = {
   SENDER_X: 37,
   RECEIVER_GAP: 80, // pool -> end receiver
   ABOVE_GAP: 60, // request-reply receivers above the pool -> pool
-  GATEWAY: 40, // router
+  GATEWAY: 40, // router, multicast, join
   LANE: 100, // main line -> route lanes below it, one per route with steps or an end
   MIN_POOL_W: 400,
   SUB_GAP: 30, // main flow -> exception subprocess below it
@@ -230,6 +230,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   // own column, so a receiver connector straight up (or down) never crosses another step; lanes: 0 is the line
   // itself, each route with steps or an end gets a lane below. A router's routes either end (their end event) or
   // stay open: the next element of the line (or its end) takes up every open route, which is how routes join again.
+  // A multicast's branches each get a lane, with their routers' routes in further lanes; the branches meet at its Join.
   const named = new Map([...names.flat, ...names.local].map((x) => [x.step, x]))
   const newLine = () => ({ nodes: [], flows: [], lanes: 0 })
   const addNode = (line, n, lane) => {
@@ -239,8 +240,8 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   }
   // target may come later: a route that continues without steps gets its flow now, so the router's routes keep
   // the spec's order (CPI evaluates them in order), and the next element of the line becomes its target
-  const connect = (line, source, target, route) => {
-    const f = { id: nextId('SequenceFlow'), source, target, route }
+  const connect = (line, source, target, route, branch) => {
+    const f = { id: nextId('SequenceFlow'), source, target, route, branch }
     source.outgoing.push(f.id)
     if (target) target.incoming.push(f.id)
     line.flows.push(f)
@@ -250,7 +251,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     if (o.pending) {
       o.pending.target = target
       target.incoming.push(o.pending.id)
-    } else connect(line, o.node, target, o.route)
+    } else connect(line, o.node, target, o.route, o.branch)
   }
   let endCount = 1 // End, End 2, End 3, ... (names given in the spec win)
   const endNode = (end, fallback) => ({
@@ -268,31 +269,47 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   /** Draws start -> steps (routers with their routes) -> the line's end; returns the end node (null when every route of the last router ends) */
   function drawLine(line, steps, start, { routeEnd, lineEnd }) {
     addNode(line, start, 0)
-    let open = [{ node: start }] // where the next element connects from (and the route, for a flow that leaves a router)
     const stepOn = (step, lane) => addNode(line, stepNode(step, named.get(step).name, named.get(step).system), lane)
-    for (const step of steps) {
-      if (step.type !== 'router') {
-        const n = stepOn(step, 0)
-        for (const o of open) reach(line, o, n)
-        open = [{ node: n }]
-        continue
-      }
-      const gateway = addNode(line, { kind: 'router', step, name: named.get(step).name, prefix: 'ExclusiveGateway', w: L.GATEWAY, h: L.GATEWAY }, 0)
-      for (const o of open) reach(line, o, gateway)
-      open = []
-      for (const route of step.routes) {
-        const lane = route.steps?.length || route.end ? ++line.lanes : 0
-        let from = { node: gateway, route: { route, router: step } }
-        for (const s of route.steps || []) {
-          const n = stepOn(s, lane)
-          connect(line, from.node, n, from.route)
-          from = { node: n }
+    // draws steps on one lane from where they connect (and the route or branch, for a flow that leaves a router or
+    // multicast); returns where the next element connects from
+    const drawSteps = (list, lane, from_) => {
+      let open = from_
+      for (const step of list) {
+        if (step.type === 'multicast') {
+          const multicast = addNode(line, { kind: 'multicast', step, name: named.get(step).name, prefix: 'ParallelGateway', w: L.GATEWAY, h: L.GATEWAY }, lane)
+          for (const o of open) reach(line, o, multicast)
+          const ends = step.branches.flatMap((branch, j) => drawSteps(branch.steps, ++line.lanes, [{ node: multicast, branch: { name: branch.name || `Branch ${j + 1}` } }]))
+          for (const n of line.nodes.slice(multicast.col + 1)) n.inBranch = true
+          const join = addNode(line, { kind: 'join', name: names.joins.get(step), prefix: 'ParallelGateway', w: L.GATEWAY, h: L.GATEWAY }, lane)
+          for (const o of ends) reach(line, o, join)
+          open = [{ node: join }]
+          continue
         }
-        if (route.end) connect(line, from.node, addNode(line, routeEnd(route.end), lane), from.route)
-        else if (from.node === gateway) open.push({ pending: connect(line, gateway, null, from.route) }) // continues at once: its flow now
-        else open.push(from)
+        if (step.type !== 'router') {
+          const n = stepOn(step, lane)
+          for (const o of open) reach(line, o, n)
+          open = [{ node: n }]
+          continue
+        }
+        const gateway = addNode(line, { kind: 'router', step, name: named.get(step).name, prefix: 'ExclusiveGateway', w: L.GATEWAY, h: L.GATEWAY }, lane)
+        for (const o of open) reach(line, o, gateway)
+        open = []
+        for (const route of step.routes) {
+          const routeLane = route.steps?.length || route.end ? ++line.lanes : lane
+          let from = { node: gateway, route: { route, router: step } }
+          for (const s of route.steps || []) {
+            const n = stepOn(s, routeLane)
+            connect(line, from.node, n, from.route)
+            from = { node: n }
+          }
+          if (route.end) connect(line, from.node, addNode(line, routeEnd(route.end), routeLane), from.route)
+          else if (from.node === gateway) open.push({ pending: connect(line, gateway, null, from.route) }) // continues at once: its flow now
+          else open.push(from)
+        }
       }
+      return open
     }
+    const open = drawSteps(steps, 0, [{ node: start }])
     const end = open.length ? addNode(line, lineEnd(), 0) : null
     for (const o of open) reach(line, o, end)
     for (const g of line.nodes.filter((n) => n.kind === 'router')) g.defaultFlow = line.flows.find((f) => f.source === g && f.route?.route.default)?.id
@@ -307,9 +324,10 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const { nodes, flows, lanes } = mainLine
 
   // --- layout ------------------------------------------------------------------------
-  // receivers of request-reply steps sit above the pool, in their step's column; the end receiver right of it
+  // receivers of request-reply steps sit above the pool, in their step's column; the end receiver right of it.
+  // In a multicast branch they sit below the pool: a line up would cross the branches above
   const hasReceiver = (n) => RECEIVER_STEPS.includes(n.step?.type)
-  const receiversAbove = nodes.some(hasReceiver)
+  const receiversAbove = nodes.some((n) => hasReceiver(n) && !n.inBranch)
   const poolY = L.POOL_Y + (receiversAbove ? L.PART_H + L.ABOVE_GAP : 0)
   const laneCy = (k) => poolY + L.POOL_H / 2 + k * L.LANE
   const cy0 = laneCy(0)
@@ -345,7 +363,10 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const processIds = new Map(locals.map((l) => [l.lp.name, l.id])) // a process call refers to the process id
   // the receivers of Send steps in the exception subprocess sit right below the main pool, in their step's column
   const subReceivers = sub ? sub.nodes.filter(hasReceiver) : []
-  let localY = poolY + poolH + (subReceivers.length ? L.ABOVE_GAP + L.PART_H : 0) + L.LOCAL_GAP
+  // the receivers of steps in multicast branches get their own row below that, as the columns of the two can overlap
+  const branchReceiverY = poolY + poolH + L.ABOVE_GAP + (subReceivers.length ? L.PART_H + L.ABOVE_GAP : 0)
+  const rowsBelow = (subReceivers.length ? 1 : 0) + (nodes.some((n) => hasReceiver(n) && n.inBranch) ? 1 : 0)
+  let localY = poolY + poolH + rowsBelow * (L.ABOVE_GAP + L.PART_H) + L.LOCAL_GAP
   for (const l of locals) {
     const k = locals.indexOf(l) + 1
     l.line = newLine()
@@ -455,8 +476,14 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   }
 
   // Request-reply receivers sit above the pool in their step's column (a straight connector up that crosses
-  // no other step and never the exception subprocess below); the end receiver right of the pool
-  for (const n of nodes.filter(hasReceiver)) {
+  // no other step and never the exception subprocess below); those of multicast branches below it; the end
+  // receiver right of the pool
+  for (const n of nodes.filter((x) => hasReceiver(x) && x.inBranch)) {
+    const { p, mf } = addReceiver(n, n.step, n.system, { x: n.x, y: branchReceiverY })
+    mf.from = [n.x + L.TASK_W / 2, n.y + L.TASK_H]
+    mf.to = [p.x + L.PART_W / 2, p.y]
+  }
+  for (const n of nodes.filter((x) => hasReceiver(x) && !x.inBranch)) {
     const { p, mf } = addReceiver(n, n.step, n.system, { x: n.x, y: poolY - L.ABOVE_GAP - L.PART_H })
     mf.from = [n.x + L.TASK_W / 2, n.y]
     mf.to = [p.x + L.PART_W / 2, p.y + L.PART_H]
@@ -487,6 +514,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   // a flow that leaves a router is a route: its name, expression type and condition (none on the default route)
   const flowXml_ = (f) => {
     const io = { ID: f.id, SOURCE: f.source.id, TARGET: f.target.id }
+    if (f.branch) return fill('iflw/branch-flow.xml', { ...io, NAME: escAttr(f.branch.name) })
     if (!f.route) return fill('iflw/sequence-flow.xml', io)
     const { route, router } = f.route
     const common = { ...io, NAME: escAttr(route.name), EXPRESSION_TYPE_VALUE: val(router.expressionType) }
@@ -602,7 +630,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       spec.trigger.type === 'httpsSender'
         ? { type: 'httpsSender', address: spec.trigger.address }
         : { type: 'timer', mode: spec.trigger.mode, ...(spec.trigger.mode === 'every' && { minutes: spec.trigger.minutes }) },
-    steps: nodes.filter((n) => n.kind === 'step' || n.kind === 'router').map((n) => ({ id: n.id, type: n.step.type, name: n.name, ...(n.lane && { route: true }) })),
+    steps: nodes.filter((n) => ['step', 'router', 'multicast'].includes(n.kind)).map((n) => ({ id: n.id, type: n.step.type, name: n.name, ...(n.lane && { route: true }) })),
     end: spec.end.type === 'httpReceiver' ? { type: 'httpReceiver', system: names.endSystem, url: spec.end.url } : { type: 'none' },
     exceptionSubprocess: sub
       ? { id: sub.id, name: sub.name, steps: subNodes.filter((n) => n.kind === 'step').map((n) => ({ id: n.id, type: n.step.type, name: n.name })) }
@@ -639,6 +667,11 @@ function nodeToXml(n) {
   if (n.kind === 'localEnd') return fill('iflw/end-local.xml', { ...common, INCOMING: incoming })
   if (n.kind === 'end') return fill(END_TEMPLATES[n.event || 'message'], { ...common, INCOMING: incoming, CATEGORY_VALUE: val(n.category || 'Others') })
   if (n.kind === 'router') return fill('iflw/router.xml', { ...common, DEFAULT: n.defaultFlow, INCOMING: incoming, OUTGOING: outgoing })
+  if (n.kind === 'join') return fill('iflw/join.xml', { ...common, INCOMING: incoming, OUTGOING: outgoing })
+  if (n.kind === 'multicast')
+    return n.step.mode === 'sequential'
+      ? fill('iflw/multicast-sequential.xml', { ...common, INCOMING: incoming, OUTGOING: outgoing, ROUTING_SEQUENCE_VALUE: val(n.outgoing.map((id, i) => `<row><cell>${i + 1}</cell><cell>${id}</cell></row>`).join('')) })
+      : fill('iflw/multicast-parallel.xml', { ...common, INCOMING: incoming, OUTGOING: outgoing })
 
   const io = { ...common, INCOMING: incoming, OUTGOING: outgoing }
   const s = n.step

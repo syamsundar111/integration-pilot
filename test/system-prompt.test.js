@@ -312,3 +312,18 @@ describe('system prompt: mappings (phase 4)', () => {
     expect(mapping).toMatch(/It only comes from an imported or existing iFlow.*keep such a step as it is, and never create one/)
   })
 })
+
+describe('system prompt: multicast (phase 9)', () => {
+  const multicast = sectionFlat('multicast')
+  test('the core prompt points to the topic, and the section has the rules', () => {
+    expect(flat).toMatch(/a `multicast` step runs several branches, in parallel or in sequence/)
+    expect(flat).toMatch(/call `getSupportedSteps` with `topics: \["multicast"\]` first/)
+    expect(flat).not.toMatch(/Multicast and join are not supported/)
+    expect(multicast).toMatch(/\*\*The next step after the multicast must be a `gather`\*\*/)
+    expect(multicast).toMatch(/never add a Join as a step/)
+    expect(multicast).toMatch(/there is no router after which a `gather` follows in the branch/)
+    expect(multicast).toMatch(/use a `processCall` to a local process that contains the router/)
+    expect(multicast).toMatch(/exactly one route of a router in a branch continues, every other route has an `end`/)
+  })
+})
+

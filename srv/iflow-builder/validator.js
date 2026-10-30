@@ -12,11 +12,11 @@ const specSteps = require('./spec-steps')
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping']
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping', 'multicast']
 // steps with a receiver of their own (a participant and an adapter)
 const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'sendMail']
-// main line only: not inside routes, the exception subprocess or local processes
-const MAIN_LINE_ONLY = ['router', 'splitter', 'gather']
+// not inside routes, the exception subprocess or local processes
+const MAIN_LINE_ONLY = ['router', 'splitter', 'gather', 'multicast']
 // Steps allowed in the exception subprocess (of the receivers only a Send step: no reply to wait for; Write Variables
 // only in the main flow so far)
 const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail', 'messageMapping', 'xsltMapping']
@@ -27,7 +27,7 @@ const MAX_MAIN_STEPS = 50 // per process: the main flow and each local process, 
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
 
 // Step kinds people (and LLMs) ask for that v1 deliberately does not build
-const NOT_IN_V1 = /gateway|multicast|join|aggregat|filter|sequential|parallel/i
+const NOT_IN_V1 = /gateway|aggregat|filter/i
 // Error handling is supported, but as the top-level exceptionSubprocess field, not as a step
 const EXCEPTION_STEP = /exception|error|subprocess|catch/i
 // Start and end events are not steps: the trigger and the end are top-level fields
@@ -48,11 +48,13 @@ const DEFAULT_STEP_NAMES = {
   loopingProcessCall: 'Looping Process Call',
   sendMail: 'Send',
   messageMapping: 'Message Mapping',
-  xsltMapping: 'XSLT Mapping'
+  xsltMapping: 'XSLT Mapping',
+  parallelMulticast: 'Parallel Multicast',
+  sequentialMulticast: 'Sequential Multicast'
 }
 /** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call, any Request Reply counts as one */
 const defaultKey = (s) =>
-  s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type
+  s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type
 const DEFAULT_EXCEPTION_SUBPROCESS_NAME = 'Exception Subprocess 1'
 
 const GROOVY_IMPORT = /import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Message\s*;?/
@@ -77,7 +79,8 @@ function effectiveNames(spec) {
   const isStep = (x) => x.step && typeof x.step === 'object'
   const flatMain = specSteps.mainSteps(spec).filter(isStep) // main flow with the steps inside routes
   const flatLocal = specSteps.localSteps(spec).filter(isStep)
-  const explicit = new Set([...flatMain.map((x) => x.step), ...sub, ...flatLocal.map((x) => x.step)].map((s) => s?.name).filter(Boolean))
+  const multicasts = flatMain.map((x) => x.step).filter((s) => s.type === 'multicast')
+  const explicit = new Set([...flatMain.map((x) => x.step), ...sub, ...flatLocal.map((x) => x.step)].map((s) => s?.name).concat(multicasts.map((s) => s.join)).filter(Boolean))
   // Defaults count per type across the main flow, the exception subprocess and the local processes
   // ("Content Modifier 1", "… 2") and skip names given explicitly
   const name = (s) => {
@@ -90,6 +93,8 @@ function effectiveNames(spec) {
   }
   // names in flow order (a router's route steps right after it), so defaults count as the flow reads
   const named = new Map(flatMain.map((x) => [x.step, name(x.step)]))
+  // the Join a multicast's branches meet at: Join 1, Join 2, ...
+  const joins = new Map(multicasts.map((s) => [s, s.join || name({ type: 'Join' })]))
   const steps = main.map((s) => named.get(s))
   const exception = sub.map(name)
   for (const x of flatLocal) named.set(x.step, name(x.step))
@@ -103,7 +108,7 @@ function effectiveNames(spec) {
   const local = flatLocal.map(withNames)
   const endSystem = spec.end?.type === 'httpReceiver' ? spec.end.system || 'Receiver' : null
   const exceptionSubprocess = spec.exceptionSubprocess ? spec.exceptionSubprocess.name || DEFAULT_EXCEPTION_SUBPROCESS_NAME : null
-  return { steps, systems, flat, local, endSystem, exceptionSubprocess, exceptionSteps: exception, exceptionSystems }
+  return { steps, systems, flat, local, joins, endSystem, exceptionSubprocess, exceptionSteps: exception, exceptionSystems }
 }
 
 /**
@@ -206,7 +211,7 @@ function walkStrings(node, path, fn) {
  * and the value of a constant header or property (an externalized value; the other sources name a header,
  * property, variable or XPath)
  */
-const STEP_PATH = String.raw`(steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\]|localProcesses\[\d+\]\.steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?)`
+const STEP_PATH = String.raw`(steps\[\d+\](\.branches\[\d+\]\.steps\[\d+\])?(\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\]|localProcesses\[\d+\]\.steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?)`
 const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId|server|to)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
 
 /**
@@ -224,16 +229,21 @@ function validate(spec, { attachments = [] } = {}) {
 
   // Unsupported step/trigger/end types get one clear message instead of schema noise
   const supportedList = SUPPORTED_STEPS.join(', ')
-  for (const { step: s, where, ptr, route } of specSteps.mainSteps(spec)) {
+  for (const { step: s, where, ptr, route, branch } of specSteps.mainSteps(spec)) {
     const type = s?.type
     if (route && type === 'router') {
       skip.push(ptr)
-      err('NESTED_ROUTER', `${where}: a router inside a route is not supported — routers sit on the main line only; put the routing on the main line, or decide it in a groovyScript that sets a property for the next router`)
+      err('NESTED_ROUTER', `${where}: a router inside a route is not supported — routers sit on the main line or a multicast branch; put the routing there, or decide it in a groovyScript that sets a property for the next router`)
       continue
     }
     if (route && MAIN_LINE_ONLY.includes(type)) {
       skip.push(ptr)
-      err('MAIN_LINE_ONLY', `${where}: a ${type} inside a route is not supported — splitters and gathers sit on the main line only`)
+      err('MAIN_LINE_ONLY', `${where}: a ${type} inside a route is not supported — splitters and gathers sit on the main line or a multicast branch, multicasts on the main line`)
+      continue
+    }
+    if (branch && type === 'multicast') {
+      skip.push(ptr)
+      err('NESTED_MULTICAST', `${where}: a multicast inside a branch is not supported — multicasts sit on the main line; call a local process, or run them one after the other`)
       continue
     }
     if (!type || SUPPORTED_STEPS.includes(type)) continue
@@ -246,6 +256,8 @@ function validate(spec, { attachments = [] } = {}) {
     else if (/mapping/i.test(type)) err('USE_MAPPING', `${where}: '${type}' — a Message Mapping is { "type": "messageMapping", "mapping": "<artifact id>" }`)
     else if (/soap/i.test(type)) err('USE_SOAP', `${where}: '${type}' — a SOAP call is { "type": "requestReplySoap", "url", "authType": "Basic", "credentialName", "proxyType": "On-Premise", "locationId"? }`)
     else if (/mail|smtp/i.test(type)) err('USE_MAIL', `${where}: '${type}' — a mail is { "type": "sendMail", "server": "host:port", "credentialName", "from", "to", "subject", "body"? }`)
+    else if (/multicast|join|sequential|parallel/i.test(type))
+      err('USE_MULTICAST', `${where}: '${type}' — a multicast is { "type": "multicast", "mode": "parallel"|"sequential", "join"?, "branches": [{ "name"?, "steps": [...] }, ...] }, and the next step is a { "type": "gather" }; the builder adds the Join`)
     else if (/gather/i.test(type)) err('USE_GATHER', `${where}: '${type}' — a gather is { "type": "gather" } (Combine), or with "source" and "target" (Combine at XPath), after a splitter`)
     else if (END_STEP.test(type))
       err('END_AS_STEP', `${where}: '${type}' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end' (or a route's 'end'), e.g. { "type": "none" }`)
@@ -259,7 +271,7 @@ function validate(spec, { attachments = [] } = {}) {
     else if (NOT_IN_V1.test(type))
       err(
         'STEP_NOT_IN_V1',
-        `${where}: '${type}' is not supported yet (no multicast or join). Supported step types: ${supportedList}.`
+        `${where}: '${type}' is not supported yet. Supported step types: ${supportedList}.`
       )
     else err('UNKNOWN_STEP', `${where}: unknown step type '${type}'. Supported step types: ${supportedList}.`)
   }
@@ -376,6 +388,7 @@ function validate(spec, { attachments = [] } = {}) {
     ...names.flat.map((x) => [x.name, x.where, x.step]),
     ...names.exceptionSteps.map((n, i) => [n, `exceptionSubprocess.steps[${i}]`, subSteps[i]]),
     ...names.local.map((x) => [x.name, x.where, x.step]),
+    ...[...names.joins.values()].map((n) => [n, 'a multicast join', null]),
     [names.exceptionSubprocess, 'exceptionSubprocess.name', null]
   ]
   const fix = (hits) => {
@@ -387,7 +400,7 @@ function validate(spec, { attachments = [] } = {}) {
     }
     return same ? `the same step was added twice: remove ${last} (${remove(last)})` : `rename all but one, or remove the extra step (${remove(last)})`
   }
-  for (const d of dupes([...names.flat.map((x) => x.name), ...names.exceptionSteps, ...names.local.map((x) => x.name), names.exceptionSubprocess])) {
+  for (const d of dupes([...names.flat.map((x) => x.name), ...names.exceptionSteps, ...names.local.map((x) => x.name), ...names.joins.values(), names.exceptionSubprocess])) {
     const hits = namedAt.filter(([n]) => n === d)
     err(
       'DUPLICATE_STEP_NAME',
@@ -405,7 +418,9 @@ function validate(spec, { attachments = [] } = {}) {
   // --- end events: an escalation category only on an Escalation End, and one the references contain ---
   const routeEnds = (list, prefix) =>
     list.flatMap((r, i) => (r?.type === 'router' && Array.isArray(r.routes) ? r.routes.map((x, j) => [`${prefix}[${i}].routes[${j}].end`, x?.end]) : []))
-  const ends = [['end', spec.end], ['exceptionSubprocess.end', spec.exceptionSubprocess?.end], ...routeEnds(steps, 'steps')].filter(([, e]) => isObj(e))
+  // the steps of the multicast branches on the main line: [list, its path]
+  const branchLines = steps.flatMap((m, i) => (m?.type === 'multicast' && Array.isArray(m.branches) ? m.branches.filter(isObj).map((b, j) => [Array.isArray(b.steps) ? b.steps.filter(isObj) : [], `steps[${i}].branches[${j}].steps`]) : []))
+  const ends = [['end', spec.end], ['exceptionSubprocess.end', spec.exceptionSubprocess?.end], ...routeEnds(steps, 'steps'), ...branchLines.flatMap(([list, prefix]) => routeEnds(list, prefix))].filter(([, e]) => isObj(e))
   // a route in a local process ends with the plain End of a local process (the only end event the references have there)
   locals.forEach((p, i) => {
     for (const [where, e] of routeEnds(Array.isArray(p.steps) ? p.steps : [], `localProcesses[${i}].steps`).filter(([, e]) => isObj(e)))
@@ -428,7 +443,7 @@ function validate(spec, { attachments = [] } = {}) {
     const count = specSteps.lineSteps(list, '').length
     if (count > MAX_MAIN_STEPS && list.length <= MAX_MAIN_STEPS) err('TOO_MANY_STEPS', tooMany(`localProcesses[${i}] '${p.name}'`, count))
   })
-  /** The router rules for one line: the main line, or a local process (which has no end of its own to set) */
+  /** The router rules for one line: the main line, a multicast branch, or a local process (the last two have no end of their own to set) */
   const checkRouters = (list, prefix, isMain) =>
     list.forEach((r, i) => {
       if (r?.type !== 'router' || !Array.isArray(r.routes)) return
@@ -455,14 +470,39 @@ function validate(spec, { attachments = [] } = {}) {
       }
     })
   checkRouters(steps, 'steps', true)
+  for (const [list, prefix] of branchLines) {
+    checkRouters(list, prefix, false)
+    const last = list.at(-1)
+    if (last?.type === 'router' && Array.isArray(last.routes) && last.routes.length && last.routes.every((x) => x?.end))
+      err('BRANCH_MUST_REACH_JOIN', `${prefix}[${list.length - 1}]: every route ends, so this branch never reaches the Join — let a route continue (no 'end')`)
+    // the tenant check of phase 9: with two continuing routes CPI marks the Join with "Multicast does not exist for join"
+    list.forEach((r, i) => {
+      const continuing = r.type === 'router' && Array.isArray(r.routes) ? r.routes.filter((x) => isObj(x) && !x.end) : []
+      if (continuing.length > 1)
+        err('BRANCH_ROUTES_JOIN', `${prefix}[${i}]: the routes ${continuing.map((x) => `'${x.name}'`).join(', ')} all continue, but CPI does not accept routes that join again inside a multicast branch — let at most one route continue to the Join, and give the others an 'end'`)
+    })
+  }
   locals.forEach((p, i) => checkRouters(Array.isArray(p.steps) ? p.steps : [], `localProcesses[${i}].steps`, false))
 
-  // --- splitters and gathers: main line; a gather closes the split of the splitter before it -------------
+  // --- splitters and gathers: a gather closes the split of the splitter before it, or follows a multicast --
+  // In a branch: every split closes before the Join (CPI: "always use gather in between splitter - join"), and no
+  // router comes before a gather: the tenant check of phase 9 showed CPI refuses it even if only one route reaches it
+  const checkSplits = (list, prefix, inBranch) => {
   let split = null // [splitter, path] whose items are still split
   let routersInSplit = [] // paths of the routers since that splitter: CPI refuses a router before its gather
-  steps.forEach((s, i) => {
-    const where = `steps[${i}]`
-    if (s?.type === 'router' && split) routersInSplit.push(where)
+  list.forEach((s, i) => {
+    const where = `${prefix}[${i}]`
+    if (s?.type === 'router' && (split || inBranch)) routersInSplit.push(where)
+    if (s?.type === 'multicast') {
+      if (split) err('MULTICAST_IN_SPLIT', `${where}: a multicast between the splitter ${split[1]} and its gather is not supported — add a gather before the multicast, or call a local process per item`)
+      const next = list[i + 1]
+      if (next?.type !== 'gather') err('JOIN_WITHOUT_GATHER', `${where}: the step after a multicast must be a { "type": "gather" }, which combines the branches after the Join`)
+      else if (next.source || next.target) err('JOIN_GATHER_COMBINE', `${prefix}[${i + 1}]: a gather after a multicast's Join is Combine — remove 'source' and 'target'`)
+    }
+    if (s?.type === 'gather' && list[i - 1]?.type === 'multicast') {
+      valueCheck('Gather', [['messageType', 'SameXMLFormat'], ['aggregationAlgorithm', cpiValues.GATHER_COMBINE]], where)
+      return
+    }
     if (s?.type === 'splitter') {
       if (split) err('NESTED_SPLIT', `${where}: a splitter between the splitter ${split[1]} and its gather is not supported (no nested splits) — add a gather before this splitter, or split once`)
       else split = [s, where]
@@ -474,7 +514,7 @@ function validate(spec, { attachments = [] } = {}) {
       for (const at of routersInSplit)
         err(
           'ROUTER_IN_SPLIT',
-          `${at}: CPI does not accept a router between a splitter and its gather (${where}) — route per item inside a local process instead: a processCall here, and a local process that contains the router (a router after a splitter without a gather is fine)`
+          `${at}: CPI does not accept a router between a splitter and its gather (${where}), even if only one route reaches it — route per item inside a local process instead: a processCall here, and a local process that contains the router${inBranch ? '' : ' (a router after a splitter without a gather is fine)'}`
         )
       split = null
       routersInSplit = []
@@ -482,6 +522,10 @@ function validate(spec, { attachments = [] } = {}) {
       else valueCheck('Gather', [['messageType', 'SameXMLFormat'], ['aggregationAlgorithm', cpiValues.gatherAlgorithm(s)]], where)
     }
   })
+  if (inBranch && split) err('SPLIT_WITHOUT_GATHER', `${split[1]}: a split inside a branch must be closed by a gather before the Join — add a { "type": "gather" } to this branch`)
+  }
+  checkSplits(steps, 'steps', false)
+  for (const [list, prefix] of branchLines) checkSplits(list, prefix, true)
 
   // --- process calls: a local process that exists; a looping one with a NonXML condition -------------------
   const processNames = new Set(locals.map((p) => p.name))

@@ -369,9 +369,10 @@ function mainPath({ startNode, nodes, flows }) {
  * A branching flow as the spec holds it: main-line steps, where a router's routes either end or continue
  * with the step after the router (every continuing route joins there). Route steps are parsed steps, a
  * router is { type: 'router', name, expressionType, routes: [{ name, condition, default, steps, end }] }
- * with the default route last; end: { kind, name } of an ending route. When the flow does not fit (a
- * router inside a route, a route that goes back or joins elsewhere, a fork that is not a router, a
- * Terminate End): { unsupported: reason }.
+ * with the default route last; end: { kind, name } of an ending route. A multicast on the main line is
+ * { type: 'multicast', name, mode, join, branches: [{ name, steps }] }: every branch runs to one Join, the line
+ * goes on after it. When the flow does not fit (a router inside a route, a route that goes back or joins
+ * elsewhere, a fork that is not a router or multicast, a Terminate End): { unsupported: reason }.
  * @returns {{ steps: object[], endNode: Element|null } | { unsupported: string }}
  */
 function routedFlow({ startNode, nodes, flows }, stepAt, { local = false } = {}) {
@@ -402,15 +403,26 @@ function routedFlow({ startNode, nodes, flows }, stepAt, { local = false } = {})
     return { seq, loop: true }
   }
 
-  const steps = []
   const onMain = new Set()
-  let next = out(startNode.getAttribute('id'))
-  if (next.length !== 1) return fail(`the start event has ${next.length} outgoing flows`)
-  let id = next[0].target
+  // sequential: the routing sequence; parallel: by name (Branch 1, Branch 2; the outgoing order is not the branch order)
+  const branchFlows = (n) => {
+    const sequence = [...String(props(n).routingSequenceTable || '').matchAll(/<cell>\d+<\/cell><cell>([^<]+)<\/cell>/g)].map((m) => m[1])
+    const rank = (f) => (sequence.includes(f.id) ? sequence.indexOf(f.id) : sequence.length)
+    return [...out(n.getAttribute('id'))].sort((a, b) => (sequence.length ? rank(a) - rank(b) : String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true })))
+  }
+  /** A line from its first node: to the end of the flow, or in a multicast's branch to the Join ({ joinId }) */
+  const line = (first, inBranch = false) => {
+  const steps = []
+  let next
+  let id = first
   let endNode = null
   while (id) {
     const n = nodes[id]
     if (!n) return fail('a flow leads nowhere')
+    if (n.localName === 'parallelGateway' && inBranch) {
+      if (props(n).activityType === 'Join') return { steps, joinId: id }
+      return fail(`${label(n)} is a multicast inside a multicast's branch`)
+    }
     if (onMain.has(id)) return fail(`the flow goes back to ${label(n)}`)
     onMain.add(id)
     if (n.localName === 'endEvent') {
@@ -418,7 +430,26 @@ function routedFlow({ startNode, nodes, flows }, stepAt, { local = false } = {})
       endNode = n
       break
     }
-    if (n.localName === 'parallelGateway') return fail(`${label(n)} is a multicast or join`)
+    if (n.localName === 'parallelGateway') {
+      const activity = props(n).activityType
+      if (local || !['Multicast', 'SequentialMulticast'].includes(activity)) return fail(`${label(n)} is a multicast or join`)
+      const branches = []
+      let joinId = null
+      for (const f of branchFlows(n)) {
+        const b = line(f.target, true)
+        if (b.unsupported) return b
+        if (!b.joinId) return fail(`a branch of ${label(n)} does not reach a Join`)
+        if (joinId && b.joinId !== joinId) return fail(`the branches of ${label(n)} do not meet at one Join`)
+        joinId = b.joinId
+        branches.push({ name: f.name || null, steps: b.steps })
+      }
+      if (!joinId) return fail(`${label(n)} has no branches`)
+      steps.push({ ...stepAt(n), type: 'multicast', mode: activity === 'Multicast' ? 'parallel' : 'sequential', join: nodes[joinId].getAttribute('name') || null, branches })
+      next = out(joinId)
+      if (next.length !== 1) return fail(`${label(nodes[joinId])} has ${next.length} outgoing flows`)
+      id = next[0].target
+      continue
+    }
     if (n.localName !== 'exclusiveGateway') {
       steps.push(stepAt(n))
       next = out(id)
@@ -445,7 +476,7 @@ function routedFlow({ startNode, nodes, flows }, stepAt, { local = false } = {})
     // no route continues, but one runs on to the line's end: on the main line the only route that ends with a Message
     // End, in a local process (where every End is plain) the default route. That route is the one that continues (the
     // builder writes both shapes alike; this is the spec's usual one, and an update keeps it)
-    if (!continuing.length) {
+    if (!continuing.length && !inBranch) {
       const toMessageEnd = routes.filter((r) => r.endNode && endKind(r.endNode) === 'message')
       const runsOn = local ? toMessageEnd.find((r) => r.f.id === n.getAttribute('default')) : toMessageEnd.length === 1 ? toMessageEnd[0] : null
       if (runsOn) {
@@ -489,6 +520,11 @@ function routedFlow({ startNode, nodes, flows }, stepAt, { local = false } = {})
     id = join
   }
   return { steps, endNode }
+  }
+
+  const started = out(startNode.getAttribute('id'))
+  if (started.length !== 1) return fail(`the start event has ${started.length} outgoing flows`)
+  return line(started[0].target)
 }
 
 /** 'escalation', 'error', 'terminate' or 'message' (a plain or message end) */

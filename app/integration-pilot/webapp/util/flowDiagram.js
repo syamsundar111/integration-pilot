@@ -22,7 +22,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     requestReplySoap: 'Request Reply (SOAP)',
     sendMail: 'Send (Mail)',
     messageMapping: 'Message Mapping',
-    xsltMapping: 'XSLT Mapping'
+    xsltMapping: 'XSLT Mapping',
+    multicast: 'Multicast'
   }
   const DEFAULT_NAMES = {
     contentModifier: 'Content Modifier',
@@ -38,11 +39,13 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     loopingProcessCall: 'Looping Process Call',
     sendMail: 'Send',
     messageMapping: 'Message Mapping',
-    xsltMapping: 'XSLT Mapping'
+    xsltMapping: 'XSLT Mapping',
+    parallelMulticast: 'Parallel Multicast',
+    sequentialMulticast: 'Sequential Multicast'
   }
   /** The key of a step's default name, as the builder counts them (validator.js defaultKey) */
   const defaultKey = (s) =>
-    s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type
+    s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type
   const ICONS = {
     https: 'sap-icon://internet-browser',
     timer: 'sap-icon://fob-watch',
@@ -61,6 +64,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     xsltMapping: 'sap-icon://map-2',
     writeVariables: 'sap-icon://save',
     router: 'sap-icon://split',
+    multicast: 'sap-icon://org-chart',
     splitter: 'sap-icon://expand-group',
     gather: 'sap-icon://collapse-group',
     processCall: 'sap-icon://process',
@@ -89,7 +93,9 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
             ? s.mapping || s.file
             : s.type === 'xsltMapping'
               ? s.file
-              : undefined
+              : s.type === 'multicast'
+                ? s.mode === 'sequential' ? 'Sequential' : 'Parallel'
+                : undefined
 
   /** Marks the steps after a splitter up to its gather (or the end) as per item */
   function markPerItem(steps) {
@@ -111,6 +117,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       counters[key] = (counters[key] || 0) + 1
       return s.name || `${DEFAULT_NAMES[key] || s.type} ${counters[key]}`
     }
+    // a branch's steps with the steps inside its routes, in flow order as the builder counts them
+    const branchNames = (list) => list.flatMap((s) => [nameOf(s), ...(s.type === 'router' ? (s.routes || []).flatMap((r) => (r.steps || []).map(nameOf)) : [])])
     return {
       trigger: spec.trigger.type === 'httpsSender' ? { kind: 'https', label: 'HTTPS', detail: spec.trigger.address } : { kind: 'timer', label: 'Timer', detail: timerText(spec.trigger) },
       steps: markPerItem(spec.steps.map((s) => {
@@ -136,6 +144,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
               end: r.end ? r.end.event || 'message' : null
             }))
           }
+        if (s.type === 'multicast')
+          return { type: s.type, name, detail: detailOf(s), branches: (s.branches || []).map((b, i) => ({ name: b.name || `Branch ${i + 1}`, steps: branchNames(b.steps || []) })) }
         return { type: s.type, name, detail: detailOf(s) }
       })),
       end: {
@@ -200,6 +210,10 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       routes:
         routed && s.type === 'router'
           ? s.routes.map((r) => ({ name: r.name, condition: r.default ? null : r.condition, steps: r.steps.map((x) => x.name), end: r.end ? r.end.kind : null }))
+          : undefined,
+      branches:
+        routed && s.type === 'multicast'
+          ? s.branches.map((b) => ({ name: b.name, steps: b.steps.flatMap((x) => [x.name, ...(x.type === 'router' ? x.routes.flatMap((r) => r.steps.map((y) => y.name)) : [])]) }))
           : undefined
     })
     return {
@@ -240,6 +254,10 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       )
       .join('')}</div>`
 
+  /** The branches of a multicast, one line each: name and steps, up to the Join */
+  const branchesHtml = (branches) =>
+    `<div class="ipFlowRoutes">${branches.map((b) => `<div class="ipFlowRoute"><span class="ipFlowRouteName">${esc(b.name)}</span> ${[...b.steps, 'Join'].map(esc).join(' → ')}</div>`).join('')}</div>`
+
   function receiver(r) {
     return `<div class="ipFlowReceiver" title="${esc(r.detail || '')}">${icon('receiver')}<div><div class="ipFlowReceiverName">${esc(r.name)}</div>${
       r.detail ? `<div class="ipFlowMono">${esc(r.detail)}</div>` : ''
@@ -261,7 +279,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           s.name
         )}">${esc(s.name)}</div><div class="ipFlowStepType">${esc(STEP_LABELS[s.type] || s.type)}${s.perItem ? ' · per item' : ''}</div></div></div>${s.detail ? `<div class="ipFlowMono">${esc(s.detail)}</div>` : ''}</div>${
           s.receiver ? `<div class="ipFlowDash"></div>${receiver(s.receiver)}` : ''
-        }${s.routes ? routesHtml(s.routes) : ''}</div>`
+        }${s.routes ? routesHtml(s.routes) : ''}${s.branches ? branchesHtml(s.branches) : ''}</div>`
       )
     }
     if (!model.end.none) {

@@ -126,7 +126,7 @@ describe('allowed values (templates/reference-values.json)', () => {
 async function elementProps(zipBuffer, name) {
   const zip = await JSZip.loadAsync(zipBuffer)
   const iflw = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
-  const element = iflw.match(new RegExp(`<bpmn2:(callActivity|startEvent) id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:\\1>`))[0]
+  const element = iflw.match(new RegExp(`<bpmn2:(callActivity|startEvent|parallelGateway) id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:\\1>`))[0]
   return Object.fromEntries(
     [...element.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].filter((m) => !/^(cmdVariantUri|componentVersion)$/.test(m[1])).map((m) => [m[1], m[2] ?? ''])
   )
@@ -578,5 +578,139 @@ describe('Ref_Mapping: Message Mapping (artifact and inside the iFlow) and XSLT 
     expect(r.spec.steps.filter((s) => STEPS.includes(s.name))).toEqual(spec.steps.slice(1))
     expect(r.spec.resources).toBeUndefined()
     for (const f of Object.keys(attachments)) expect(r.attachments[f]).toBe(attachments[f])
+  })
+})
+
+describe('Ref_Multicast: Parallel and Sequential Multicast, Join and the Gather after it (phase 9)', () => {
+  const GATEWAYS = ['MC_Parallel', 'JN_Parallel', 'GA_Parallel', 'MC_Sequential', 'JN_Sequential', 'GA_Sequential', 'GA_Items']
+  const prop = (name, value) => ({ name, type: 'constant', value, datatype: 'java.lang.String' })
+  // test/reference-prompts/Ref_Multicast.txt, without RT_Item: CPI refuses a router between a splitter and its gather
+  const spec = {
+    id: 'Ref_Multicast',
+    name: 'Ref_Multicast',
+    packageId: 'PilotReference',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [
+      { type: 'contentModifier', name: 'CM_SetBody', properties: [prop('stop', 'false')], body: '<orders><order><id>1</id><type>A</type></order><order><id>2</id><type>B</type></order></orders>' },
+      {
+        type: 'multicast',
+        name: 'MC_Parallel',
+        mode: 'parallel',
+        join: 'JN_Parallel',
+        branches: [
+          { name: 'Branch 1', steps: [{ type: 'contentModifier', name: 'CM_BranchA', properties: [prop('branch', 'A')] }] },
+          {
+            name: 'Branch 2',
+            steps: [
+              {
+                type: 'router',
+                name: 'RT_Branch',
+                expressionType: 'NonXML',
+                routes: [{ name: 'R_Stop', condition: "${property.stop} = 'true'", end: { event: 'message', name: 'End_Stop' } }, { name: 'R_Go', default: true }]
+              },
+              { type: 'contentModifier', name: 'CM_BranchB', properties: [prop('branch', 'B')] }
+            ]
+          }
+        ]
+      },
+      { type: 'gather', name: 'GA_Parallel' },
+      {
+        type: 'multicast',
+        name: 'MC_Sequential',
+        mode: 'sequential',
+        join: 'JN_Sequential',
+        branches: [
+          { name: 'Branch 1', steps: [{ type: 'contentModifier', name: 'CM_SeqA', properties: [prop('seq', 'A')] }] },
+          { name: 'Branch 2', steps: [{ type: 'splitter', name: 'ITSPL_Items', kind: 'iterating', expression: '//order', stopOnException: false }, { type: 'gather', name: 'GA_Items' }] }
+        ]
+      },
+      { type: 'gather', name: 'GA_Sequential' }
+    ],
+    end: { type: 'none' }
+  }
+  const noIds = (x) => JSON.parse(JSON.stringify(x, (k, v) => (k === 'id' ? undefined : v)))
+
+  let builtZip, built, reference
+  beforeAll(async () => {
+    reference = await parse(readRef('Ref_Multicast.zip'))
+    builtZip = Buffer.from((await build(spec)).zipBase64, 'base64')
+    built = await parse(builtZip)
+  })
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('every property of the multicasts, joins and gathers is as in the reference', async () => {
+    for (const name of GATEWAYS) {
+      const want = await elementProps(readRef('Ref_Multicast.zip'), name)
+      const have = await elementProps(builtZip, name)
+      // generated flow ids: two rows, in the order of the branches
+      for (const p of [want, have]) if (p.routingSequenceTable) p.routingSequenceTable = p.routingSequenceTable.replace(/SequenceFlow_\d+/g, '(flow)')
+      expect([name, have]).toEqual([name, want])
+    }
+  })
+
+  test('the sequential routing table names the flows into its branches, in order', async () => {
+    const zip = await JSZip.loadAsync(builtZip)
+    const xml = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+    const table = (await elementProps(builtZip, 'MC_Sequential')).routingSequenceTable
+    const flows = [...table.matchAll(/SequenceFlow_\d+/g)].map((m) => m[0])
+    expect(flows.map((f) => xml.match(new RegExp(`id="${f}" name="([^"]+)"`))[1])).toEqual(['Branch 1', 'Branch 2'])
+    const ids = [...xml.matchAll(/ id="([^"]+)"/g)].map((m) => m[1])
+    expect(ids.filter((v, i) => ids.indexOf(v) !== i)).toEqual([]) // no id twice
+  })
+
+  test('the parallel multicast and its first gather parse the same from the reference and the built iFlow', () => {
+    const first = (p) => noIds(p.routed.steps.slice(1, 3))
+    expect(built.routed.unsupported).toBeUndefined()
+    expect(first(built)).toEqual(first(reference))
+    expect(reference.routed.steps[1].branches.map((b) => b.name)).toEqual(['Branch 1', 'Branch 2']) // not the outgoing order
+    expect(reference.routed.steps[3]).toMatchObject({ type: 'multicast', mode: 'sequential', join: 'JN_Sequential' })
+  })
+
+  test('an update of the built iFlow gives the same spec back (no blockers)', () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const r = specFromParsed(built, { packageId: 'PilotReference' })
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps).toEqual(spec.steps)
+  })
+
+  test('the reference itself cannot be updated: its RT_Item is a router before a gather', () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    expect(specFromParsed(reference, { packageId: 'PilotReference' }).blockers.join()).toMatch(/CPI does not accept a router between a splitter and its gather/)
+  })
+
+  test('routes that join again in a branch: Import makes the router a placeholder, an update is blocked', async () => {
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const cm = (name) => ({ type: 'contentModifier', name, properties: [prop('p', 'x')] })
+    // the shape the validator now refuses, as an iFlow from the tenant may still have it
+    let buildAny
+    jest.isolateModules(() => {
+      jest.doMock('../srv/iflow-builder/validator', () => ({ ...jest.requireActual('../srv/iflow-builder/validator'), validate: () => ({ valid: true, errors: [], warnings: [] }) }))
+      buildAny = require('../srv/iflow-builder/builder').build
+    })
+    jest.dontMock('../srv/iflow-builder/validator')
+    const zip = Buffer.from((await buildAny({ ...spec, steps: [spec.steps[0], { ...spec.steps[1], branches: [spec.steps[1].branches[0], { name: 'Branch 2', steps: [{ type: 'router', name: 'RT_Join', expressionType: 'NonXML', routes: [{ name: 'R_A', condition: "${property.stop} = 'a'", steps: [cm('CM_A')] }, { name: 'R_Go', default: true }] }, cm('CM_After')] }] }, spec.steps[2]] })).zipBase64, 'base64')
+    const parsed = await parse(zip)
+    expect(specFromParsed(parsed, { packageId: 'PilotReference' }).blockers.join()).toMatch(/routes 'R_A', 'R_Go' all continue/)
+    const r = await importIflow(zip, { fileName: 'Join.zip', packageId: 'PilotReference' })
+    expect(r).toMatchObject({ valid: true, errors: [], placeholders: 1 })
+    const branch = r.spec.steps[1].branches[1].steps
+    expect(branch.map((s) => s.name)).toEqual(['RT_Join', 'CM_After'])
+    expect(branch[0].description).toMatch(/^REPLACE WITH Router 'RT_Join' whose routes join again in a multicast branch, which CPI does not accept \(R_A .*CM_A; R_Go: no steps\)/)
+  })
+
+  test('Import keeps the multicasts; the split with a router in a branch becomes placeholders', async () => {
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const r = await importIflow(readRef('Ref_Multicast.zip'), { fileName: 'Ref_Multicast.zip', packageId: 'PilotReference' })
+    expect(r).toMatchObject({ valid: true, errors: [], placeholders: 2 })
+    expect(r.spec.steps.slice(0, 3)).toEqual(spec.steps.slice(0, 3))
+    const branch = r.spec.steps[3].branches[1].steps
+    expect(branch.map((s) => s.name)).toEqual(['ITSPL_Items', 'RT_Item', 'GA_Items'])
+    expect(branch[0].description).toMatch(/^REPLACE WITH Iterating Splitter 'ITSPL_Items' \(\/\/order\) without a gather in its branch/)
+    expect(branch[2].description).toMatch(/^REPLACE WITH Gather 'GA_Items' \(combine\) after a router in the split; move the routing into a local process/)
   })
 })

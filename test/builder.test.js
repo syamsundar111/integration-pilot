@@ -236,7 +236,7 @@ describe('builder', () => {
   })
 
   test('throws INVALID_SPEC with readable errors', async () => {
-    await expect(build(baseSpec({ steps: [{ type: 'parallelMulticast' }] }))).rejects.toMatchObject({ code: 'INVALID_SPEC', errors: [expect.stringContaining("'parallelMulticast' is not supported yet")] })
+    await expect(build(baseSpec({ steps: [{ type: 'contentFilter' }] }))).rejects.toMatchObject({ code: 'INVALID_SPEC', errors: [expect.stringContaining("'contentFilter' is not supported yet")] })
   })
 
   test('helpers: java date, properties escaping, manifest folding', () => {
@@ -567,6 +567,26 @@ describe('SOAP 1.x and Mail receivers (phase 3)', () => {
     const ids = [...doc.getElementsByTagName('*')].map((e) => e.getAttribute('id')).filter(Boolean)
     expect(ids.filter((v, i) => ids.indexOf(v) !== i)).toEqual([])
     for (const a of [alert, receiver('S1'), receiver('M1'), receiver('S2')]) for (const pool of [main, local]) expect(overlap(a, pool)).toBe(false)
+  })
+
+  test('layout: the receiver of a step in a multicast branch sits below the pool, straight down from its step, above any local pool', async () => {
+    const steps = [
+      { type: 'multicast', name: 'MC', mode: 'parallel', join: 'JN', branches: [{ steps: [soap('S3', 'SysS3')] }, { steps: [mail('M3', 'SysM3')] }] },
+      { type: 'gather', name: 'GA' }
+    ]
+    const { doc } = await built(baseSpec({ steps, end: { type: 'none' }, exceptionSubprocess: spec.exceptionSubprocess, localProcesses: [{ name: 'L', steps: [soap('S4', 'SysS4')] }] }))
+    const main = box(doc, 'Participant_Process_1')
+    const receiver = (name) => box(doc, flowOf(doc, name).getAttribute('targetRef'))
+    const local = box(doc, all(doc, 'participant').find((p) => p.getAttribute('name') === 'L').getAttribute('id'))
+    for (const name of ['S3', 'M3']) {
+      const step = box(doc, all(doc, 'serviceTask').find((t) => t.getAttribute('name') === name).getAttribute('id'))
+      expect(receiver(name).y).toBeGreaterThan(main.y + main.h)
+      expect(receiver(name).y + receiver(name).h).toBeLessThan(local.y)
+      expect(receiver(name).x + receiver(name).w / 2).toBe(step.x + step.w / 2)
+      expect(overlap(receiver(name), receiver('Alert'))).toBe(false)
+    }
+    const plain = await built(baseSpec({ steps: [{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }] }))
+    expect(main.y).toBe(box(plain.doc, 'Participant_Process_1').y) // no room kept above the pool
   })
 
   test('a parameter gets its reference in parameters.propdef; a literal does not', async () => {

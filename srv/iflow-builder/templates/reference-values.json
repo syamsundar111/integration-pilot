@@ -41,6 +41,11 @@
     "sourceType": {
       "constant": {
         "references": [
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Multicast",
           "Ref_Multicast_Enrich",
           "Ref_Multicast_Enrich",
           "Ref_Persistence",
@@ -134,6 +139,11 @@
     "datatype": {
       "java.lang.String": {
         "references": [
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Multicast",
           "Ref_Multicast_Enrich",
           "Ref_Multicast_Enrich",
           "Ref_Persistence",
@@ -276,23 +286,27 @@
   },
   "Router": {
     "expressionType": {
-      "NonXML": {
-        "references": [
-          "Ref_Router_Ends",
-          "Ref_Router_Ends"
-        ]
-      },
-      "": {
-        "references": [
-          "Ref_Router_Ends"
-        ]
-      },
       "XML": {
         "references": [
+          "Ref_Multicast",
+          "Ref_Multicast",
           "Ref_Router_Ends",
           "Ref_Router_Ends"
         ],
         "confirmed": "re-selected in Ref_Router_Ends (R_Other, the default route of RT_Xml, stored with its expression type), 2026-10-29"
+      },
+      "": {
+        "references": [
+          "Ref_Multicast",
+          "Ref_Router_Ends"
+        ]
+      },
+      "NonXML": {
+        "references": [
+          "Ref_Multicast",
+          "Ref_Router_Ends",
+          "Ref_Router_Ends"
+        ]
       }
     }
   },
@@ -300,6 +314,7 @@
     "exprType": {
       "XPath": {
         "references": [
+          "Ref_Multicast",
           "Ref_Structure",
           "Ref_Structure"
         ],
@@ -309,6 +324,7 @@
     "streaming": {
       "true": {
         "references": [
+          "Ref_Multicast",
           "Ref_Structure"
         ],
         "confirmed": "re-selected in Ref_Structure (ITSPL_Orders), 2026-10-29"
@@ -323,6 +339,7 @@
     "stopOnException": {
       "false": {
         "references": [
+          "Ref_Multicast",
           "Ref_Structure"
         ],
         "confirmed": "re-selected in Ref_Structure (ITSPL_Orders), 2026-10-29"
@@ -337,6 +354,7 @@
     "parallel": {
       "false": {
         "references": [
+          "Ref_Multicast",
           "Ref_Structure",
           "Ref_Structure"
         ],
@@ -346,21 +364,33 @@
   },
   "Gather": {
     "messageType": {
+      "SameXMLFormat": {
+        "references": [
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Structure",
+          "Ref_Structure"
+        ],
+        "confirmed": "XML (Same Format), re-selected in Ref_Structure (GA_Orders and GA_Combine), 2026-10-30"
+      },
       "DiffXMLFormat": {
         "references": [
           "Ref_Multicast_Enrich",
           "Ref_Multicast_Enrich"
         ]
-      },
-      "SameXMLFormat": {
-        "references": [
-          "Ref_Structure",
-          "Ref_Structure"
-        ],
-        "confirmed": "XML (Same Format), re-selected in Ref_Structure (GA_Orders and GA_Combine), 2026-10-30"
       }
     },
     "aggregationAlgorithm": {
+      "sap-identical-multi-mapping": {
+        "references": [
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Multicast",
+          "Ref_Structure"
+        ],
+        "confirmed": "Combine, re-selected in Ref_Structure (GA_Combine), 2026-10-30"
+      },
       "sap-pi-multi-mapping": {
         "references": [
           "Ref_Multicast_Enrich",
@@ -372,12 +402,6 @@
           "Ref_Structure"
         ],
         "confirmed": "Combine at XPath, re-selected in Ref_Structure (GA_Orders), 2026-10-29"
-      },
-      "sap-identical-multi-mapping": {
-        "references": [
-          "Ref_Structure"
-        ],
-        "confirmed": "Combine, re-selected in Ref_Structure (GA_Combine), 2026-10-30"
       }
     }
   },
@@ -441,6 +465,7 @@
       "NONE": {
         "references": [
           "Ref_Mapping",
+          "Ref_Multicast",
           "Ref_Multicast_Enrich",
           "Ref_Persistence",
           "Ref_Receivers",
@@ -462,6 +487,7 @@
       "Etc/GMT": {
         "references": [
           "Ref_Mapping",
+          "Ref_Multicast",
           "Ref_Multicast_Enrich",
           "Ref_Persistence",
           "Ref_Receivers",

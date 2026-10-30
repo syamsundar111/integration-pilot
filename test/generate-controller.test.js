@@ -395,6 +395,20 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(activeFor(base([{ type: 'jsonToXml', name: 'J' }, { type: 'messageMapping', name: 'MM', mapping: 'A' }])).xmlMappingText).toBe('')
   })
 
+  test('multicast cards (phase 9): the branches, their steps numbered by branch, the gather and the notes', () => {
+    const inBranch = { type: 'router', name: 'RT', expressionType: 'XML', routes: [{ name: 'R', condition: '/a = 1', steps: [cm('Y')], end: {} }, { name: 'D', default: true }] }
+    const active = activeFor(base([cm('CM_SetBody'), { type: 'multicast', name: 'MC', mode: 'sequential', join: 'JN', branches: [{ steps: [cm('A')] }, { name: 'Other', steps: [inBranch, { type: 'messageMapping', name: 'MM', mapping: 'X' }] }] }, { type: 'gather', name: 'GA' }]))
+    const card = (title) => active.stepCards.find((c) => c.title === title)
+    expect(card('2. MC')).toMatchObject({ type: 'Sequential Multicast', lines: 'Branch 1: 1 step\nOther: 2 steps\nThe branches run one after the other, in this order; they meet at JN' })
+    expect(card('2.B1.1 A')).toMatchObject({ type: 'Content Modifier · Branch 1' })
+    expect(card('2.B2.1.1.1 Y')).toMatchObject({ type: 'Content Modifier · Other, route R' })
+    expect(card('3. GA')).toMatchObject({ lines: 'Combines the branches after JN (XML, same format)' })
+    expect(active.xmlRouterText).toMatch(/on the routes of RT \(after MC\)/)
+    expect(active.xmlMappingText).toMatch(/input on MM \(after RT\)|input on MM \(after MC\)/)
+    expect(active.gatherText).toMatch(/^Exchange properties set in a multicast branch may not reach the other branches/)
+    expect(active.combineText).toMatch(/^After GA \(Combine\)/)
+  })
+
   test('an XML router after a Content Modifier (routers in between skipped) gets the XML input notice', () => {
     const nonXml = { type: 'router', name: 'RT_Check', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1' }, { name: 'D', default: true }] }
     expect(activeFor(base([cm('CM_SetInput'), nonXml, xmlRouter])).xmlRouterText).toMatch(/on the routes of RT_Type \(after CM_SetInput\): it cannot tell/)
