@@ -91,7 +91,7 @@ function parseTable(value) {
 
 function adapterOf(flow) {
   const p = props(flow.node)
-  const address = p.urlPath ?? (p.httpAddressWithoutQuery != null ? p.httpAddressWithoutQuery + (p.httpAddressQuery ? `?${p.httpAddressQuery}` : '') : p.address)
+  const address = p.urlPath ?? (p.httpAddressWithoutQuery != null ? p.httpAddressWithoutQuery + (p.httpAddressQuery ? `?${p.httpAddressQuery}` : '') : (p.address ?? p.server))
   const adapter = {
     id: flow.id,
     name: flow.node.getAttribute('name'),
@@ -127,6 +127,26 @@ function httpCall(adapter) {
     ...connection,
     ...(unsupported.length && { unsupportedSettings: unsupported })
   }
+}
+
+/** A SOAP 1.x receiver call as the spec holds it; the other settings stay in step.settings, for updates and Import */
+function soapCall(adapter) {
+  const p = adapter.settings
+  return {
+    system: adapter.system,
+    url: p.address,
+    authType: p.authentication,
+    credentialName: p.credentialName,
+    proxyType: p.proxyType === 'sapcc' ? 'On-Premise' : p.proxyType,
+    locationId: p.location_id,
+    timeout: /^\d+$/.test(p.requestTimeout || '') ? Number(p.requestTimeout) : p.requestTimeout
+  }
+}
+
+/** A Mail receiver as the spec holds it */
+function mailCall(adapter) {
+  const p = adapter.settings
+  return { system: adapter.system, server: p.server, credentialName: p.user, from: p.from, to: p.to, cc: p.cc, bcc: p.bcc, subject: p.subject, body: p.body }
 }
 
 // --- steps ---------------------------------------------------------------------------
@@ -206,7 +226,19 @@ function stepOf(node, adaptersBySource, processNames = {}) {
     case 'ExternalCall': {
       const adapter = adaptersBySource[base.id]
       if (adapter?.type === 'HTTP') return { ...base, type: 'requestReplyHttp', ...httpCall(adapter) }
+      if (adapter?.type === 'SOAP' && adapter.settings.MessageProtocol === 'SOAP 1.x') {
+        const step = { ...base, type: 'requestReplySoap', ...soapCall(adapter) }
+        Object.defineProperty(step, 'settings', { value: adapter.settings, enumerable: false })
+        return step
+      }
       return { ...base, type: 'requestReply', adapter: adapter || null }
+    }
+    case 'Send': {
+      const adapter = adaptersBySource[base.id]
+      if (adapter?.type !== 'Mail') return { ...base, type: 'send', activityType: p.activityType, adapter: adapter || null }
+      const step = { ...base, type: 'sendMail', ...mailCall(adapter) }
+      Object.defineProperty(step, 'settings', { value: adapter.settings, enumerable: false })
+      return step
     }
     default:
       return { ...base, type: p.activityType ? p.activityType[0].toLowerCase() + p.activityType.slice(1) : local, activityType: p.activityType || null }

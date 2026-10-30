@@ -15,11 +15,12 @@ turns into extra questions.
 | | Supported | Not supported |
 |---|---|---|
 | Trigger | HTTPS sender (with a path), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, SOAP, other senders |
-| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP request-reply, Router, Iterating and General Splitter, Gather (these three on the main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; nested splits; join step, multicast, mapping, XSLT step, Idempotent Process Call |
-| Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP request-reply and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Router, Iterating and General Splitter, Gather (these three on the main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; nested splits; join step, multicast, mapping, XSLT step, Idempotent Process Call |
+| Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
-| Error handling | One exception subprocess (Content Modifier, Groovy, converters, Process Call), ending with a Message, Escalation or Error End | Request-reply inside the exception subprocess |
+| SOAP 1.x and Mail receivers | SOAP: Basic with a credential name, On-Premise with an optional location ID, timeout, the address can be a parameter. Mail: STARTTLS mandatory, Plain User/Password, text/plain; the server, credential name and recipients can be parameters | SOAP with a WSDL or operation, over the Internet or without authentication; mail attachments, other protection or body types; SOAP or Mail at the end of the flow |
+| Error handling | One exception subprocess (Content Modifier, Groovy, converters, Process Call, Mail), ending with a Message, Escalation or Error End | Request-reply inside the exception subprocess |
 
 Hard limits:
 
@@ -34,8 +35,9 @@ Hard limits:
   or "Routing condition not met"; the receiver categories are not supported yet.
   An XML router may get CPI's notice "may not pass XML message to Sequence Flow. Sequence Flow supports
   XML input only" on its routes unless the step before it is a JSON to XML converter (e.g. after a
-  Content Modifier, Groovy script or splitter): CPI cannot tell that the step produces XML. It is not an
-  error; make sure the body is XML there.
+  Content Modifier, Groovy script, splitter or Send step): CPI cannot tell that the step produces XML. It
+  is not an error; make sure the body is XML there. The same notice may appear on the line of a SOAP
+  receiver, whose body must be XML.
 - A splitter (Iterating or General, XPath) makes the steps after it run once per item, until a Gather
   (XML, same format, combine at XPath) or the end. Say whether **one failing item stops the rest**
   (Stop on Exception): it has no default. No second splitter and no router before the Gather (CPI
@@ -46,7 +48,8 @@ Hard limits:
   (`${property.hasMore} = 'true'`, spaces around the operator), at most a maximum number of times.
 - Step names, receiver names and Groovy file names must be **unique**.
 - `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver,
-  or as a whole **constant** header or property value. "Default" for a parameter means its value
+  the **URL** of a SOAP receiver, the **server**, **credential name** or **recipients** of a mail, or as a
+  whole **constant** header or property value. "Default" for a parameter means its value
   (Configure); to fill a Content Modifier's Default Value column, say so explicitly: "Default Value
   column = X".
 - Header and property sources: constant, expression, header, property, XPath (with a data type),
@@ -130,6 +133,9 @@ spec:
   router, the route with a condition), and the other routes are described in the router's placeholder.
 - `{{Param}}` values outside receiver URLs, credential names, location IDs and constant values become
   the parameter's default; a receiver URL combined from parameters becomes one `<Receiver>_URL` parameter.
+- SOAP 1.x request-replies without a WSDL and Mail steps are kept; a setting given as a parameter takes
+  its default unless the field can hold a parameter. A SOAP channel with a WSDL or another
+  authentication becomes a placeholder.
 - Iterating and General Splitters, Gathers, (Looping) Process Calls and the local processes they call
   are kept. A splitter's settings given as parameters take their defaults. What a local process cannot
   hold becomes a placeholder inside it.

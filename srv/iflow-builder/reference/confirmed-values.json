@@ -76,5 +76,24 @@
     "expressionType": {
       "Non XML": "re-selected in Ref_Structure (LPC_FetchPages), 2026-10-29"
     }
+  },
+  "SOAP Receiver": {
+    "authentication": {
+      "Basic": "re-selected in Ref_Receivers (RR_Soap), confirmed 2026-10-30"
+    },
+    "proxyType": {
+      "sapcc": "On-Premise, re-selected in Ref_Receivers (RR_Soap), confirmed 2026-10-30"
+    }
+  },
+  "Mail Receiver": {
+    "auth": {
+      "loginPlain": "Plain User/Password, re-selected in Ref_Receivers (SND_Alert), confirmed 2026-10-30"
+    },
+    "ssl": {
+      "starttls_mandatory": "STARTTLS Mandatory, re-selected in Ref_Receivers (SND_Alert), confirmed 2026-10-30"
+    },
+    "content_type": {
+      "text/plain": "re-selected in Ref_Receivers (SND_Alert), confirmed 2026-10-30"
+    }
   }
 }

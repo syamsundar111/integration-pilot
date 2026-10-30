@@ -56,7 +56,7 @@ Because turns and approvals live in the process, the backend must stay at **`ins
 
 **iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender |
 timer once | timer every N minutes), steps (contentModifier, groovyScript, writeVariables, jsonToXml, xmlToJson,
-requestReplyHttp, router, splitter, gather, processCall) and an end (httpReceiver | none, with a Message/Escalation/Error
+requestReplyHttp, requestReplySoap, sendMail, router, splitter, gather, processCall) and an end (httpReceiver | none, with a Message/Escalation/Error
 End), plus optional `exceptionSubprocess` and `localProcesses`. Splitters and gathers sit on the main line, routers on
 the main line or a local process's line; a router's routes end or continue with the step after it; a splitter is flat
 (the steps after it run per item until a gather, with no router in between); a processCall runs a local process (`spec-steps.js` lists all steps with their paths, `mapSteps` changes them). Spec values

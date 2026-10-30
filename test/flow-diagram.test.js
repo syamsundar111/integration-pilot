@@ -65,3 +65,20 @@ describe('flow diagram: splitters, gathers, process calls and local processes (p
     expect(model.locals.map((lp) => lp.name).sort()).toEqual(['LIP_FetchPage', 'LIP_HandleOrder'])
   })
 })
+
+describe('flow diagram: SOAP and Mail receivers (phase 3)', () => {
+  const soap = { type: 'requestReplySoap', url: 'http://s4dummy/x', authType: 'Basic', credentialName: 'C', proxyType: 'On-Premise' }
+  const mail = { type: 'sendMail', server: 'smtp.example.com:587', credentialName: 'C', from: 'a@example.com', to: 'b@example.com', subject: 'Hi' }
+  test('from a spec and from a parsed iFlow: type, detail and receiver', async () => {
+    const model = flowDiagram.fromSpec({ trigger: { type: 'timer', mode: 'once' }, steps: [soap, mail], end: { type: 'none' } })
+    expect(model.steps.map((s) => [s.name, s.detail, s.receiver.name, s.receiver.detail])).toEqual([
+      ['Request Reply 1', 'SOAP 1.x', 'Receiver1', 'http://s4dummy/x'],
+      ['Send 1', 'to b@example.com', 'Receiver2', 'smtp.example.com:587']
+    ])
+    expect(flowDiagram.toHtml(model)).toContain('Request Reply (SOAP)')
+    const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Receivers.zip')))
+    const steps = flowDiagram.fromParsed(parsed).steps
+    expect(steps.find((s) => s.name === 'RR_Soap')).toMatchObject({ type: 'requestReplySoap', detail: 'SOAP 1.x', receiver: { detail: '{{RR_Soap_Address}}' } })
+    expect(steps.find((s) => s.name === 'SND_Alert')).toMatchObject({ type: 'sendMail', detail: 'to {{Mail_To}}', receiver: { detail: '{{Mail_Server}}' } })
+  })
+})

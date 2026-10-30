@@ -1271,7 +1271,7 @@ describe('fewer and smaller model inputs', () => {
     expect(content.length).toBeLessThan(5000) // ~4.7k: before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
     const result = JSON.parse(content)
     expect(Object.keys(result.format.steps)).toEqual(['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'writeVariables', 'requestReplyHttp'])
-    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting'])
+    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail'])
     expect(result.rules).toBeUndefined()
   })
 
@@ -1282,7 +1282,7 @@ describe('fewer and smaller model inputs', () => {
     expect(Object.keys(result.format.steps)).toEqual(expect.arrayContaining(['splitter', 'gather', 'processCall']))
     expect(result.format.steps.router).toBeUndefined()
     expect(result.rules.splitting).toMatch(/^## Splitters and local processes/)
-    expect(Object.keys(result.moreTopics)).toEqual(['routing'])
+    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'soap', 'mail'])
     // the next message has the section in the prompt, and the tool sends no rules twice
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['splitting'] })).mockResolvedValueOnce(answer('ok'))
     await chat({ sessionId: first.sessionId, message: 'ok' })
@@ -1291,7 +1291,7 @@ describe('fewer and smaller model inputs', () => {
   })
 
   test('getSupportedSteps names every field of the schema (all topics)', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['routing', 'splitting'] })).mockResolvedValueOnce(answer('ok'))
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['routing', 'splitting', 'soap', 'mail'] })).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     const content = llm.chat.mock.calls.at(-1)[0].messages.at(-1).content
     const { format } = JSON.parse(content)
@@ -1557,6 +1557,10 @@ describe('conditional system prompt sections', () => {
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'Send it to A when the status is open, otherwise to B, depending on the type.' })
     expect(systemOf()).toMatch(/## Routers/)
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Call the SOAP service, then send an e-mail to the team.' })
+    expect(systemOf()).toMatch(/## SOAP receivers/)
+    expect(systemOf()).toMatch(/## Mail/)
   })
 
   test('files add the attached-files section; sections keep a fixed order, whatever came first', async () => {

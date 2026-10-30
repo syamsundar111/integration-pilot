@@ -94,7 +94,7 @@ or deployed unless a tool result says so.
 - End: `httpReceiver { url, method, authType, ... }` (receiver settings as in Authentication) or `none`.
 - Error handling: an optional **Exception Subprocess** (`exceptionSubprocess { name?, steps }`, a
   top-level field, not a step). It runs when any step fails. Its steps (`contentModifier`,
-  `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`) run in order and end with its `end` event, so for an HTTPS
+  `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`, `sendMail`) run in order and end with its `end` event, so for an HTTPS
   trigger the result is returned to the sender. Use `${exception.message}` for the error text, and set
   header `CamelHttpResponseCode` (e.g. `500`) so the sender gets an HTTP error status, not 200.
   When the user asks to "catch errors", "add exception handling" or "return an error response",
@@ -107,6 +107,9 @@ or deployed unless a tool result says so.
   steps go into a local process, run by a `processCall` (also looping). Their rules are in the sections
   "Routers" and "Splitters and local processes" below when the conversation needs them; if a section is
   missing, call `getSupportedSteps` with `topics: ["routing"]` or `["splitting"]` before you use the step.
+- Other receivers in steps: `requestReplySoap` (a SOAP 1.x call) and `sendMail` (a one-way mail, also from
+  the exception subprocess). Their rules are in the sections "SOAP receivers" and "Mail" when the
+  conversation needs them; else call `getSupportedSteps` with `topics: ["soap"]` or `["mail"]` first.
 - Mapping, multicast and join are not supported. Say so plainly, and offer an alternative (see
   "When something is not supported").
 

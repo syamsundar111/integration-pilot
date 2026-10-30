@@ -368,3 +368,48 @@ describe('import: splitters, gathers, process calls and local processes (phase 2
     expect(r.valid).toBe(true)
   })
 })
+
+describe('import: SOAP 1.x and Mail receivers (phase 3)', () => {
+  const soap = { type: 'requestReplySoap', name: 'RR', system: 'SysS', url: 'http://s4dummy/x', authType: 'Basic', credentialName: 'CRED', proxyType: 'On-Premise', locationId: 'LOC' }
+  const mail = { type: 'sendMail', name: 'SND', system: 'SysM', server: 'smtp.example.com:587', credentialName: 'CRED', from: 'a@example.com', to: 'b@example.com', subject: 'Hi' }
+  const spec = baseSpec({ steps: [soap, mail] })
+  const flowSetting = (xml, component, key, value) => {
+    const el = xml.match(new RegExp(`<bpmn2:messageFlow id="[^"]+" name="${component}"[\\s\\S]*?</bpmn2:messageFlow>`))[0]
+    return xml.replace(el, el.replace(new RegExp(`(<key>${key}</key>\\s*)(<value>[^<]*</value>|<value/>)`), `$1<value>${value}</value>`))
+  }
+  const imported = async (patch) => importIflow(await zipWith(spec, patch), { fileName: 'r.zip', packageId: 'PilotReference' })
+
+  test('a flow the spec holds imports as it is', async () => {
+    const r = await imported()
+    expect(r).toMatchObject({ valid: true, placeholders: 0 })
+    expect(r.spec.steps).toEqual(spec.steps)
+  })
+
+  test('a WSDL, other authentication or WS-Security make the SOAP step a placeholder; so do other mail settings', async () => {
+    const description = async (name, patch) => (await imported(patch)).spec.steps.find((s) => s.name === name).description
+    expect(await description('RR', (x) => flowSetting(x, 'SOAP', 'soapWsdlURL', '/wsdl/x.wsdl'))).toMatch(/^REPLACE WITH SOAP request-reply 'RR' to http:\/\/s4dummy\/x \(with soapWsdlURL \/wsdl\/x\.wsdl\)/)
+    expect(await description('RR', (x) => flowSetting(x, 'SOAP', 'authentication', 'None'))).toMatch(/\(authentication None, proxy sapcc; supported: Basic, On-Premise\)/)
+    expect(await description('RR', (x) => flowSetting(x, 'SOAP', 'WSSecurity_outbound', 'SignMessage'))).toMatch(/\(WS-Security SignMessage\)/)
+    expect(await description('SND', (x) => flowSetting(x, 'Mail', 'ssl', 'none'))).toMatch(/^REPLACE WITH Mail 'SND' .*protection none/)
+  })
+
+  test('settings given as parameters take their defaults, unless the field can hold a parameter', async () => {
+    const zip = await zipWith(spec, (x) => flowSetting(flowSetting(flowSetting(flowSetting(x, 'SOAP', 'address', '{{Addr}}'), 'SOAP', 'credentialName', '{{Cred}}'), 'SOAP', 'authentication', '{{Auth}}'), 'Mail', 'to', '{{MailTo}}'))
+    const JSZipLib = require('jszip')
+    const z = await JSZipLib.loadAsync(zip)
+    const prop = Object.keys(z.files).find((f) => f.endsWith('parameters.prop'))
+    z.file(prop, 'Addr=http\\://s4dummy/x\nCred=S_CRED\nAuth=Basic\nMailTo=x@example.com\n')
+    const r = await importIflow(await z.generateAsync({ type: 'nodebuffer' }), { fileName: 'r.zip', packageId: 'PilotReference' })
+    expect(r.valid).toBe(true)
+    expect(r.spec.steps[0]).toMatchObject({ type: 'requestReplySoap', url: '{{Addr}}', credentialName: 'S_CRED', authType: 'Basic' })
+    expect(r.spec.steps[1]).toMatchObject({ type: 'sendMail', to: '{{MailTo}}' })
+    expect(r.notes).toContain('SysS: the credential name {{Cred}} became its value S_CRED (it cannot be kept as a parameter)')
+  })
+
+  test('a mail in the exception subprocess stays; a SOAP call there becomes a placeholder', async () => {
+    const withSub = baseSpec({ steps: [soap], exceptionSubprocess: { steps: [{ ...mail, name: 'Alert', system: 'SysA' }], end: { event: 'escalation' } } })
+    const r = await importIflow(await zipWith(withSub), { fileName: 'r.zip', packageId: 'PilotReference' })
+    expect(r.spec.exceptionSubprocess.steps[0]).toMatchObject({ type: 'sendMail', name: 'Alert' })
+    expect(r.valid).toBe(true)
+  })
+})

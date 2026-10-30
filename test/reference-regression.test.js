@@ -440,3 +440,75 @@ describe('Ref_Structure: splitters, gather, process calls and local processes (p
     expect(r.spec.localProcesses).toEqual(spec.localProcesses)
   })
 })
+
+describe('Ref_Receivers: SOAP 1.x and Mail receivers (phase 3)', () => {
+  const STEPS = ['RR_Soap', 'SND_Alert']
+  // test/reference-prompts/Ref_Receivers.txt, steps 6 and 7
+  const soap = { type: 'requestReplySoap', name: 'RR_Soap', system: 'RCV_Soap', url: '{{RR_Soap_Address}}', authType: 'Basic', credentialName: 'DUMMY_SOAP_CRED', proxyType: 'On-Premise', locationId: 'DUMMY_LOC' }
+  const mail = { type: 'sendMail', name: 'SND_Alert', system: 'RCV_Mail', server: '{{Mail_Server}}', credentialName: '{{Mail_Credential}}', from: 'noreply@example.com', to: '{{Mail_To}}', subject: 'Dummy alert' }
+  const spec = {
+    id: 'Ref_Receivers',
+    name: 'Ref_Receivers',
+    packageId: 'PilotReference',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [soap, mail],
+    end: { type: 'none' },
+    parameters: { RR_Soap_Address: 'http://s4dummy:8000/sap/bc/srt/dummy', Mail_Server: 'smtp.example.com:587', Mail_Credential: 'DUMMY_MAIL_CRED', Mail_To: 'alerts@example.com' }
+  }
+  const params = Object.keys(spec.parameters)
+
+  let builtZip, built, reference
+  beforeAll(async () => {
+    builtZip = Buffer.from((await build(spec)).zipBase64, 'base64')
+    built = await parse(builtZip)
+    reference = await parse(readRef('Ref_Receivers.zip'))
+  })
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('every property of the SOAP and Mail receivers is as in the reference', () => {
+    const want = receivers(reference, STEPS)
+    expect(Object.keys(want)).toEqual(STEPS)
+    expect(receivers(built, STEPS)).toEqual(want)
+  })
+
+  test('the steps themselves are as in the reference: a Request Reply and a Send step', async () => {
+    for (const name of STEPS) {
+      const zip = await JSZip.loadAsync(builtZip)
+      const xml = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+      const refZip = await JSZip.loadAsync(readRef('Ref_Receivers.zip'))
+      const refXml = await refZip.file(Object.keys(refZip.files).find((f) => f.endsWith('.iflw'))).async('string')
+      const props = (x) => [...x.match(new RegExp(`<bpmn2:serviceTask id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:serviceTask>`))[0].matchAll(/<key>([^<]*)<\/key>\s*<value>([^<]*)</g)].map((m) => [m[1], m[2]])
+      expect(props(xml)).toEqual(props(refXml))
+    }
+  })
+
+  test('the parsed steps carry the same settings', () => {
+    const fields = (p) => p.steps.filter((s) => STEPS.includes(s.name)).map(({ id, system, ...rest }) => rest)
+    expect(fields(built)).toEqual(fields(reference))
+  })
+
+  test('the externalized fields have the same parameters, defaults and propdef references', async () => {
+    for (const p of params) expect(built.parameters[p]).toBe(reference.parameters[p])
+    const want = await paramReferences(readRef('Ref_Receivers.zip'), params)
+    expect(Object.keys(want).sort()).toEqual([...params].sort())
+    expect(await paramReferences(builtZip, params)).toEqual(want)
+  })
+
+  test('an update of the reference keeps them (no blockers); Import holds them without placeholders', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const r = specFromParsed(reference, { packageId: 'PilotReference' })
+    expect(r.blockers).toEqual([])
+    const of = (sp) => sp.steps.filter((s) => STEPS.includes(s.name)).map(({ system, ...s }) => s)
+    const without = [soap, mail].map(({ system, ...s }) => s)
+    expect(of(r.spec)).toEqual(without)
+    const imported = await importIflow(readRef('Ref_Receivers.zip'), { fileName: 'Ref_Receivers.zip', packageId: 'PilotReference' })
+    expect(imported).toMatchObject({ valid: true, errors: [], placeholders: 0 })
+    expect(of(imported.spec)).toEqual(without)
+    expect(imported.spec.parameters).toMatchObject(spec.parameters)
+  })
+})

@@ -18,7 +18,9 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     router: 'Router',
     splitter: 'Splitter',
     gather: 'Gather',
-    processCall: 'Process Call'
+    processCall: 'Process Call',
+    requestReplySoap: 'Request Reply (SOAP)',
+    sendMail: 'Send (Mail)'
   }
   const DEFAULT_NAMES = {
     contentModifier: 'Content Modifier',
@@ -31,10 +33,12 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     generalSplitter: 'General Splitter',
     gather: 'Gather',
     processCall: 'Process Call',
-    loopingProcessCall: 'Looping Process Call'
+    loopingProcessCall: 'Looping Process Call',
+    sendMail: 'Send'
   }
   /** The key of a step's default name, as the builder counts them (validator.js defaultKey) */
-  const defaultKey = (s) => (s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type)
+  const defaultKey = (s) =>
+    s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type
   const ICONS = {
     https: 'sap-icon://internet-browser',
     timer: 'sap-icon://fob-watch',
@@ -47,6 +51,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     jsonToXml: 'sap-icon://switch-views',
     xmlToJson: 'sap-icon://switch-views',
     requestReplyHttp: 'sap-icon://outbox',
+    requestReplySoap: 'sap-icon://outbox',
+    sendMail: 'sap-icon://email',
     writeVariables: 'sap-icon://save',
     router: 'sap-icon://split',
     splitter: 'sap-icon://expand-group',
@@ -98,6 +104,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       steps: markPerItem(spec.steps.map((s) => {
         const name = nameOf(s)
         if (s.type === 'requestReplyHttp') return { type: s.type, name, detail: s.method, receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
+        if (s.type === 'requestReplySoap') return { type: s.type, name, detail: 'SOAP 1.x', receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
+        if (s.type === 'sendMail') return { type: s.type, name, detail: `to ${s.to}`, receiver: { name: s.system || `Receiver${++rr}`, detail: s.server } }
         if (s.type === 'groovyScript') return { type: s.type, name, detail: `${s.fileName}.groovy` }
         if (s.type === 'contentModifier') {
           const n = (s.headers || []).length + (s.properties || []).length
@@ -160,6 +168,10 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           ? s.script || `${s.fileName}.groovy`
           : s.type === 'requestReplyHttp'
             ? s.method
+            : s.type === 'requestReplySoap'
+            ? 'SOAP 1.x'
+            : s.type === 'sendMail'
+            ? `to ${s.to}`
             : s.type === 'writeVariables'
               ? (s.variables || []).map((v) => v.name).join(', ') || undefined
               : s.type === 'router' && s.routes
@@ -167,7 +179,12 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
                   ? 'XML (XPath)'
                   : 'Non-XML'
                 : detailOf(s),
-      receiver: s.type === 'requestReplyHttp' ? { name: s.system || 'Receiver', detail: s.url } : undefined,
+      receiver:
+        s.type === 'requestReplyHttp' || s.type === 'requestReplySoap'
+          ? { name: s.system || 'Receiver', detail: s.url }
+          : s.type === 'sendMail'
+            ? { name: s.system || 'Receiver', detail: s.server }
+            : undefined,
       routes:
         routed && s.type === 'router'
           ? s.routes.map((r) => ({ name: r.name, condition: r.default ? null : r.condition, steps: r.steps.map((x) => x.name), end: r.end ? r.end.kind : null }))

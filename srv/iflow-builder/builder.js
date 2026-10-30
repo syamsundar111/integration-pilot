@@ -9,7 +9,7 @@
 const fs = require('fs')
 const path = require('path')
 const JSZip = require('jszip')
-const { validate, effectiveNames } = require('./validator')
+const { validate, effectiveNames, RECEIVER_STEPS } = require('./validator')
 const receiverSettings = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
 const specSteps = require('./spec-steps')
@@ -170,7 +170,7 @@ const stepNode = (step, name, system) => ({
   step,
   name,
   system,
-  prefix: step.type === 'requestReplyHttp' ? 'ServiceTask' : 'CallActivity',
+  prefix: RECEIVER_STEPS.includes(step.type) ? 'ServiceTask' : 'CallActivity',
   w: L.TASK_W,
   h: L.TASK_H
 })
@@ -308,7 +308,8 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
 
   // --- layout ------------------------------------------------------------------------
   // receivers of request-reply steps sit above the pool, in their step's column; the end receiver right of it
-  const receiversAbove = nodes.some((n) => n.step?.type === 'requestReplyHttp')
+  const hasReceiver = (n) => RECEIVER_STEPS.includes(n.step?.type)
+  const receiversAbove = nodes.some(hasReceiver)
   const poolY = L.POOL_Y + (receiversAbove ? L.PART_H + L.ABOVE_GAP : 0)
   const laneCy = (k) => poolY + L.POOL_H / 2 + k * L.LANE
   const cy0 = laneCy(0)
@@ -324,7 +325,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     sub = { id: nextId('SubProcess'), name: names.exceptionSubprocess, x: L.START_X, y: lanesBottom + L.SUB_GAP, h: L.SUB_H, nodes: [] }
     sub.nodes.push({ id: nextId('StartEvent'), kind: 'errorStart', name: 'Error Start 1', w: L.EVENT, h: L.EVENT })
     spec.exceptionSubprocess.steps.forEach((step, i) => {
-      const n = stepNode(step, names.exceptionSteps[i], null)
+      const n = stepNode(step, names.exceptionSteps[i], names.exceptionSystems[i])
       sub.nodes.push({ ...n, id: nextId(n.prefix) })
     })
     sub.nodes.push({ ...endNode(spec.exceptionSubprocess.end, 'End 1'), id: nextId('EndEvent') })
@@ -342,7 +343,9 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     return { lp, id, participantId: `Participant_${id}` }
   })
   const processIds = new Map(locals.map((l) => [l.lp.name, l.id])) // a process call refers to the process id
-  let localY = poolY + poolH + L.LOCAL_GAP
+  // the receivers of Send steps in the exception subprocess sit right below the main pool, in their step's column
+  const subReceivers = sub ? sub.nodes.filter(hasReceiver) : []
+  let localY = poolY + poolH + (subReceivers.length ? L.ABOVE_GAP + L.PART_H : 0) + L.LOCAL_GAP
   for (const l of locals) {
     const k = locals.indexOf(l) + 1
     l.line = newLine()
@@ -354,7 +357,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     for (const n of l.nodes) Object.assign(n, { x: colCx(n.col) - n.w / 2, y: cy(n.lane) - n.h / 2 })
     const h = Math.max(L.POOL_H, cy(l.line.lanes) + L.TASK_H / 2 + L.POOL_PAD - localY)
     Object.assign(l, { x: L.POOL_X, y: localY, w: Math.max(colCx(l.nodes.length - 1) + L.TASK_W / 2 + L.GAP - L.POOL_X, L.MIN_POOL_W), h })
-    localY += h + (l.nodes.some((n) => n.step?.type === 'requestReplyHttp') ? L.ABOVE_GAP + L.PART_H : 0) + L.LOCAL_GAP
+    localY += h + (l.nodes.some(hasReceiver) ? L.ABOVE_GAP + L.PART_H : 0) + L.LOCAL_GAP
   }
   // a process call names its local process by id; a looping one has its loop and condition ids
   for (const n of [...nodes, ...(sub ? sub.nodes : [])].filter((x) => x.step?.type === 'processCall')) {
@@ -389,9 +392,44 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     adapters.push({ type: 'HTTPS', direction: 'Sender', system: p.name, address: spec.trigger.address })
   }
 
+  // parameter references (parameters.propdef) of the fields given as a whole {{Param}}: [attribute, value]
+  const addParamRefs = (system, fields) => {
+    const attributes = RECEIVER_ATTRIBUTES()
+    for (const [field, value] of fields) {
+      const param = String(value).match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
+      const a = attributes[field]
+      if (param) paramRefs.push({ category: system + a.categorySuffix, attributeId: a.attributeId, uilabel: a.uilabel, key: param })
+    }
+  }
   const addReceiver = (sourceNode, call, system, placement) => {
     const p = { id: nextId('Participant'), kind: 'receiver', name: system, ...placement }
     participants.push(p)
+    if (call.type === 'requestReplySoap' || call.type === 'sendMail') {
+      const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id }
+      const common = { SOURCE: sourceNode.id, TARGET: p.id, SYSTEM_VALUE: val(system), CREDENTIAL_NAME_VALUE: val(call.credentialName) }
+      if (call.type === 'requestReplySoap') {
+        mf.template = 'iflw/messageflow-soap-receiver.xml'
+        mf.vars = { ...common, ADDRESS_VALUE: val(call.url), LOCATION_ID_VALUE: val(call.locationId), TIMEOUT_VALUE: val(String(call.timeout ?? 60000)) }
+        addParamRefs(system, [['soapAddress', call.url]])
+        adapters.push({ type: 'SOAP', direction: 'Receiver', system, address: call.url, authType: call.authType })
+      } else {
+        mf.template = 'iflw/messageflow-mail-receiver.xml'
+        mf.vars = {
+          ...common,
+          SERVER_VALUE: val(call.server),
+          FROM_VALUE: val(call.from),
+          TO_VALUE: val(call.to),
+          CC_VALUE: val(call.cc),
+          BCC_VALUE: val(call.bcc),
+          SUBJECT_VALUE: val(call.subject),
+          BODY_VALUE: val(call.body ?? '${in.body}')
+        }
+        addParamRefs(system, [['mailServer', call.server], ['mailTo', call.to], ['mailCredential', call.credentialName]])
+        adapters.push({ type: 'Mail', direction: 'Receiver', system, address: call.server })
+      }
+      messageFlows.push(mf)
+      return { p, mf }
+    }
     const { address, query } = splitUrl(call.url, spec.parameters)
     if (address.includes('?')) throw Object.assign(new Error(`receiver ${system}: the address still contains '?'`), { errors: [`receiver ${system}: the address must not contain '?'; the query belongs in the Query field`] })
     const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id }
@@ -411,35 +449,35 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     }
     messageFlows.push(mf)
     // fields given as a whole {{Param}}: a reference in parameters.propdef, as the CPI editor writes it
-    const attributes = RECEIVER_ATTRIBUTES()
-    for (const [field, value] of [['address', address], ['credentialName', cpiSettings.credentialName], ['locationID', cpiSettings.locationID]]) {
-      const param = String(value).match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
-      const a = attributes[field]
-      if (param) paramRefs.push({ category: system + a.categorySuffix, attributeId: a.attributeId, uilabel: a.uilabel, key: param })
-    }
+    addParamRefs(system, [['address', address], ['credentialName', cpiSettings.credentialName], ['locationID', cpiSettings.locationID]])
     adapters.push({ type: 'HTTP', direction: 'Receiver', system, address: call.url, method: call.method, authType: cpiSettings.authenticationMethod })
     return { p, mf }
   }
 
   // Request-reply receivers sit above the pool in their step's column (a straight connector up that crosses
   // no other step and never the exception subprocess below); the end receiver right of the pool
-  for (const n of nodes.filter((n) => n.step?.type === 'requestReplyHttp')) {
+  for (const n of nodes.filter(hasReceiver)) {
     const { p, mf } = addReceiver(n, n.step, n.system, { x: n.x, y: poolY - L.ABOVE_GAP - L.PART_H })
     mf.from = [n.x + L.TASK_W / 2, n.y]
     mf.to = [p.x + L.PART_W / 2, p.y + L.PART_H]
   }
   for (const l of locals)
-    for (const n of l.nodes.filter((x) => x.step?.type === 'requestReplyHttp')) {
+    for (const n of l.nodes.filter(hasReceiver)) {
       const { p, mf } = addReceiver(n, n.step, n.system, { x: n.x, y: l.y + l.h + L.ABOVE_GAP })
       mf.from = [n.x + L.TASK_W / 2, n.y + L.TASK_H]
       mf.to = [p.x + L.PART_W / 2, p.y]
     }
+  for (const n of subReceivers) {
+    const { p, mf } = addReceiver(n, n.step, n.system, { x: n.x, y: poolY + poolH + L.ABOVE_GAP })
+    mf.from = [n.x + L.TASK_W / 2, n.y + L.TASK_H]
+    mf.to = [p.x + L.PART_W / 2, p.y]
+  }
   if (spec.end.type === 'httpReceiver') {
     const { p, mf } = addReceiver(end, spec.end, names.endSystem, { x: L.POOL_X + poolW + L.RECEIVER_GAP, y: cy0 - L.PART_H / 2 })
     mf.from = [end.x + L.EVENT / 2, cy0]
     mf.to = [p.x, cy0]
   }
-  for (const mf of messageFlows) if (mf.vars) mf.xml = fill('iflw/messageflow-http-receiver.xml', { ID: mf.id, ...mf.vars })
+  for (const mf of messageFlows) if (mf.vars) mf.xml = fill(mf.template || 'iflw/messageflow-http-receiver.xml', { ID: mf.id, ...mf.vars })
 
   // --- XML assembly ----------------------------------------------------------------
   const participantXml =
@@ -646,7 +684,10 @@ function nodeToXml(n) {
     case 'xmlToJson':
       return fill('iflw/step-xml-to-json.xml', io)
     case 'requestReplyHttp':
+    case 'requestReplySoap':
       return fill('iflw/step-request-reply.xml', io)
+    case 'sendMail':
+      return fill('iflw/step-send.xml', io)
     case 'splitter': {
       // the item XPath also goes to the Iterating Splitter's token value, as the CPI editor writes it
       const expression = val(s.expression)

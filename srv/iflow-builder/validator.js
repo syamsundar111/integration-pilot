@@ -12,13 +12,16 @@ const specSteps = require('./spec-steps')
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'writeVariables', 'router', 'splitter', 'gather', 'processCall']
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router', 'splitter', 'gather', 'processCall']
+// steps with a receiver of their own (a participant and an adapter)
+const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'sendMail']
 // main line only: not inside routes, the exception subprocess or local processes
 const MAIN_LINE_ONLY = ['router', 'splitter', 'gather']
-// Steps allowed in the exception subprocess (no receivers there; Write Variables only in the main flow so far)
-const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall']
+// Steps allowed in the exception subprocess (of the receivers only a Send step: no reply to wait for; Write Variables
+// only in the main flow so far)
+const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail']
 // Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
-const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'writeVariables', 'router']
+const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'timer']
 const MAX_MAIN_STEPS = 50 // main-flow steps, routers, the steps inside routes and the steps of local processes together
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
@@ -42,10 +45,12 @@ const DEFAULT_STEP_NAMES = {
   generalSplitter: 'General Splitter',
   gather: 'Gather',
   processCall: 'Process Call',
-  loopingProcessCall: 'Looping Process Call'
+  loopingProcessCall: 'Looping Process Call',
+  sendMail: 'Send'
 }
-/** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call */
-const defaultKey = (s) => (s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type)
+/** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call, any Request Reply counts as one */
+const defaultKey = (s) =>
+  s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type
 const DEFAULT_EXCEPTION_SUBPROCESS_NAME = 'Exception Subprocess 1'
 
 const GROOVY_IMPORT = /import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Message\s*;?/
@@ -87,15 +92,16 @@ function effectiveNames(spec) {
   const exception = sub.map(name)
   for (const x of flatLocal) named.set(x.step, name(x.step))
   let rr = 0
-  const systemOf = new Map([...flatMain, ...flatLocal].map((x) => [x.step, x.step.type === 'requestReplyHttp' ? x.step.system || `Receiver${++rr}` : null]))
+  const systemOf = new Map([...flatMain.map((x) => x.step), ...sub, ...flatLocal.map((x) => x.step)].map((s) => [s, RECEIVER_STEPS.includes(s?.type) ? s.system || `Receiver${++rr}` : null]))
   const systems = main.map((s) => systemOf.get(s))
+  const exceptionSystems = sub.map((s) => systemOf.get(s))
   // every main-flow step with its path, name and receiver: [{ step, where, name, system }]; local: the same for local processes
   const withNames = (x) => ({ ...x, name: named.get(x.step), system: systemOf.get(x.step) })
   const flat = flatMain.map(withNames)
   const local = flatLocal.map(withNames)
   const endSystem = spec.end?.type === 'httpReceiver' ? spec.end.system || 'Receiver' : null
   const exceptionSubprocess = spec.exceptionSubprocess ? spec.exceptionSubprocess.name || DEFAULT_EXCEPTION_SUBPROCESS_NAME : null
-  return { steps, systems, flat, local, endSystem, exceptionSubprocess, exceptionSteps: exception }
+  return { steps, systems, flat, local, endSystem, exceptionSubprocess, exceptionSteps: exception, exceptionSystems }
 }
 
 /**
@@ -137,7 +143,12 @@ const PATTERN_HINTS = {
   system: 'use letters, digits and underscore only',
   name: 'use letters, digits, dot, dash or underscore',
   credentialName: 'use the name of the deployed credential (letters, digits, dot, dash, underscore) or a whole parameter like {{ErpCredential}}',
-  locationId: 'use letters, digits, dot, dash or underscore, or a whole parameter like {{ErpLocation}}'
+  locationId: 'use letters, digits, dot, dash or underscore, or a whole parameter like {{ErpLocation}}',
+  server: 'use host:port, e.g. smtp.example.com:587, or a whole parameter like {{Mail_Server}}',
+  from: 'use one mail address, e.g. noreply@example.com',
+  to: 'use mail addresses separated by commas, or a whole parameter like {{Mail_To}}',
+  cc: 'use mail addresses separated by commas',
+  bcc: 'use mail addresses separated by commas'
 }
 
 /** Translates Ajv errors into plain sentences: [{ code, message }] */
@@ -194,7 +205,7 @@ function walkStrings(node, path, fn) {
  * property, variable or XPath)
  */
 const STEP_PATH = String.raw`(steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\]|localProcesses\[\d+\]\.steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?)`
-const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
+const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId|server|to)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
 
 /**
  * @param {object} spec
@@ -229,6 +240,8 @@ function validate(spec, { attachments = [] } = {}) {
       err('USE_ROUTER', `${where}: '${type}' — a router is { "type": "router", "expressionType": "XML"|"NonXML", "routes": [{ "name", "condition", "steps"?, "end"? }, ..., { "name", "default": true }] }`)
     else if (/split/i.test(type))
       err('USE_SPLITTER', `${where}: '${type}' — a splitter is { "type": "splitter", "kind": "iterating"|"general", "expression": "//item", "stopOnException": true|false }; the steps after it run per item until a { "type": "gather", "source", "target" }`)
+    else if (/soap/i.test(type)) err('USE_SOAP', `${where}: '${type}' — a SOAP call is { "type": "requestReplySoap", "url", "authType": "Basic", "credentialName", "proxyType": "On-Premise", "locationId"? }`)
+    else if (/mail|smtp/i.test(type)) err('USE_MAIL', `${where}: '${type}' — a mail is { "type": "sendMail", "server": "host:port", "credentialName", "from", "to", "subject", "body"? }`)
     else if (/gather/i.test(type)) err('USE_GATHER', `${where}: '${type}' — a gather is { "type": "gather", "source": "//item", "target": "/items" }, after a splitter`)
     else if (END_STEP.test(type))
       err('END_AS_STEP', `${where}: '${type}' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end' (or a route's 'end'), e.g. { "type": "none" }`)
@@ -317,6 +330,26 @@ function validate(spec, { attachments = [] } = {}) {
     }
   }
 
+  // SOAP and Mail receivers: credentials never in the spec; on SOAP only the url can be a parameter (the references
+  // have no parameter reference for its credential name and location ID); stored values from the references
+  for (const { step: s, where, ptr } of [...specSteps.allSteps(spec)].filter((x) => ['requestReplySoap', 'sendMail'].includes(x.step?.type))) {
+    for (const key of Object.keys(s).filter((k) => SECRET_NAME.test(k) || /^(user(name)?|clientId)$/i.test(k))) {
+      skip.push(`${ptr}/${key}`)
+      err('SECRET', `${where}.${key}: never put credentials into the spec — ${CREDENTIAL_HINT}`)
+    }
+    if (s.type === 'requestReplySoap') {
+      for (const key of ['credentialName', 'locationId'].filter((k) => typeof s[k] === 'string' && s[k].includes('{{'))) {
+        skip.push(`${ptr}/${key}`)
+        err('PARAM_NOT_URL', `${where}.${key}: on a SOAP receiver only the url can be a parameter — give the name itself`)
+      }
+      if (typeof s.url === 'string' && /^https?:\/\/[^/@\s]+:[^/@\s]+@/.test(s.url)) err('URL_CREDENTIALS', `${where}.url: contains user:password — remove it; set credentialName instead (${CREDENTIAL_HINT})`)
+      if (s.authType === 'Basic' && s.proxyType === 'On-Premise') valueCheck('SOAP Receiver', [['authentication', 'Basic'], ['proxyType', 'sapcc']], where)
+    } else {
+      if (typeof s.body === 'string' && /"(password|passwd|pwd|secret|client_secret|token)"\s*:\s*"[^"$]+"/i.test(s.body)) err('SECRET', `${where}.body: contains a plaintext secret — never put passwords or tokens in the flow`)
+      valueCheck('Mail Receiver', [['auth', 'loginPlain'], ['ssl', 'starttls_mandatory'], ['content_type', 'text/plain']], where)
+    }
+  }
+
   if (!checkSchema(spec)) issues.push(...schemaErrors(checkSchema.errors, skip))
 
   // --- semantic rules (defensive: the spec may be partially invalid) ------------
@@ -358,7 +391,7 @@ function validate(spec, { attachments = [] } = {}) {
     )
   }
   for (const d of dupes(locals.map((p) => p.name))) err('DUPLICATE_PROCESS_NAME', `localProcesses: local process name '${d}' is used more than once — give each local process its own name`)
-  for (const d of dupes([...names.flat.map((x) => x.system), ...names.local.map((x) => x.system), names.endSystem]))
+  for (const d of dupes([...names.flat.map((x) => x.system), ...names.exceptionSystems, ...names.local.map((x) => x.system), names.endSystem]))
     err('DUPLICATE_SYSTEM', `receiver system name '${d}' is used more than once — give each receiver a unique 'system'`)
   for (const d of dupes(allSteps.filter(([s]) => s?.type === 'groovyScript').map(([s]) => s.fileName))) {
     const hits = allSteps.filter(([s]) => s?.type === 'groovyScript' && s.fileName === d).map(([st, p]) => [d, p, st])
@@ -569,7 +602,7 @@ function validate(spec, { attachments = [] } = {}) {
     const row = /\.(headers|properties)\[\d+\]\.value$/.test(path)
     const rowType = row && specSteps.valueAt(spec, path.replace(/\.value$/, ''))?.type
     if (!PARAM_FIELDS.test(path) || (row && rowType !== 'constant')) {
-      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, or as a constant value`)
+      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, or as a constant value`)
       return
     }
     if (!WHOLE_PARAM.test(value)) {
@@ -608,4 +641,4 @@ function normalizeTypes(spec) {
   return { spec: out, fixes }
 }
 
-module.exports = { validate, normalizeTypes, effectiveNames, hasScriptSecret, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, SUPPORTED_LOCAL_STEPS, MAIN_LINE_ONLY, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }
+module.exports = { validate, normalizeTypes, effectiveNames, hasScriptSecret, RECEIVER_STEPS, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, SUPPORTED_LOCAL_STEPS, MAIN_LINE_ONLY, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }

@@ -13,5 +13,25 @@
     "attributeId": "ctype::AdapterVariant/cname::HTTP/tp::HTTP/mp::None/direction::Receiver/version::1.22.0/attrId::locationID",
     "uilabel": "Location ID",
     "categorySuffix": ""
+  },
+  "soapAddress": {
+    "attributeId": "ctype::AdapterVariant/cname::SOAP/tp::HTTP/mp::SOAP 1.x/direction::Receiver/version::1.14.1/attrId::address",
+    "uilabel": "Address",
+    "categorySuffix": ".Receiver.System"
+  },
+  "mailServer": {
+    "attributeId": "ctype::AdapterVariant/cname::Mail/tp::SMTP/mp::None/direction::Receiver/version::1.13.0/attrId::server",
+    "uilabel": "Address",
+    "categorySuffix": ""
+  },
+  "mailTo": {
+    "attributeId": "ctype::AdapterVariant/cname::Mail/tp::SMTP/mp::None/direction::Receiver/version::1.13.0/attrId::to",
+    "uilabel": "To",
+    "categorySuffix": ""
+  },
+  "mailCredential": {
+    "attributeId": "ctype::AdapterVariant/cname::Mail/tp::SMTP/mp::None/direction::Receiver/version::1.13.0/attrId::user",
+    "uilabel": "Credential Name",
+    "categorySuffix": ""
   }
 }

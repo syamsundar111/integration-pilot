@@ -54,10 +54,12 @@ const WRITE_VARIABLES_DEFAULTS = (() => {
  */
 const FIXED_SETTINGS = (() => {
   const read = (f) => fs.readFileSync(path.join(__dirname, 'templates', 'iflw', f), 'utf8')
+  // versions and names differ by adapter release and do not change behaviour
+  const NOT_SETTINGS = ['componentVersion', 'activityType', 'cmdVariantUri', 'ComponentNS', 'ComponentSWCVId', 'ComponentSWCVName', 'TransportProtocolVersion', 'MessageProtocolVersion', 'Name', 'Description']
   const fixed = (xml) =>
     Object.fromEntries(
       [...xml.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)]
-        .filter((m) => !['componentVersion', 'activityType', 'cmdVariantUri'].includes(m[1]))
+        .filter((m) => !NOT_SETTINGS.includes(m[1]))
         .map((m) => [m[1], m[2] ?? ''])
     )
   return {
@@ -65,7 +67,9 @@ const FIXED_SETTINGS = (() => {
     general: fixed(read('step-splitter-general.xml')),
     gather: fixed(read('step-gather.xml')),
     processCall: fixed(read('step-process-call.xml')),
-    loopingProcessCall: fixed(read('step-process-call-looping.xml'))
+    loopingProcessCall: fixed(read('step-process-call-looping.xml')),
+    soap: fixed(read('messageflow-soap-receiver.xml')),
+    mail: fixed(read('messageflow-mail-receiver.xml'))
   }
 })()
 /** Throws a blocker for a setting that differs from the builder's fixed value */
@@ -170,6 +174,32 @@ function toStep(s, scripts, where) {
         throw `${where} '${s.name}': tokenValue '${s.settings.tokenValue}' differs from the expression; an update would set it to '${s.expression}'`
       return { ...base, kind: s.kind, expression: s.expression, ...(s.grouping !== 1 && { grouping: s.grouping }), ...(!s.streaming && { streaming: false }), stopOnException: s.stopOnException }
     }
+    case 'requestReplySoap':
+      checkFixed(s, FIXED_SETTINGS.soap, `${where} '${s.name}': receiver ${s.system}`)
+      return {
+        ...base,
+        ...(s.system && { system: s.system }),
+        url: s.url,
+        authType: s.authType,
+        credentialName: s.credentialName,
+        proxyType: s.proxyType,
+        ...(s.locationId && { locationId: s.locationId }),
+        ...(s.timeout && s.timeout !== 60000 && { timeout: s.timeout })
+      }
+    case 'sendMail':
+      checkFixed(s, FIXED_SETTINGS.mail, `${where} '${s.name}': receiver ${s.system}`)
+      return {
+        ...base,
+        ...(s.system && { system: s.system }),
+        server: s.server,
+        credentialName: s.credentialName,
+        from: s.from,
+        to: s.to,
+        ...(s.cc && { cc: s.cc }),
+        ...(s.bcc && { bcc: s.bcc }),
+        subject: s.subject,
+        ...(s.body !== '${in.body}' && { body: s.body })
+      }
     case 'gather':
       checkFixed(s, FIXED_SETTINGS.gather, `${where} '${s.name}'`)
       return { ...base, source: s.source, target: s.target }
@@ -217,7 +247,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   else blockers.push(`trigger: ${t.type === 'timer' ? 'scheduled timer' : t.adapter || t.type} (only HTTPS sender, run-once timer or every N minutes in UTC)`)
 
   for (const a of parsed.adapters || [])
-    if (!(a.type === 'HTTPS' && a.direction === 'Sender') && !(a.type === 'HTTP' && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
+    if (!(a.type === 'HTTPS' && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
 
   const stepFrom = (s, where) =>
     SUPPORTED_STEPS.includes(s.type) && s.type !== 'router'

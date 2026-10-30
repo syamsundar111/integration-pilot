@@ -267,3 +267,33 @@ describe('system prompt: splitters and local processes (phase 2)', () => {
     await expect(build(spec)).resolves.toBeTruthy()
   })
 })
+
+describe('system prompt: SOAP and Mail receivers (phase 3)', () => {
+  const soap = sectionFlat('soap')
+  const mail = sectionFlat('mail')
+  test('the rules are in their sections, the core keeps a pointer', () => {
+    expect(flat).toMatch(/`requestReplySoap` \(a SOAP 1\.x call\) and `sendMail` \(a one-way mail, also from the exception subprocess\)/)
+    expect(flat).toMatch(/call `getSupportedSteps` with `topics: \["soap"\]` or `\["mail"\]` first/)
+    expect(flat).not.toMatch(/STARTTLS/)
+    expect(soap).toMatch(/Only Basic and On-Premise are supported/)
+    expect(soap).toMatch(/There is no WSDL or operation: the message body is sent as it is/)
+    expect(mail).toMatch(/`server`, `credentialName` and `to` can each be a whole `\{\{Param\}\}`/)
+    expect(mail).toMatch(/in the exception subprocess \(an alert mail on error\)/)
+  })
+
+  test('a spec from the examples in the sections validates and builds', async () => {
+    const spec = {
+      ...sample,
+      id: 'Prompt_SoapMail',
+      name: 'Prompt_SoapMail',
+      steps: [
+        { type: 'requestReplySoap', name: 'Call', system: 'Erp', url: '{{ErpUrl}}', authType: 'Basic', credentialName: 'ERP_CRED', proxyType: 'On-Premise' },
+        { type: 'sendMail', name: 'Tell', system: 'Smtp', server: 'smtp.example.com:587', credentialName: 'MAIL_CRED', from: 'a@example.com', to: 'a@example.com, b@example.com', subject: 'Done' }
+      ],
+      parameters: { ...sample.parameters, ErpUrl: 'http://s4dummy/x' },
+      exceptionSubprocess: { steps: [{ type: 'sendMail', name: 'Alert', system: 'SmtpAlert', server: 'smtp.example.com:587', credentialName: 'MAIL_CRED', from: 'a@example.com', to: 'b@example.com', subject: 'Failed' }], end: { event: 'escalation' } }
+    }
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+    await expect(build(spec)).resolves.toBeTruthy()
+  })
+})

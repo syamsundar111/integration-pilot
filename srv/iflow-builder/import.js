@@ -254,6 +254,81 @@ async function importIflow(buffer, { fileName, packageId }) {
         if (s.unsupportedSettings?.length) step.description = `Set ${s.unsupportedSettings.map(withDefaults).join(', ')} on ${system} in the CPI web editor.`
         return [step]
       }
+      case 'requestReplySoap': {
+        const raw = s.settings || {}
+        const what = `SOAP request-reply ${label} to ${s.url || '?'}`
+        if (where === 'exception') return [placeholder(name, `${what} (not supported in the exception subprocess)`)]
+        const used = (key) => withDefaults(raw[key] ?? '')
+        // what the spec cannot hold (values resolved: a setting may be a parameter): the step stays a placeholder
+        const wsdl = ['soapWsdlURL', 'soapServiceName', 'soapWsdlPortName', 'operationName'].filter((k) => used(k) && !/\{\{/.test(used(k)))
+        if (wsdl.length) return [placeholder(name, `${what} (with ${wsdl.map((k) => `${k} ${used(k)}`).join(', ')})`)]
+        if (used('authentication') !== 'Basic' || used('proxyType') !== 'sapcc') return [placeholder(name, `${what} (authentication ${used('authentication')}, proxy ${used('proxyType')}; supported: Basic, On-Premise)`)]
+        if (used('WSSecurity_outbound') !== 'None') return [placeholder(name, `${what} (WS-Security ${used('WSSecurity_outbound')})`)]
+        const system = uniqueSystem(identifier(s.system, 'Receiver'), 50)
+        const url = httpUrl(s.url, system)
+        if (!url) return [placeholder(name, `${what} (the URL could not be converted)`)]
+        // on a SOAP receiver only the url can stay a parameter
+        const literal = (key, what_) => {
+          const value = used(key)
+          if (/\{\{/.test(raw[key] ?? '') && value && !/\{\{/.test(value)) notes.push(`${system}: the ${what_} ${raw[key]} became its value ${value} (it cannot be kept as a parameter)`)
+          return /\{\{/.test(value) ? '' : value
+        }
+        const credentialName = literal('credentialName', 'credential name')
+        if (!/^[A-Za-z0-9_.-]{1,150}$/.test(credentialName)) return [placeholder(name, `${what} (credential name ${raw.credentialName || 'missing'})`)]
+        const locationId = literal('location_id', 'location ID')
+        const timeout = Number(used('requestTimeout'))
+        return [
+          {
+            type: 'requestReplySoap',
+            ...(name && { name }),
+            system,
+            url,
+            authType: 'Basic',
+            credentialName,
+            proxyType: 'On-Premise',
+            ...(/^[A-Za-z0-9_.-]{1,100}$/.test(locationId) && { locationId }),
+            ...(Number.isInteger(timeout) && timeout > 0 && timeout !== 60000 && { timeout })
+          }
+        ]
+      }
+      case 'sendMail': {
+        const raw = s.settings || {}
+        const what = `Mail ${label} to ${s.to || '?'} via ${s.server || '?'}`
+        const used = (key) => withDefaults(raw[key] ?? '')
+        if (used('auth') !== 'loginPlain' || used('ssl') !== 'starttls_mandatory' || used('content_type') !== 'text/plain' || used('attachments') || used('encrypt.type') !== 'none')
+          return [placeholder(name, `${what} (authentication ${used('auth')}, protection ${used('ssl')}, body type ${used('content_type')}${used('attachments') ? ', attachments' : ''}; supported: Plain User/Password, STARTTLS mandatory, text/plain)`)]
+        const system = uniqueSystem(identifier(s.system, 'Receiver'), 50)
+        // server, credential name and recipients may stay a whole parameter; other parameters become their defaults
+        const field = (key, pattern) => {
+          const whole = String(raw[key] ?? '').match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
+          if (whole && Object.hasOwn(params, whole)) return raw[key]
+          const value = used(key)
+          return pattern.test(value) ? value : null
+        }
+        const ADDRESSES = /^[^\s,@]+@[^\s,@]+(\s*,\s*[^\s,@]+@[^\s,@]+)*$/
+        const server = field('server', /^[A-Za-z0-9.-]+:[0-9]{1,5}$/)
+        const credentialName = field('user', /^[A-Za-z0-9_.-]{1,150}$/)
+        const to = field('to', ADDRESSES)
+        const from = used('from')
+        const subject = used('subject')
+        if (!server || !credentialName || !to || !/^[^\s,@]+@[^\s,@]+$/.test(from) || !subject) return [placeholder(name, `${what} (a server, credential name, sender, recipient or subject the spec cannot hold)`)]
+        const body = used('body')
+        return [
+          {
+            type: 'sendMail',
+            ...(name && { name }),
+            system,
+            server,
+            credentialName,
+            from,
+            to,
+            ...(ADDRESSES.test(used('cc')) && { cc: used('cc') }),
+            ...(ADDRESSES.test(used('bcc')) && { bcc: used('bcc') }),
+            subject,
+            ...(raw.body != null && raw.body !== '${in.body}' && { body })
+          }
+        ]
+      }
       case 'requestReply': {
         const a = s.adapter || {}
         return [placeholder(name, `request-reply ${label} via the ${a.type || 'unknown'} adapter${a.system ? ` to ${a.system}` : ''}${a.address ? ` (${a.address})` : ''}`)]

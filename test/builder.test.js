@@ -521,3 +521,61 @@ describe('routers in local processes (phase 2 tenant check: route per item insid
     expect(imported.spec.localProcesses).toEqual(spec.localProcesses)
   })
 })
+
+describe('SOAP 1.x and Mail receivers (phase 3)', () => {
+  const soap = (name, system) => ({ type: 'requestReplySoap', name, system, url: 'http://s4dummy:8000/x', authType: 'Basic', credentialName: 'CRED', proxyType: 'On-Premise', locationId: 'LOC' })
+  const mail = (name, system, extra = {}) => ({ type: 'sendMail', name, system, server: 'smtp.example.com:587', credentialName: 'CRED', from: 'a@example.com', to: 'b@example.com', subject: 'Hi & bye', ...extra })
+  const spec = baseSpec({
+    steps: [soap('S1', 'SysS1'), mail('M1', 'SysM1'), { type: 'processCall', name: 'PC', process: 'L' }],
+    exceptionSubprocess: { steps: [mail('Alert', 'SysAlert', { body: 'Failed: ${exception.message}' })], end: { event: 'escalation' } },
+    localProcesses: [{ name: 'L', steps: [soap('S2', 'SysS2')] }]
+  })
+  const box = (doc, id) => {
+    const b = all(all(doc, 'BPMNShape').find((s) => s.getAttribute('bpmnElement') === id), 'Bounds')[0]
+    return { x: +b.getAttribute('x'), y: +b.getAttribute('y'), w: +b.getAttribute('width'), h: +b.getAttribute('height') }
+  }
+  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+  const flowOf = (doc, name) => {
+    const task = all(doc, 'serviceTask').find((t) => t.getAttribute('name') === name)
+    return all(doc, 'messageFlow').find((f) => f.getAttribute('sourceRef') === task.getAttribute('id'))
+  }
+
+  test('each step gets its own adapter: SOAP on a Request Reply, Mail on a Send step; values escaped; default body', async () => {
+    const { doc, iflw, result } = await built(spec)
+    expect(props(all(doc, 'serviceTask').find((t) => t.getAttribute('name') === 'S1')).activityType).toBe('ExternalCall')
+    expect(props(all(doc, 'serviceTask').find((t) => t.getAttribute('name') === 'M1')).activityType).toBe('Send')
+    expect(props(flowOf(doc, 'S1'))).toMatchObject({ ComponentType: 'SOAP', address: 'http://s4dummy:8000/x', credentialName: 'CRED', location_id: 'LOC', apiprovider_location_id: 'LOC', requestTimeout: '60000', system: 'SysS1' })
+    expect(props(flowOf(doc, 'M1'))).toMatchObject({ ComponentType: 'Mail', server: 'smtp.example.com:587', user: 'CRED', to: 'b@example.com', cc: '', subject: 'Hi & bye', body: '${in.body}', system: 'SysM1' })
+    expect(iflw).toContain('Hi &amp; bye')
+    expect(props(flowOf(doc, 'Alert')).body).toBe('Failed: ${exception.message}')
+    expect(result.summary.adapters.filter((a) => a.direction === 'Receiver').map((a) => [a.type, a.system]).sort()).toEqual([['Mail', 'SysAlert'], ['Mail', 'SysM1'], ['SOAP', 'SysS1'], ['SOAP', 'SysS2']])
+  })
+
+  test('layout: main receivers above, the alert mail receiver below the main pool, the local pool below that, nothing overlaps', async () => {
+    const { doc } = await built(spec)
+    const main = box(doc, 'Participant_Process_1')
+    const receiver = (name) => box(doc, flowOf(doc, name).getAttribute('targetRef'))
+    expect(receiver('S1').y + receiver('S1').h).toBeLessThan(main.y)
+    expect(receiver('M1').y + receiver('M1').h).toBeLessThan(main.y)
+    const alert = receiver('Alert')
+    expect(alert.y).toBeGreaterThan(main.y + main.h)
+    const step = box(doc, all(doc, 'serviceTask').find((t) => t.getAttribute('name') === 'Alert').getAttribute('id'))
+    expect(alert.x + alert.w / 2).toBe(step.x + step.w / 2) // straight down from its step
+    const local = box(doc, all(doc, 'participant').find((p) => p.getAttribute('name') === 'L').getAttribute('id'))
+    expect(local.y).toBeGreaterThan(alert.y + alert.h)
+    expect(receiver('S2').y).toBeGreaterThan(local.y + local.h)
+    const ids = [...doc.getElementsByTagName('*')].map((e) => e.getAttribute('id')).filter(Boolean)
+    expect(ids.filter((v, i) => ids.indexOf(v) !== i)).toEqual([])
+    for (const a of [alert, receiver('S1'), receiver('M1'), receiver('S2')]) for (const pool of [main, local]) expect(overlap(a, pool)).toBe(false)
+  })
+
+  test('a parameter gets its reference in parameters.propdef; a literal does not', async () => {
+    const withParams = baseSpec({
+      steps: [{ ...soap('S', 'SysS'), url: '{{U}}' }, mail('M', 'SysM', { server: '{{Sv}}', credentialName: '{{C}}', to: '{{T}}' })],
+      parameters: { U: 'http://s4dummy/x', Sv: 'h:25', C: 'CRED', T: 'a@example.com' }
+    })
+    const { files } = await built(withParams)
+    const refs = [...files['src/main/resources/parameters.propdef'].matchAll(/attribute_category="([^"]+)"[^>]*attrId::(\w+)"[^>]*param_key="([^"]+)"/g)].map((m) => m.slice(1))
+    expect(refs).toEqual([['SysS.Receiver.System', 'address', 'U'], ['SysM', 'server', 'Sv'], ['SysM', 'to', 'T'], ['SysM', 'user', 'C']])
+  })
+})

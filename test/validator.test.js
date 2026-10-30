@@ -171,7 +171,7 @@ describe('validator', () => {
     const constantValue = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'constant', value: '{{P}}' }] }], parameters: { P: 'v' } })
     expect(errorsOf(constantValue)).toEqual([])
     const wrongPlace = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'expression', value: '{{P}}' }] }], parameters: { P: 'v' } })
-    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, or as a constant value/)
+    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, or as a constant value/)
 
     const senderParam = baseSpec({ trigger: { type: 'httpsSender', address: '{{Path}}' }, parameters: { Path: '/x' } })
     expectError(senderParam, /trigger\.address: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
@@ -462,5 +462,53 @@ describe('relative XPaths: a note (CPI evaluates them from the document root: on
     expect(r.warnings[1]).toBe(
       "steps[1].headers[0].value: the XPath 'id' is relative; CPI evaluates it from the document root, so it only works if it starts with the root element (e.g. 'order/id'). Safer: start it with / or //, e.g. '/order/id'"
     )
+  })
+})
+
+describe('SOAP 1.x and Mail receivers (phase 3)', () => {
+  const soap = (extra = {}) => ({ type: 'requestReplySoap', name: 'RR', url: 'http://s4dummy:8000/sap/bc/srt/x', authType: 'Basic', credentialName: 'CRED', proxyType: 'On-Premise', ...extra })
+  const mail = (extra = {}) => ({ type: 'sendMail', name: 'SND', server: 'smtp.example.com:587', credentialName: 'CRED', from: 'a@example.com', to: 'b@example.com, c@example.com', subject: 'Hi', ...extra })
+  const issues = (spec) => validate(spec).issues
+
+  test('valid without warnings, on the main line, in routes and in local processes', () => {
+    const router = { type: 'router', name: 'R', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1', steps: [soap({ name: 'S2' }), mail({ name: 'M2' })] }, { name: 'D', default: true }] }
+    const spec = baseSpec({ steps: [soap(), mail(), router, { type: 'processCall', process: 'L' }], localProcesses: [{ name: 'L', steps: [soap({ name: 'S3' }), mail({ name: 'M3' })] }] })
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+  })
+
+  test('only the values of the references: Basic, On-Premise', () => {
+    expectError(baseSpec({ steps: [soap({ authType: 'None' })] }), /steps\[0\]\.authType: must be one of Basic/)
+    expectError(baseSpec({ steps: [soap({ proxyType: 'Internet' })] }), /steps\[0\]\.proxyType: must be one of On-Premise/)
+  })
+
+  test('parameters: on SOAP only the url; on Mail the server, credential name and recipients', () => {
+    expect(validate(baseSpec({ steps: [soap({ url: '{{U}}' })], parameters: { U: 'http://x/y' } })).valid).toBe(true)
+    expect(issues(baseSpec({ steps: [soap({ credentialName: '{{C}}' })], parameters: { C: 'x' } }))).toEqual([{ code: 'PARAM_NOT_URL', message: 'steps[0].credentialName: on a SOAP receiver only the url can be a parameter — give the name itself' }])
+    expect(validate(baseSpec({ steps: [mail({ server: '{{S}}', credentialName: '{{C}}', to: '{{T}}' })], parameters: { S: 'h:25', C: 'x', T: 'a@example.com' } })).valid).toBe(true)
+    expectError(baseSpec({ steps: [mail({ server: '{{S}}' })] }), /steps\[0\]\.server: parameter 'S' is referenced but not defined/)
+    expectError(baseSpec({ steps: [mail({ subject: '{{S}}' })], parameters: { S: 'x' } }), /steps\[0\]\.subject: parameters/)
+  })
+
+  test('mail fields: host:port and addresses; no secrets', () => {
+    expectError(baseSpec({ steps: [mail({ server: 'smtp.example.com' })] }), /steps\[0\]\.server: invalid value — use host:port/)
+    expectError(baseSpec({ steps: [mail({ to: 'not-an-address' })] }), /steps\[0\]\.to: invalid value — use mail addresses/)
+    expectError(baseSpec({ steps: [mail({ from: 'a@example.com, b@example.com' })] }), /steps\[0\]\.from: invalid value — use one mail address/)
+    expect(issues(baseSpec({ steps: [mail({ password: 'x' })] })).map((i) => i.code)).toEqual(['SECRET'])
+    expect(issues(baseSpec({ steps: [soap({ password: 'x' })] })).map((i) => i.code)).toEqual(['SECRET'])
+    expect(issues(baseSpec({ steps: [soap({ url: 'http://u:p@s4dummy/x' })] })).map((i) => i.code)).toEqual(['URL_CREDENTIALS'])
+  })
+
+  test('the exception subprocess takes a mail, not a SOAP call; SOAP and Mail are no end', () => {
+    expect(validate(baseSpec({ steps: [mail()], exceptionSubprocess: { steps: [mail({ name: 'Alert' })], end: { event: 'escalation' } } })).valid).toBe(true)
+    expectError(baseSpec({ steps: [mail()], exceptionSubprocess: { steps: [soap()] } }), /exceptionSubprocess\.steps\[0\]: 'requestReplySoap' is not supported in the exception subprocess/)
+    expectError(baseSpec({ end: { type: 'mail' } }), /end: 'mail' is not supported/)
+  })
+
+  test('default names and receivers count with the others; other names point to the format', () => {
+    const names = effectiveNames(baseSpec({ steps: [{ type: 'requestReplyHttp', url: 'https://a.example.com', method: 'GET', authType: 'None' }, soap({ name: undefined }), mail({ name: undefined })], exceptionSubprocess: { steps: [mail({ name: undefined })] } }))
+    expect(names.flat.map((x) => [x.name, x.system])).toEqual([['Request Reply 1', 'Receiver1'], ['Request Reply 2', 'Receiver2'], ['Send 1', 'Receiver3']])
+    expect([names.exceptionSteps, names.exceptionSystems]).toEqual([['Send 2'], ['Receiver4']])
+    expectError(baseSpec({ steps: [{ type: 'soapCall' }] }), /'soapCall' — a SOAP call is \{ "type": "requestReplySoap"/)
+    expectError(baseSpec({ steps: [{ type: 'email' }] }), /'email' — a mail is \{ "type": "sendMail"/)
   })
 })

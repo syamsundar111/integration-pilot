@@ -351,6 +351,35 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(activeFor(base([cm('A')])).gatherText).toBe('')
   })
 
+  test('SOAP and Mail cards (phase 3): no-WSDL warning in plain words, fixed mail settings shown, credentials in the note', () => {
+    const soap = { type: 'requestReplySoap', name: 'RR', system: 'SysS', url: 'http://s4dummy/x', authType: 'Basic', credentialName: 'S_CRED', proxyType: 'On-Premise', locationId: 'LOC' }
+    const mail = { type: 'sendMail', name: 'SND', system: 'SysM', server: 'smtp.example.com:587', credentialName: 'M_CRED', from: 'a@example.com', to: 'b@example.com', cc: 'c@example.com', subject: 'Hi' }
+    const active = activeFor(base([soap, mail], { exceptionSubprocess: { steps: [{ ...mail, name: 'Alert', system: 'SysA', credentialName: 'A_CRED' }], end: { event: 'escalation' } } }))
+    const card = (title) => active.stepCards.find((c) => c.title === title)
+    expect(card('1. RR')).toMatchObject({ type: 'Request Reply (SOAP)', lines: 'SOAP 1.x http://s4dummy/x\nBasic, credential S_CRED · On-Premise, location LOC\nNo WSDL: the message body is sent as it is, so it must be the XML the service expects' })
+    expect(card('2. SND')).toMatchObject({
+      type: 'Send (Mail)',
+      lines: 'To b@example.com, cc c@example.com, from a@example.com\nSubject: Hi\nBody: ${in.body} (the message body)\nsmtp.example.com:587 · STARTTLS mandatory · Plain User/Password, credential M_CRED · text/plain\nOne-way: the flow continues after it'
+    })
+    expect(card('E1. Alert')).toMatchObject({ type: 'Send (Mail)' })
+    expect(active.receiversText).toBe('Before deploying, the credentials must exist as security material on the tenant: S_CRED (Basic, SysS), M_CRED (Plain User/Password, SysM), A_CRED (Plain User/Password, SysA).')
+  })
+
+  test('tenant check of phase 3: the XML notes name the step before: SOAP after a Content Modifier, an XML router after a mail', () => {
+    const soap = (name) => ({ type: 'requestReplySoap', name, url: 'http://s4dummy/x', authType: 'Basic', credentialName: 'C', proxyType: 'On-Premise' })
+    const mail = { type: 'sendMail', name: 'SND_Done', server: 'h:25', credentialName: 'C', from: 'a@example.com', to: 'b@example.com', subject: 'S' }
+    const active = activeFor(base([cm('CM_SetBody'), soap('RR_Soap'), mail, xmlRouter]))
+    expect(active.xmlSoapText).toMatch(/^The body of a SOAP call must be XML\. CPI may show the notice "may not pass XML message to Soap1x Receiver\. Soap1x Receiver supports XML input only" on the SOAP line of RR_Soap \(after CM_SetBody\)/)
+    expect(active.xmlRouterText).toMatch(/on the routes of RT_Type \(after SND_Done\)/)
+    // known XML: no note; in a route: the step before its router, then the step before it in the route; in a local process
+    expect(activeFor(base([{ type: 'jsonToXml', name: 'ToXml' }, soap('S')])).xmlSoapText).toBe('')
+    const routed = { ...xmlRouter, routes: [{ name: 'X', condition: "/a = 'x'", steps: [soap('S1'), cm('Mid'), soap('S2')] }, { name: 'Other', default: true }] }
+    expect(activeFor(base([{ type: 'jsonToXml', name: 'ToXml' }, routed])).xmlSoapText).toMatch(/on the SOAP line of S2 \(after Mid\):/)
+    const local = activeFor(base([{ type: 'processCall', name: 'PC', process: 'L' }], { localProcesses: [{ name: 'L', steps: [soap('S3')] }] }))
+    expect(local.xmlSoapText).toMatch(/S3 \(first step\)/)
+    expect(activeFor(base([cm('A')])).xmlSoapText).toBe('')
+  })
+
   test('an XML router after a Content Modifier (routers in between skipped) gets the XML input notice', () => {
     const nonXml = { type: 'router', name: 'RT_Check', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1' }, { name: 'D', default: true }] }
     expect(activeFor(base([cm('CM_SetInput'), nonXml, xmlRouter])).xmlRouterText).toMatch(/on the routes of RT_Type \(after CM_SetInput\): it cannot tell/)

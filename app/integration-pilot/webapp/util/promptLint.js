@@ -48,11 +48,11 @@ sap.ui.define([], () => {
   ]
 
   // Where a {{Param}} can stand: a receiver URL (a line about a URL, or right after an HTTP method or
-  // "address"), a receiver's credential name or location ID, or a constant value ("constant {{X}}",
-  // "externalized parameter {{X}}")
+  // "address"), a receiver's credential name or location ID, a mail's server or recipients, or a constant
+  // value ("constant {{X}}", "externalized parameter {{X}}", "server externalized as {{X}}")
   const URL_LINE = /\burls?\b|https?:\/\//i
   const PARAM_POSITION =
-    /(\b(GET|POST|PUT|PATCH|DELETE)(\s+to)?|\b(address|url|endpoint)\s*[:=]?|\bcredential(\s+name)?\s*[:=]?|\blocation(\s+id)?\s*[:=]?|\bconstant\s*[:=]?|\bparameter)\s*$/i
+    /(\b(GET|POST|PUT|PATCH|DELETE)(\s+to)?|\b(address|url|endpoint)\s*[:=]?|\bcredential(\s+name)?\s*[:=]?|\blocation(\s+id)?\s*[:=]?|\bserver\s*[:=]?|\b(mail\s+to|recipients?)\s*[:=]?|\bto\s+externalized\s+as|\bconstant\s*[:=]?|\bparameter)(\s+externalized\s+as)?\s*$/i
   // Never, even on a URL line: right after user or password (credentials are names only), or part of a URL
   const NOT_PARAM_FIELD = /\b(user(\s*name)?|password)\s*[:=]?\s*$/i
   const IN_URL = (before, after) => /(:\/\/|\/)$/.test(before) || after.startsWith('/')
@@ -103,10 +103,10 @@ sap.ui.define([], () => {
 
   const WARNINGS = {
     unsupported: (found) =>
-      `Not supported yet: ${found.join(', ')}. Supported: Content Modifier, Groovy Script, Write Variables, JSON/XML converters, HTTP request-reply, routers, splitters, gathers and process calls. Use a Groovy script, or add the step in the CPI web editor after creation.` +
+      `Not supported yet: ${found.join(', ')}. Supported: Content Modifier, Groovy Script, Write Variables, JSON/XML converters, HTTP and SOAP request-reply, mail, routers, splitters, gathers and process calls. Use a Groovy script, or add the step in the CPI web editor after creation.` +
       (found.includes('XSLT') ? ' Attach the .xsl file to include it in the iFlow, ready for an XSLT Mapping step.' : ''),
     params: (names) =>
-      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, or as a constant value. Use literal values elsewhere.`,
+      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, the URL of a SOAP receiver, the server, credential name or recipients of a mail, or as a constant value. Use literal values elsewhere.`,
     secret:
       'This looks like a password, secret or token. Never send credentials: deploy them as security material in CPI (User Credentials or OAuth2 Client Credentials) and give only its name, e.g. "Basic, credential ERP_BASIC_USER".'
   }

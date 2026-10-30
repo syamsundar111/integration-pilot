@@ -94,6 +94,16 @@ const VALUE_FIELDS = {
     variant: /cname::Variables\//,
     values: (p) => tableRows(p.variable).flatMap((c) => [['type', c[2]?.value], ['scope', c[4]?.value], ...(c[1]?.value ? [['datatype', c[1].value]] : [])])
   },
+  // SOAP 1.x receiver: authentication and proxy type
+  'SOAP Receiver': {
+    variant: /cname::(?:sap:)?SOAP\/tp::HTTP\/mp::SOAP 1\.x\/direction::Receiver\//,
+    values: (p) => [['authentication', p.authentication], ['proxyType', p.proxyType]]
+  },
+  // Mail receiver: authentication, protection and body MIME type
+  'Mail Receiver': {
+    variant: /cname::(?:sap:)?Mail\/tp::SMTP\/mp::None\/direction::Receiver\//,
+    values: (p) => [['auth', p.auth], ['ssl', p.ssl], ['content_type', p.content_type]]
+  },
   // the route of a router: its condition type (XML, NonXML)
   Router: {
     variant: /cname::GatewayRoute\//,
@@ -418,16 +428,61 @@ async function main() {
   const version = addressId.match(/\/version::([^/]+)\//)[1]
   const receivers = await readZip('Ref_Receivers.zip')
   const receiversPropdef = receivers.files['src/main/resources/parameters.propdef']
-  const refOf = (attr) => {
+  const refOf = (attr, { ownVersion = false } = {}) => {
     const r = receiversPropdef.match(new RegExp(`<reference attribute_category="([^"]+)" attribute_id="([^"]+/attrId::${attr})" attribute_uilabel="([^"]+)" param_key="([^"]+)"/>`))
     if (!r) throw new Error(`Ref_Receivers.zip: no parameter reference for ${attr}`)
     const flow = receivers.iflw.match(new RegExp(`<bpmn2:messageFlow\\b[\\s\\S]*?<\\/bpmn2:messageFlow>`, 'g')).find((f) => f.includes(`{{${r[4]}}}`))
     const system = flow.match(/<key>system<\/key>\s*<value>([^<]*)<\/value>/)[1]
     if (!r[1].startsWith(system)) throw new Error(`Ref_Receivers.zip: category ${r[1]} does not start with the receiver ${system}`)
-    return { attributeId: r[2].replace(/\/version::[^/]+\//, `/version::${version}/`), uilabel: r[3], categorySuffix: r[1].slice(system.length) }
+    // the HTTP fields get the version of the template's adapter; SOAP and Mail templates come from this export
+    return { attributeId: ownVersion ? r[2] : r[2].replace(/\/version::[^/]+\//, `/version::${version}/`), uilabel: r[3], categorySuffix: r[1].slice(system.length) }
   }
   t['propdef-receiver-attributes.json'] =
-    JSON.stringify({ address: { attributeId: addressId, uilabel: 'Address', categorySuffix: '' }, credentialName: refOf('credentialName'), locationID: refOf('locationID') }, null, 2) + '\n'
+    JSON.stringify(
+      {
+        address: { attributeId: addressId, uilabel: 'Address', categorySuffix: '' },
+        credentialName: refOf('credentialName'),
+        locationID: refOf('locationID'),
+        soapAddress: refOf('address', { ownVersion: true }),
+        mailServer: refOf('server', { ownVersion: true }),
+        mailTo: refOf('to', { ownVersion: true }),
+        mailCredential: refOf('user', { ownVersion: true })
+      },
+      null,
+      2
+    ) + '\n'
+
+  // SOAP 1.x receiver (RR_Soap, a Request Reply like HTTP: step-request-reply.xml) and the Send step with the Mail
+  // receiver (SND_Alert). What the spec does not hold stays as exported (WS-Security off, no WSDL; STARTTLS mandatory,
+  // Plain User/Password, text/plain, no attachments)
+  t['iflw/messageflow-soap-receiver.xml'] = apply(block(receivers.iflw, 'id="MessageFlow_19"'), 'soap-receiver', {
+    attrs: { 'id="MessageFlow_19"': 'id="{{ID}}"', 'sourceRef="ServiceTask_17"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_18"': 'targetRef="{{TARGET}}"' },
+    props: {
+      address: 'ADDRESS_VALUE',
+      system: 'SYSTEM_VALUE',
+      credentialName: 'CREDENTIAL_NAME_VALUE',
+      location_id: 'LOCATION_ID_VALUE',
+      apiprovider_location_id: 'LOCATION_ID_VALUE', // the editor stores the location ID here too
+      requestTimeout: 'TIMEOUT_VALUE'
+    }
+  })
+  t['iflw/messageflow-mail-receiver.xml'] = apply(block(receivers.iflw, 'id="MessageFlow_22"'), 'mail-receiver', {
+    attrs: { 'id="MessageFlow_22"': 'id="{{ID}}"', 'sourceRef="ServiceTask_20"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_21"': 'targetRef="{{TARGET}}"' },
+    props: {
+      server: 'SERVER_VALUE',
+      system: 'SYSTEM_VALUE',
+      user: 'CREDENTIAL_NAME_VALUE',
+      from: 'FROM_VALUE',
+      to: 'TO_VALUE',
+      cc: 'CC_VALUE',
+      bcc: 'BCC_VALUE',
+      subject: 'SUBJECT_VALUE',
+      body: 'BODY_VALUE'
+    }
+  })
+  t['iflw/step-send.xml'] = apply(block(receivers.iflw, 'id="ServiceTask_20"'), 'step-send', {
+    attrs: { 'id="ServiceTask_20"': 'id="{{ID}}"', 'name="SND_Alert"': 'name="{{NAME}}"', '>SequenceFlow_17<': '>{{INCOMING}}<', '>SequenceFlow_20<': '>{{OUTGOING}}<' }
+  })
 
   // --- allowed values -----------------------------------------------------------------
   t['reference-values.json'] = JSON.stringify(await referenceValues(), null, 2) + '\n'

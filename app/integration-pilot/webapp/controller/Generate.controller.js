@@ -33,7 +33,9 @@ sap.ui.define(
       router: 'Router',
       splitter: 'Splitter',
       gather: 'Gather',
-      processCall: 'Process Call'
+      processCall: 'Process Call',
+      requestReplySoap: 'Request Reply (SOAP)',
+      sendMail: 'Send (Mail)'
     }
     /** The step type as the CPI editor names it: Iterating / General Splitter, (Looping) Process Call */
     const typeOf = (s) =>
@@ -116,9 +118,45 @@ sap.ui.define(
         : ''
     }
 
+    /**
+     * The same for SOAP receivers: the SOAP body must be XML, and CPI may show a notice on the SOAP line unless the step
+     * before (in its route: the one before the route's router at first) is known to produce XML. Routes and local processes too.
+     */
+    function xmlSoapNote(spec) {
+      const hits = []
+      const check = (s, before) => {
+        if (s.type === 'requestReplySoap' && !(before && XML_OUTPUT.includes(before.type))) hits.push(`${s.name || 'the SOAP receiver'} (${before ? `after ${before.name || typeOf(before)}` : 'first step'})`)
+      }
+      for (const line of [spec.steps, ...(spec.localProcesses || []).map((lp) => lp.steps || [])]) {
+        let before = null
+        for (const s of line) {
+          if (s.type === 'router') {
+            for (const r of s.routes || []) {
+              let inRoute = before
+              for (const x of r.steps || []) {
+                check(x, inRoute)
+                inRoute = x
+              }
+            }
+            continue
+          }
+          check(s, before)
+          before = s
+        }
+      }
+      return hits.length
+        ? `The body of a SOAP call must be XML. CPI may show the notice "may not pass XML message to Soap1x Receiver. Soap1x Receiver supports XML input only" on the SOAP line of ${hits.join(', ')}: it cannot tell that the step before produces XML. Not an error; make sure the body is XML at that point.`
+        : ''
+    }
+
     /** The note under a proposal with HTTP receivers: credentials to deploy, receivers without authentication */
     function receiversNote(spec) {
-      const calls = [...everyStep(spec).filter((s) => s.type === 'requestReplyHttp'), ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])]
+      const calls = [
+        ...everyStep(spec)
+          .filter((s) => ['requestReplyHttp', 'requestReplySoap', 'sendMail'].includes(s.type))
+          .map((s) => (s.type === 'sendMail' ? { ...s, authType: 'Plain User/Password' } : s)),
+        ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])
+      ]
       if (!calls.length) return ''
       const label = (c) => c.system || c.name || 'Receiver'
       const withAuth = calls.filter((c) => c.authType && c.authType !== 'None')
@@ -882,6 +920,7 @@ sap.ui.define(
           scriptsText: '',
           receiversText: '',
           xmlRouterText: '',
+          xmlSoapText: '',
           gatherText: ''
         }
 
@@ -915,6 +954,20 @@ sap.ui.define(
                     ? [
                         `XPath ${s.expression}${s.grouping > 1 ? `, ${s.grouping} items per message` : ''}${s.streaming === false ? ', no streaming' : ''}`,
                         s.stopOnException ? 'One failing item stops the rest' : 'One failing item does not stop the rest'
+                      ].join('\n')
+                    : s.type === 'requestReplySoap'
+                    ? [
+                        `SOAP 1.x ${s.url}`,
+                        `Basic, credential ${s.credentialName} · On-Premise${s.locationId ? `, location ${s.locationId}` : ''}${s.timeout ? ` · timeout ${s.timeout} ms` : ''}`,
+                        'No WSDL: the message body is sent as it is, so it must be the XML the service expects'
+                      ].join('\n')
+                    : s.type === 'sendMail'
+                    ? [
+                        `To ${s.to}${s.cc ? `, cc ${s.cc}` : ''}${s.bcc ? `, bcc ${s.bcc}` : ''}, from ${s.from}`,
+                        `Subject: ${s.subject}`,
+                        `Body: ${s.body || '${in.body} (the message body)'}`,
+                        `${s.server} · STARTTLS mandatory · Plain User/Password, credential ${s.credentialName} · text/plain`,
+                        'One-way: the flow continues after it'
                       ].join('\n')
                     : s.type === 'gather'
                     ? `Combines the items: ${s.source} into ${s.target} (XML, same format)`
@@ -1007,6 +1060,7 @@ sap.ui.define(
             : ''
           active.receiversText = receiversNote(spec)
           active.xmlRouterText = xmlRouterNote(spec)
+          active.xmlSoapText = xmlSoapNote(spec)
           active.gatherText = gatherNote(spec)
         }
 

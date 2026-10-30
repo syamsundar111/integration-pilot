@@ -42,6 +42,13 @@ describe('prompt linter', () => {
     expect(keys(lint('Add a multicast after step 2, then gather and join the branches'))).toEqual(['unsupported'])
   })
 
+  test('a mail server, credential and recipients can be parameters (phase 3); a subject cannot', () => {
+    const start = 'Build an iFlow on a timer in package P, no authentication.'
+    expect(lint(`${start}\nSend a mail: server externalized as {{Mail_Server}}, credential externalized as {{Mail_Cred}}, to externalized as {{Mail_To}}.`)).toEqual([])
+    expect(lint(`${start}\nSend a mail: server {{Mail_Server}}, mail to {{Mail_To}}.`)).toEqual([])
+    expect(keys(lint(`${start}\nSend a mail with subject {{Subject}}.`))).toEqual(['params'])
+  })
+
   test('more than 50 steps', () => {
     const many = ['Create an iFlow on a timer in package P. No auth.', ...Array.from({ length: 52 }, (_, i) => `${i + 1}. Content Modifier "Step ${i + 1}"`)].join('\n')
     expect(keys(lint(many))).toEqual(['steps'])

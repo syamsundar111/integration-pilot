@@ -230,6 +230,50 @@
       }
     }
   },
+  "SOAP Receiver": {
+    "authentication": {
+      "Basic": {
+        "references": [
+          "Ref_Receivers"
+        ],
+        "confirmed": "re-selected in Ref_Receivers (RR_Soap), confirmed 2026-10-30"
+      }
+    },
+    "proxyType": {
+      "sapcc": {
+        "references": [
+          "Ref_Receivers"
+        ],
+        "confirmed": "On-Premise, re-selected in Ref_Receivers (RR_Soap), confirmed 2026-10-30"
+      }
+    }
+  },
+  "Mail Receiver": {
+    "auth": {
+      "loginPlain": {
+        "references": [
+          "Ref_Receivers"
+        ],
+        "confirmed": "Plain User/Password, re-selected in Ref_Receivers (SND_Alert), confirmed 2026-10-30"
+      }
+    },
+    "ssl": {
+      "starttls_mandatory": {
+        "references": [
+          "Ref_Receivers"
+        ],
+        "confirmed": "STARTTLS Mandatory, re-selected in Ref_Receivers (SND_Alert), confirmed 2026-10-30"
+      }
+    },
+    "content_type": {
+      "text/plain": {
+        "references": [
+          "Ref_Receivers"
+        ],
+        "confirmed": "re-selected in Ref_Receivers (SND_Alert), confirmed 2026-10-30"
+      }
+    }
+  },
   "Router": {
     "expressionType": {
       "NonXML": {

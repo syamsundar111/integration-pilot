@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://iflow-pilot/spec-schema.json",
   "title": "iFlow spec v1",
-  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Routers branch on the main line into routes that end or continue with the step after the router. A splitter on the main line makes the steps after it run once per item, until a gather or the end. Local processes are called with a processCall step. Mapping is not supported yet. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver, and as a constant header or property value. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
+  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Routers branch on the main line into routes that end or continue with the step after the router. A splitter on the main line makes the steps after it run once per item, until a gather or the end. Local processes are called with a processCall step. Receivers in steps: HTTP (requestReplyHttp), SOAP 1.x (requestReplySoap) and Mail (sendMail). Mapping is not supported yet. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver, and as a constant header or property value. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
   "type": "object",
   "required": [
     "id",
@@ -154,7 +154,7 @@
       "items": {
         "$ref": "#/definitions/localProcess"
       },
-      "description": "Local integration processes, each called by processCall steps (main line, routes or exception subprocess); their steps: contentModifier, groovyScript, jsonToXml, xmlToJson, requestReplyHttp, writeVariables, router (its routes continue or end with a plain End, { \"event\": \"message\" })"
+      "description": "Local integration processes, each called by processCall steps (main line, routes or exception subprocess); their steps: contentModifier, groovyScript, jsonToXml, xmlToJson, requestReplyHttp, requestReplySoap, sendMail, writeVariables, router (its routes continue or end with a plain End, { \"event\": \"message\" })"
     },
     "parameters": {
       "type": "object",
@@ -664,7 +664,9 @@
             "router",
             "splitter",
             "gather",
-            "processCall"
+            "processCall",
+            "requestReplySoap",
+            "sendMail"
           ]
         }
       },
@@ -788,6 +790,30 @@
           "then": {
             "$ref": "#/definitions/processCall"
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "requestReplySoap"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/requestReplySoap"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sendMail"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/sendMail"
+          }
         }
       ]
     },
@@ -803,7 +829,8 @@
             "groovyScript",
             "jsonToXml",
             "xmlToJson",
-            "processCall"
+            "processCall",
+            "sendMail"
           ]
         }
       },
@@ -866,6 +893,18 @@
           },
           "then": {
             "$ref": "#/definitions/processCall"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sendMail"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/sendMail"
           }
         }
       ]
@@ -1046,7 +1085,9 @@
             "xmlToJson",
             "requestReplyHttp",
             "writeVariables",
-            "router"
+            "router",
+            "requestReplySoap",
+            "sendMail"
           ]
         }
       },
@@ -1134,8 +1175,154 @@
           "then": {
             "$ref": "#/definitions/router"
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "requestReplySoap"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/requestReplySoap"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sendMail"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/sendMail"
+          }
         }
       ]
+    },
+    "requestReplySoap": {
+      "type": "object",
+      "required": [
+        "type",
+        "url",
+        "authType",
+        "credentialName",
+        "proxyType"
+      ],
+      "additionalProperties": false,
+      "description": "Request Reply with the SOAP 1.x adapter, without WSDL or operation: the message body is sent as it is",
+      "properties": {
+        "type": {
+          "const": "requestReplySoap"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "system": {
+          "$ref": "#/definitions/systemName"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^(https?://\\S+|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Full URL or a whole {{Parameter}} reference"
+        },
+        "authType": {
+          "enum": [
+            "Basic"
+          ],
+          "description": "Basic only (the references hold no other SOAP authentication)"
+        },
+        "credentialName": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,150}$",
+          "description": "Name of the deployed User Credentials, never a password; no parameter on a SOAP receiver"
+        },
+        "proxyType": {
+          "enum": [
+            "On-Premise"
+          ],
+          "description": "On-Premise only (the references hold no other SOAP proxy type)"
+        },
+        "locationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,100}$",
+          "description": "Cloud Connector location ID, optional; no parameter on a SOAP receiver"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Request timeout in milliseconds (default 60000)"
+        }
+      }
+    },
+    "sendMail": {
+      "type": "object",
+      "required": [
+        "type",
+        "server",
+        "credentialName",
+        "from",
+        "to",
+        "subject"
+      ],
+      "additionalProperties": false,
+      "description": "Send step with the Mail adapter: one-way, the flow continues. STARTTLS mandatory, Plain User/Password, text/plain, no attachments",
+      "properties": {
+        "type": {
+          "const": "sendMail"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "system": {
+          "$ref": "#/definitions/systemName"
+        },
+        "server": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9.-]+:[0-9]{1,5}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "SMTP server host:port, or a whole {{Parameter}}"
+        },
+        "credentialName": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.-]{1,150}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Name of the deployed User Credentials, or a whole {{Parameter}}; never a password"
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^[^\\s,@]+@[^\\s,@]+$",
+          "description": "Sender address"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^([^\\s,@]+@[^\\s,@]+(\\s*,\\s*[^\\s,@]+@[^\\s,@]+)*|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Recipients separated by commas, or a whole {{Parameter}}"
+        },
+        "cc": {
+          "type": "string",
+          "pattern": "^[^\\s,@]+@[^\\s,@]+(\\s*,\\s*[^\\s,@]+@[^\\s,@]+)*$"
+        },
+        "bcc": {
+          "type": "string",
+          "pattern": "^[^\\s,@]+@[^\\s,@]+(\\s*,\\s*[^\\s,@]+@[^\\s,@]+)*$"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "body": {
+          "type": "string",
+          "description": "Mail body, default ${in.body} (the message body)"
+        }
+      }
     }
   },
   "examples": [

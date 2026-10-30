@@ -24,13 +24,16 @@ Main integration process, in this order:
    Location ID = externalized parameter {{RR_OnPrem_LocationId}}, default DUMMY_LOC,
    Authentication Basic, Credential Name DUMMY_ONPREM_CRED.
 6. RR_Soap - Request Reply to receiver RCV_Soap, SOAP 1.x adapter:
-   Address http://s4dummy:8000/sap/bc/srt/dummy,
+   Address = externalized parameter {{RR_Soap_Address}},
+     default http://s4dummy:8000/sap/bc/srt/dummy,
    Proxy Type On-Premise, Location ID DUMMY_LOC,
    Authentication Basic, Credential Name DUMMY_SOAP_CRED.
    No WSDL and no operation name.
 7. SND_Alert - Send step to receiver RCV_Mail, Mail adapter:
-   Address smtp.example.com:587, Protection STARTTLS Mandatory,
-   Authentication Plain User/Password, Credential Name DUMMY_MAIL_CRED,
-   From noreply@example.com, To alerts@example.com, Subject Dummy alert,
+   Address = externalized parameter {{Mail_Server}}, default smtp.example.com:587,
+   Protection STARTTLS Mandatory, Authentication Plain User/Password,
+   Credential Name = externalized parameter {{Mail_Credential}}, default DUMMY_MAIL_CRED,
+   From noreply@example.com,
+   To = externalized parameter {{Mail_To}}, default alerts@example.com, Subject Dummy alert,
    Mail Body ${in.body}, Body MIME type text/plain.
 8. End - Message End.

@@ -47,8 +47,8 @@ const definitions = [
   }),
   fn(
     'getSupportedSteps',
-    'Spec v1 format in short, with an example. Call once before proposing. topics: also the format and rules of routing (router) or splitting (splitter, gather, process calls, local processes) when you need them. full: the JSON schema (rarely needed).',
-    { topics: { type: 'array', items: { type: 'string', enum: ['routing', 'splitting'] } }, full: { type: 'boolean' } }
+    'Spec v1 format in short, with an example. Call once before proposing. topics: also the format and rules of routing (router), splitting (splitter, gather, process calls, local processes), soap (SOAP 1.x call) or mail (send a mail) when you need them. full: the JSON schema (rarely needed).',
+    { topics: { type: 'array', items: { type: 'string', enum: ['routing', 'splitting', 'soap', 'mail'] } }, full: { type: 'boolean' } }
   ),
   fn('validateSpec', 'Check a spec without proposing it; only after a failed proposal. Returns { valid } or errors "CODE path: message".', {
     spec: { type: 'object' },
@@ -127,12 +127,14 @@ const SPEC_FORMAT = {
     splitter:
       '{ type, name?, description?, kind: iterating|general, expression (XPath, e.g. //order), grouping? (1), streaming? (true), stopOnException: true|false (always set), parallel?: false } — main line; the next steps run per item until a gather or the end (no nested split, no router before the gather: route in a called local process); properties set per item are lost after the gather',
     gather: '{ type, name?, description?, source (XPath, e.g. //order), target (e.g. /orders) } — closes a split',
-    processCall: '{ type, name?, description?, process (localProcesses name), loop?: { condition (as NonXML), max } } — main line, routes, exceptionSubprocess'
+    processCall: '{ type, name?, description?, process (localProcesses name), loop?: { condition (as NonXML), max } } — main line, routes, exceptionSubprocess',
+    requestReplySoap: '{ type, name?, description?, system?, url ("{{Param}}" allowed), authType: Basic, credentialName, proxyType: On-Premise, locationId?, timeout? } — no WSDL: the body is sent as it is; not in exceptionSubprocess',
+    sendMail: '{ type, name?, description?, system?, server (host:port), credentialName, from, to (comma-separated), cc?, bcc?, subject, body? (default ${in.body}) } — one-way; server, credentialName, to may be "{{Param}}"; also in exceptionSubprocess'
   },
   end: ['{ "type": "none", event?: message|escalation|error, category? (escalation: Others|RoutingConditionNotMet) }', '{ "type": "httpReceiver", system?, url, method, authType, credentialName?, proxyType?, locationId?, timeout? } (as requestReplyHttp)'],
-  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson | processCall, end?: { event: message|escalation|error, name?, category? } (new iFlows: escalation or error) }',
+  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson | processCall | sendMail, end?: { event: message|escalation|error, name?, category? } (new iFlows: escalation or error) }',
   localProcesses: '[{ name, description?, steps: [step] (routers as on the main line, route ends only { event: message }, which returns to the caller; no splitter, gather, processCall) }]',
-  parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId, or a constant header/property value "{{Name}}"',
+  parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId, a mail server or to, or a constant header/property value "{{Name}}"',
   resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
   names: 'id: letters, digits, _ · packageId: letters, digits, dots (a Name with _ or spaces is turned into the ID) · fileName, system: letter first, then letters, digits, _ · step names unique'
 }
@@ -140,7 +142,9 @@ const SPEC_FORMAT = {
 // Topics: steps whose format and rules are sent only when a conversation needs them (srv/agent/prompt-sections/<topic>.md)
 const TOPICS = {
   routing: { steps: ['router'], summary: 'router: branch into routes by conditions (route ends, joins)' },
-  splitting: { steps: ['splitter', 'gather', 'processCall'], summary: 'splitter / gather: steps per item; local processes run by a processCall (also looping)' }
+  splitting: { steps: ['splitter', 'gather', 'processCall'], summary: 'splitter / gather: steps per item; local processes run by a processCall (also looping)' },
+  soap: { steps: ['requestReplySoap'], summary: 'requestReplySoap: a SOAP 1.x call' },
+  mail: { steps: ['sendMail'], summary: 'sendMail: send a mail, one-way' }
 }
 for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
 

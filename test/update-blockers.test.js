@@ -243,3 +243,36 @@ describe('splitters, gathers, process calls and local processes on update (phase
     ])
   })
 })
+
+describe('SOAP and Mail receivers on update (phase 3)', () => {
+  const soapMail = baseSpec({
+    id: 'Blocker_Receivers',
+    steps: [
+      { type: 'requestReplySoap', name: 'RR', system: 'SysS', url: 'http://s4dummy/x', authType: 'Basic', credentialName: 'CRED', proxyType: 'On-Premise', locationId: 'LOC', timeout: 90000 },
+      { type: 'sendMail', name: 'SND', system: 'SysM', server: 'smtp.example.com:587', credentialName: 'CRED', from: 'a@example.com', to: 'b@example.com', cc: 'c@example.com', subject: 'Hi', body: 'Text' }
+    ]
+  })
+  async function readBackFlow(component, patch = (x) => x) {
+    const zip = await JSZip.loadAsync(Buffer.from((await build(soapMail)).zipBase64, 'base64'))
+    const file = Object.keys(zip.files).find((f) => IFLW.test(f))
+    const xml = await zip.file(file).async('string')
+    const el = xml.match(new RegExp(`<bpmn2:messageFlow id="[^"]+" name="${component}"[\\s\\S]*?</bpmn2:messageFlow>`))[0]
+    zip.file(file, xml.replace(el, patch(el)))
+    return specFromParsed(await parse(await zip.generateAsync({ type: 'nodebuffer' })), { packageId: soapMail.packageId })
+  }
+
+  test("the builder's own output gives the same spec back", async () => {
+    const r = await readBackFlow('SOAP')
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps).toEqual(soapMail.steps)
+  })
+
+  test('what the spec cannot hold is a blocker, not reset: a WSDL, WS-Security, other authentication, mail attachments or protection', async () => {
+    const blocker = async (component, key, value) => (await readBackFlow(component, (el) => setting(el, key, value))).blockers
+    expect(await blocker('SOAP', 'soapWsdlURL', '/wsdl/x.wsdl')).toEqual(["step 1 'RR': receiver SysS: soapWsdlURL is '/wsdl/x.wsdl'; an update would reset it to '(empty)'"])
+    expect(await blocker('SOAP', 'WSSecurity_outbound', 'SignMessage')).toEqual(["step 1 'RR': receiver SysS: WSSecurity_outbound is 'SignMessage'; an update would reset it to 'None'"])
+    expect((await blocker('SOAP', 'authentication', 'None'))[0]).toMatch(/authentication is 'None'; an update would reset it to 'Basic'/)
+    expect(await blocker('Mail', 'ssl', 'none')).toEqual(["step 2 'SND': receiver SysM: ssl is 'none'; an update would reset it to 'starttls_mandatory'"])
+    expect(await blocker('Mail', 'attachments', 'x')).toEqual(["step 2 'SND': receiver SysM: attachments is 'x'; an update would reset it to '(empty)'"])
+  })
+})
