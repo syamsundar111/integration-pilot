@@ -186,6 +186,8 @@ From the former reference export checklist; each needs a reference export first.
   covers a router between a splitter and its gather.
 - Multicast: confirm on a deployed run whether exchange properties set in a branch reach the steps after the Join
   (the panel says "may not"), and how the branch output is combined.
+- Multicast layout: receiver lines can still cross, with receivers in several branches (the lanes of the later
+  branches) or with an exception subprocess in the same column.
 - SOAP receiver: Internet, no authentication, a WSDL with service, port and operation (needs `.wsdl` and
   its `.xsd` files as uploads, refused since phase 4); the credential name and location ID as parameters.
 - Mail: other protection, authentication and body types, attachments; a mail or SOAP receiver at the end.
