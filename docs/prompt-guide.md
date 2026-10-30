@@ -99,6 +99,8 @@ proposal says which:
 
 - **Package**: the first package on the tenant. Pick another one, or create a new package, in the
   proposal panel before approving.
+  An imported iFlow is the exception: the assistant asks which package to use before proposing it.
+  A package that doesn't exist yet is only created if you named it as a package.
 - **Trigger**: an HTTPS sender with a path made from the iFlow name ("Order Intake" ->
   `/order-intake`). Write "timer, run once" or another path to change it.
 - **End of error handling**: an exception subprocess ends with an **Escalation End**, so a failed

@@ -156,9 +156,9 @@ describe('import', () => {
     const { files } = await build(spec)
     const iflw = files.find((f) => IFLW.test(f.path)).content
     const r = await importIflow(Buffer.from(iflw), { fileName: 'My Flow.iflw' })
-    expect(r.spec).toMatchObject({ id: 'My_Flow_Imported', packageId: 'Imported', trigger: { type: 'httpsSender', address: '/test/flow' } })
+    expect(r.spec).toMatchObject({ id: 'My_Flow_Imported', packageId: 'ImportNoPackage', trigger: { type: 'httpsSender', address: '/test/flow' } })
     expect(r.spec.steps[0].description).toMatch(/^REPLACE WITH Groovy script 'Script' \(doIt.groovy is missing in the export\)/)
-    expect(r.notes).toContain('Target package: set one before proposing (in your message or in the proposal panel)')
+    expect(r.notes).toContain('Target package: none yet. Name one when you ask me to propose it; otherwise I will ask you for one.')
     expect(validate(r.spec, { attachments: Object.keys(r.attachments) }).valid).toBe(true)
   })
 

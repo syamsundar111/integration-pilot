@@ -1611,6 +1611,42 @@ describe('package not named: the first package on the tenant, no question (the p
     expect((await chat({ message: 'Build it in package Second Package' })).proposals[0].packageId).toBe('Second.Pkg')
   })
 
+  test('an import without a package: nothing is proposed, the tenant packages are offered; the answer sets it', async () => {
+    const { build } = require('../srv/iflow-builder/builder')
+    const zip = (await build({ ...sample, id: 'Import_No_Pkg' })).zipBase64
+    const { data: imported } = await POST('/api/importIflow', { fileName: 'x.zip', contentBase64: zip })
+    expect(imported.spec.packageId).toBe('ImportNoPackage')
+    expect(imported.notes).toContain('Target package: none yet. Name one when you ask me to propose it; otherwise I will ask you for one.')
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { useDraftSpec: true })).mockResolvedValueOnce(answer('Which package?'))
+    const first = await chat({ sessionId: imported.sessionId, message: 'Propose the imported iFlow as a new iFlow.' })
+    expect(first.proposals).toEqual([])
+    expect(lastToolResult()).toMatchObject({
+      valid: false,
+      errors: [expect.stringMatching(/^PACKAGE_REQUIRED /)],
+      packages: [{ id: 'PilotReference', name: 'Pilot Reference' }, { id: 'Second.Pkg', name: 'Second Package' }]
+    })
+    llm.chat
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { packageId: 'Second.Pkg' } }] }))
+      .mockResolvedValueOnce(toolCall('proposeIflow', { useDraftSpec: true }))
+      .mockResolvedValueOnce(answer('ready'))
+    const next = await chat({ sessionId: imported.sessionId, message: 'Second.Pkg' })
+    expect(next.proposals).toEqual([expect.objectContaining({ iflowId: expect.stringMatching(/^Import_No_Pkg/), packageId: 'Second.Pkg' })])
+  })
+
+  test('a package that does not exist counts as named only as a package, not as a word in the message', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_7', 'Imported') })).mockResolvedValueOnce(answer('ready'))
+    expect((await chat({ message: 'Propose the imported iFlow as a new iFlow.' })).proposals[0].packageId).toBe('PilotReference')
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_8', 'Imported') })).mockResolvedValueOnce(answer('ready'))
+    expect((await chat({ message: 'Build it in a new package called Imported' })).proposals[0].packageId).toBe('Imported')
+  })
+
+  test('a tenant without packages: the model is told to ask, no package is made up', async () => {
+    cpi.listPackages.mockImplementation(async () => [])
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_9', 'NoPackageGiven') })).mockResolvedValueOnce(answer('Which package?'))
+    expect((await chat({ message: 'Build it' })).proposals).toEqual([])
+    expect(lastToolResult().errors).toEqual([expect.stringMatching(/^PACKAGE_REQUIRED /)])
+  })
+
   test('the package of an earlier proposal of the conversation stays', async () => {
     llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: spec('Default_Pkg_5', 'Second.Pkg') })).mockResolvedValueOnce(answer('ready'))
     const first = await chat({ message: 'Build it in Second.Pkg' })

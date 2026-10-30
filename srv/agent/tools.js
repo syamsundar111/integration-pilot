@@ -27,7 +27,7 @@ const patternCache = {}
 // Groovy code in a chat message: a CPI entry function or a CPI import
 const GROOVY_IN_TEXT = /\bdef\s+Message\s+processData\s*\(|\bimport\s+com\.sap\.(gateway|it)\./
 const DRAFT_FIELDS = ['id', 'name', 'description', 'packageId', 'trigger', 'end', 'parameters', 'resources', 'exceptionSubprocess']
-const { toPackageId } = require('../lib/package-id')
+const { toPackageId, IMPORT_NO_PACKAGE } = require('../lib/package-id')
 
 const fn = (name, description, properties = {}, required = []) => ({
   type: 'function',
@@ -347,32 +347,51 @@ async function attachmentsOf(ctx) {
   return ctx.attachments
 }
 
+const wordPattern = (word) => `(?<![a-z0-9_.])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9_]|\\.[a-z0-9])`
+const isNamed = (text, word) => new RegExp(wordPattern(word)).test(text)
+/** "package X", "package id: X", "new package called 'X'", "X package" */
+const isNamedPackage = (text, word) =>
+  new RegExp(`\\bpackage\\b(?:\\s+(?:with|id|name|named|called))*\\s*[:=]?\\s*["“'\`]?${wordPattern(word)}|${wordPattern(word)}["”'\`]?\\s+package\\b`).test(text)
+
 /**
  * The target package when the user names none: the first package on the tenant, in CPI's order. The
  * proposal goes on with it (no question to the user); they change it, or create a new package, in the
- * proposal panel. Named = the package's id or name appears in a message of the user in this
- * conversation, or an earlier proposal of this conversation used it. AGENT_DEFAULT_PACKAGE=false
- * keeps the model's package (tests).
- * @returns {Promise<{ packageId: string, note: string }|null>} null: keep the spec's package
+ * proposal panel. Named = the package's id or name is a whole word in a message of the user in this
+ * conversation (for a package that does not exist yet: right after or before the word "package", since
+ * approving creates it), or an earlier proposal of this conversation used it. A tenant without packages
+ * has nothing to default to: ask. AGENT_DEFAULT_PACKAGE=false keeps the model's package (tests).
+ * @returns {Promise<{ packageId: string, note: string }|{ ask: string }|null>} null: keep the spec's package
  */
 async function defaultPackage(ctx, spec, pkg) {
   if (process.env.AGENT_DEFAULT_PACKAGE === 'false') return null
   const packages = await cpi.listPackages().catch(() => [])
-  if (!packages.length) return null // an empty tenant: the package the spec names is created on approval
   const rows = ctx.sessionId
     ? await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.from('iflowpilot.ChatMessage').columns('content').where({ session_ID: ctx.sessionId, role: 'user' })))
     : []
   const text = [ctx.message || '', ...rows.map((m) => m.content || '')].join('\n').toLowerCase()
   const existing = packages.find((p) => p.id === spec.packageId)
-  const named = [spec.packageId, pkg?.name, existing?.name].filter(Boolean).some((n) => text.includes(String(n).toLowerCase()))
+  const named = [spec.packageId, pkg?.name, existing?.name].filter(Boolean).some((n) => (existing ? isNamed : isNamedPackage)(text, String(n).toLowerCase()))
   if (named) return null
   if (ctx.sessionId && (await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.one.from('iflowpilot.Proposal').columns('ID').where({ session_ID: ctx.sessionId, packageId: spec.packageId })))))
     return null // the package of an earlier proposal of this conversation
+  if (!packages.length) return { ask: 'No package was named and none could be read from the tenant.' }
   const first = packages[0]
   if (first.id === spec.packageId) return null
   return {
     packageId: first.id,
     note: `No package was named, so the first package on the tenant is used: ${first.id} ("${first.name}"). Tell the user this in one line, and that they can pick another package or create a new one in the proposal panel before approving.`
+  }
+}
+
+/** The refusal for a proposal without a target package: the user chooses, the model never picks or invents one */
+async function askForPackage(why) {
+  const packages = await cpi.listPackages().catch(() => [])
+  return {
+    valid: false,
+    errors: [`PACKAGE_REQUIRED ${why}`],
+    ...(packages.length && { packages: packages.slice(0, 20).map(({ id, name }) => ({ id, name })) }),
+    instruction:
+      'Nothing was proposed. Do not choose or invent a package. If the user named one in this conversation, set it with editDraftSpec {"op":"set","fields":{"packageId":"<id>"}} and call proposeIflow with { "useDraftSpec": true }. Otherwise ask the user which package to use, offering the packages listed here, and wait for the answer.'
   }
 }
 
@@ -735,11 +754,13 @@ const handlers = {
     if (error) return error
     const notJson = unparsableSpec(spec)
     if (notJson) return notJson
+    if (spec.packageId === IMPORT_NO_PACKAGE) return askForPackage('The imported iFlow has no target package yet.')
     let pkg = await resolvePackage(spec.packageId)
     if (pkg.error) return { valid: false, errors: [pkg.error] }
     if (pkg.note) spec = { ...spec, packageId: pkg.id }
     // no package named by the user: the first package on the tenant (changeable in the proposal panel)
     const chosen = await defaultPackage(ctx, spec, pkg)
+    if (chosen?.ask) return askForPackage(chosen.ask)
     if (chosen) {
       spec = { ...spec, packageId: chosen.packageId }
       pkg = { id: chosen.packageId }

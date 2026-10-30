@@ -50,7 +50,7 @@ const cutOffKeptNote = (finished) => {
 }
 const HISTORY_LIMIT = 40 // earlier user messages and answers sent back to the model
 const INTERRUPTED = 'Interrupted by server restart — please send your message again.'
-const { toPackageId } = require('../lib/package-id')
+const { toPackageId, IMPORT_NO_PACKAGE } = require('../lib/package-id')
 
 const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 'utf8')
 
@@ -684,7 +684,7 @@ async function importIntoSession({ sessionId, fileName, buffer, packageId, user 
   await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ draftSpec: JSON.stringify(draft) })))
 
   const { spec } = result
-  await tools.nameSession(user, sessionId, `${spec.name || spec.id}${spec.packageId ? ` · ${spec.packageId}` : ''}`)
+  await tools.nameSession(user, sessionId, `${spec.name || spec.id}${spec.packageId && spec.packageId !== IMPORT_NO_PACKAGE ? ` · ${spec.packageId}` : ''}`)
   const stepList = (steps) => steps.map((s, i) => `${i + 1}. ${s.name}${/^REPLACE WITH /.test(s.description || '') ? ' *(placeholder)*' : ''}`).join('\n')
   const summary = [
     `Imported **${spec.name}** (\`${spec.id}\`) from ${fileName} as the draft spec: ${spec.trigger.type === 'timer' ? 'timer, run once' : `HTTPS ${spec.trigger.address}`}, ${spec.steps.length} steps.`,

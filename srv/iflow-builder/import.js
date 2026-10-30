@@ -16,6 +16,7 @@ const JSZip = require('jszip')
 const { parse } = require('./parser')
 const cpiValues = require('./cpi-values')
 const { validate } = require('./validator')
+const { IMPORT_NO_PACKAGE } = require('../lib/package-id')
 
 const MAX_STEPS = 50
 // data types of the reference exports; Java class names are case-sensitive
@@ -618,7 +619,7 @@ async function importIflow(buffer, { fileName, packageId }) {
     id,
     name: truncate(parsed.name || id, 100),
     description,
-    packageId: /^[A-Za-z0-9.]+$/.test(packageId || '') ? packageId : 'Imported',
+    packageId: /^[A-Za-z0-9.]+$/.test(packageId || '') ? packageId : IMPORT_NO_PACKAGE,
     trigger,
     steps,
     end,
@@ -627,7 +628,7 @@ async function importIflow(buffer, { fileName, packageId }) {
     ...(Object.keys(params).length && { parameters: params }),
     ...(resources.length && { resources })
   }
-  if (spec.packageId === 'Imported') notes.push('Target package: set one before proposing (in your message or in the proposal panel)')
+  if (spec.packageId === IMPORT_NO_PACKAGE) notes.push('Target package: none yet. Name one when you ask me to propose it; otherwise I will ask you for one.')
   if (placeholders) notes.push(`${placeholders} placeholder step(s) say what to replace them with in the CPI web editor`)
   const { valid, errors } = validate(spec, { attachments: Object.keys(attachments) })
   return { spec, attachments, notes, placeholders, valid, errors }

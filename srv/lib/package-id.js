@@ -6,6 +6,9 @@
 
 const PACKAGE_ID = /^[A-Za-z0-9.]+$/
 
+/** The packageId of an imported draft without a target package: proposing it asks the user for one */
+const IMPORT_NO_PACKAGE = 'ImportNoPackage'
+
 /** What was removed, for "(CPI does not allow … in IDs)" */
 function removedKinds(value) {
   const underscores = value.includes('_')
@@ -27,4 +30,4 @@ function toPackageId(value) {
   return { id, name: v, note: id ? `Package ID will be ${id} (CPI does not allow ${removedKinds(v)} in IDs).` : null }
 }
 
-module.exports = { PACKAGE_ID, toPackageId }
+module.exports = { PACKAGE_ID, IMPORT_NO_PACKAGE, toPackageId }
