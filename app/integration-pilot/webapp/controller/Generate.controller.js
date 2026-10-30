@@ -35,7 +35,9 @@ sap.ui.define(
       gather: 'Gather',
       processCall: 'Process Call',
       requestReplySoap: 'Request Reply (SOAP)',
-      sendMail: 'Send (Mail)'
+      sendMail: 'Send (Mail)',
+      messageMapping: 'Message Mapping',
+      xsltMapping: 'XSLT Mapping'
     }
     /** The step type as the CPI editor names it: Iterating / General Splitter, (Looping) Process Call */
     const typeOf = (s) =>
@@ -77,6 +79,14 @@ sap.ui.define(
       const last = g < 0 ? spec.steps.length : i + 1 + g // index after the last step that runs per item
       const range = last - (i + 1) === 0 ? 'No step runs per item' : last - (i + 1) === 1 ? `Step ${i + 2} runs once per item` : `Steps ${i + 2}–${last} run once per item`
       return g < 0 ? `${range}, up to the end` : `${range}; ${spec.steps[last].name || 'the gather'} (step ${last + 1}) combines the items again`
+    }
+
+    function xmlMappingNote(spec) {
+      const note = (what, format, hits) =>
+        hits.length
+          ? `${what} takes ${format}. CPI may show a notice about ${format} input on ${hits.join(', ')}: it cannot tell that the step before produces ${format}. Not an error; make sure the body is ${format} at that point.`
+          : ''
+      return [note('A Message Mapping', 'XML or JSON', xmlInputHits(spec, ['messageMapping'])), note('An XSLT Mapping', 'XML', xmlInputHits(spec, ['xsltMapping']))].filter(Boolean).join(' ')
     }
 
     /**
@@ -130,13 +140,14 @@ sap.ui.define(
     }
 
     /**
-     * The same for SOAP receivers: the SOAP body must be XML, and CPI may show a notice on the SOAP line unless the step
-     * before (in its route: the one before the route's router at first) is known to produce XML. Routes and local processes too.
+     * The same for steps that take XML (SOAP receivers, mapping steps): CPI may show a notice on them unless the step
+     * before (in its route: the one before the route's router at first) is known to produce XML. Routes and local
+     * processes too. @returns the steps of those types, with the step before each
      */
-    function xmlSoapNote(spec) {
+    function xmlInputHits(spec, types) {
       const hits = []
       const check = (s, before) => {
-        if (s.type === 'requestReplySoap' && !(before && XML_OUTPUT.includes(before.type))) hits.push(`${s.name || 'the SOAP receiver'} (${before ? `after ${before.name || typeOf(before)}` : 'first step'})`)
+        if (types.includes(s.type) && !(before && XML_OUTPUT.includes(before.type))) hits.push(`${s.name || typeOf(s)} (${before ? `after ${before.name || typeOf(before)}` : 'first step'})`)
       }
       for (const line of [spec.steps, ...(spec.localProcesses || []).map((lp) => lp.steps || [])]) {
         let before = null
@@ -155,6 +166,11 @@ sap.ui.define(
           before = s
         }
       }
+      return hits
+    }
+
+    function xmlSoapNote(spec) {
+      const hits = xmlInputHits(spec, ['requestReplySoap'])
       return hits.length
         ? `The body of a SOAP call must be XML. CPI may show the notice "may not pass XML message to Soap1x Receiver. Soap1x Receiver supports XML input only" on the SOAP line of ${hits.join(', ')}: it cannot tell that the step before produces XML. Not an error; make sure the body is XML at that point.`
         : ''
@@ -932,6 +948,7 @@ sap.ui.define(
           receiversText: '',
           xmlRouterText: '',
           xmlSoapText: '',
+          xmlMappingText: '',
           gatherText: '',
           combineText: ''
         }
@@ -967,6 +984,12 @@ sap.ui.define(
                         `XPath ${s.expression}${s.grouping > 1 ? `, ${s.grouping} items per message` : ''}${s.streaming === false ? ', no streaming' : ''}`,
                         s.stopOnException ? 'One failing item stops the rest' : 'One failing item does not stop the rest'
                       ].join('\n')
+                    : s.type === 'messageMapping'
+                    ? s.mapping
+                      ? `Refers to the artifact ${s.mapping}: it must exist on the tenant and be deployed before the iFlow can run`
+                      : `Mapping inside the iFlow: ${s.file}${(s.schemas || []).length ? `, with ${s.schemas.join(', ')}` : ''}`
+                    : s.type === 'xsltMapping'
+                    ? `mapping/${s.file} (attached file)`
                     : s.type === 'requestReplySoap'
                     ? [
                         `SOAP 1.x ${s.url}`,
@@ -1070,11 +1093,12 @@ sap.ui.define(
           if (active.scripts.length)
             active.scriptsText = `${active.scripts.length} Groovy script(s) are suggested, not compiled or tested here. Review them below and test the iFlow in CPI after creation.`
           active.resourcesText = (spec.resources || []).length
-            ? `XSLT files added as src/main/resources/mapping/: ${spec.resources.join(', ')}. v1 has no XSLT step — add an XSLT Mapping step for them in the CPI web editor.`
+            ? `XSLT files added as src/main/resources/mapping/ that no step uses: ${spec.resources.join(', ')}.`
             : ''
           active.receiversText = receiversNote(spec)
           active.xmlRouterText = xmlRouterNote(spec)
           active.xmlSoapText = xmlSoapNote(spec)
+          active.xmlMappingText = xmlMappingNote(spec)
           active.gatherText = gatherNote(spec)
           active.combineText = combineNote(spec)
         }

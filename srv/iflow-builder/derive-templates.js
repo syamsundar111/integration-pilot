@@ -124,6 +124,15 @@ const VALUE_FIELDS = {
     variant: /cname::LoopingProcess\//,
     values: (p) => [['expressionType', p.expressionType]]
   },
+  // Message Mapping and XSLT Mapping steps: how they refer to the mapping
+  'Message Mapping': {
+    variant: /cname::MessageMapping\//,
+    values: (p) => [['mappingReference', p.mappingReference]]
+  },
+  'XSLT Mapping': {
+    variant: /cname::XSLTMapping\//,
+    values: (p) => [['mappingSource', p.mappingSource], ['mappingoutputformat', p.mappingoutputformat]]
+  },
   // an Escalation End: its category (ErrorCode: Others, RoutingConditionNotMet, ReceiverNotFound, ...)
   'Escalation End': {
     variant: /cname::EscalationEndEvent\//,
@@ -361,6 +370,20 @@ async function main() {
   t['iflw/end-local.xml'] = apply(block(st, 'id="EndEvent_10"'), 'end-local', {
     attrs: { 'id="EndEvent_10"': 'id="{{ID}}"', 'name="End 1"': 'name="{{NAME}}"', '>SequenceFlow_13<': '>{{INCOMING}}<' }
   })
+
+  // Message Mapping (an artifact, or a mapping inside the iFlow: the same step without the bundle id) and XSLT Mapping
+  const mapping = await readZip('Ref_Mapping.zip')
+  const mappingStep = (name, props) => {
+    const el = block(mapping.iflw, `name="${name}"`)
+    const id = el.match(/id="([^"]+)"/)[1]
+    return apply(el, name, {
+      attrs: { [`id="${id}"`]: 'id="{{ID}}"', [`name="${name}"`]: 'name="{{NAME}}"', [`>${el.match(/<bpmn2:incoming>([^<]+)</)[1]}<`]: '>{{INCOMING}}<', [`>${el.match(/<bpmn2:outgoing>([^<]+)</)[1]}<`]: '>{{OUTGOING}}<' },
+      props
+    })
+  }
+  const mappingProps = { mappingname: 'MAPPING_NAME_VALUE', mappingpath: 'MAPPING_PATH_VALUE', mappinguri: 'MAPPING_URI_VALUE' }
+  t['iflw/step-message-mapping.xml'] = mappingStep('MM_UseArtifact', { ...mappingProps, messageMappingBundleId: 'BUNDLE_ID_VALUE' })
+  t['iflw/step-xslt-mapping.xml'] = mappingStep('XSLT_Dummy', mappingProps)
 
   t['iflw/step-groovy-script.xml'] = step('CallActivity_8', 'Groovy Script 1', 'SequenceFlow_6', 'SequenceFlow_14', { script: 'SCRIPT_VALUE' })
   t['iflw/step-json-to-xml.xml'] = step('CallActivity_11', 'JSON to XML Converter 1', 'SequenceFlow_14', 'SequenceFlow_12')

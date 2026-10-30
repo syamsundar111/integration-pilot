@@ -26,8 +26,8 @@ describe('validator', () => {
     expect(errors).toEqual(expect.arrayContaining(["spec: missing required field 'name'", "spec: missing required field 'trigger'"]))
   })
 
-  test.each(['parallelMulticast', 'messageMapping'])('rejects %s with a clear message', (type) => {
-    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' is not supported yet \\(no multicast, join or mapping\\)`))
+  test.each(['parallelMulticast', 'joinStep'])('rejects %s with a clear message', (type) => {
+    expectError(baseSpec({ steps: [{ type }] }), new RegExp(`steps\\[0\\]: '${type}' is not supported yet \\(no multicast or join\\)`))
   })
 
   test('another router type points to the router format (phase 1b)', () => {
@@ -186,7 +186,7 @@ describe('validator', () => {
       steps: [
         { type: 'contentModifier', name: 'A' },
         { type: 'contentModifier', name: 'A', headers: [{ name: 'X', type: 'numberRange', value: '/a' }] },
-        { type: 'messageMapping' },
+        { type: 'parallelMulticast' },
         ...Array.from({ length: 49 }, () => ({ type: 'jsonToXml' }))
       ],
       end: { type: 'httpReceiver', url: '{{Missing}}', method: 'POST', authType: 'Basic' } // no credentialName
@@ -527,5 +527,34 @@ describe('gather: Combine or Combine at XPath', () => {
     expect(validate(baseSpec({ steps: [split, { type: 'gather', name: 'G', source: '//item' }] })).issues).toEqual([
       { code: 'GATHER_XPATH', message: 'steps[1]: Combine at XPath needs both source and target — set both, or remove them for Combine' }
     ])
+  })
+})
+
+describe('Message Mapping and XSLT Mapping (phase 4)', () => {
+  const issues = (spec, attachments = []) => validate(spec, { attachments }).issues
+  test('an artifact, or a file with schemas of this conversation; everywhere', () => {
+    const artifact = { type: 'messageMapping', name: 'M', mapping: 'MM_X' }
+    const router = { type: 'router', name: 'R', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1', steps: [{ ...artifact, name: 'InRoute' }] }, { name: 'D', default: true }] }
+    const spec = baseSpec({ steps: [artifact, router, { type: 'processCall', process: 'L' }], exceptionSubprocess: { steps: [{ ...artifact, name: 'InError' }] }, localProcesses: [{ name: 'L', steps: [{ ...artifact, name: 'InLocal' }] }] })
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+    const inline = baseSpec({ steps: [{ type: 'messageMapping', name: 'M', file: 'X.mmap', schemas: ['a b.xsd', 'c.wsdl'] }] })
+    expect(validate(inline, { attachments: ['X.mmap', 'a b.xsd', 'c.wsdl'] })).toMatchObject({ valid: true, warnings: [] })
+  })
+
+  test('exactly one source; the files must be of this conversation (the assistant never writes them)', () => {
+    expect(issues(baseSpec({ steps: [{ type: 'messageMapping', name: 'M' }] })).map((i) => i.code)).toEqual(['MAPPING_SOURCE'])
+    expect(issues(baseSpec({ steps: [{ type: 'messageMapping', name: 'M', mapping: 'A', file: 'X.mmap' }] }), ['X.mmap']).map((i) => i.code)).toEqual(['MAPPING_SOURCE'])
+    expect(issues(baseSpec({ steps: [{ type: 'messageMapping', name: 'M', mapping: 'A', schemas: ['a.xsd'] }] })).map((i) => i.code)).toEqual(['MAPPING_SOURCE'])
+    expect(issues(baseSpec({ steps: [{ type: 'messageMapping', name: 'M', file: 'X.mmap' }] }))[0].message).toMatch(/steps\[0\]\.file: 'X\.mmap' is not a file of this conversation — a mapping inside the iFlow comes from an imported or existing iFlow and is never written/)
+    expect(issues(baseSpec({ steps: [{ type: 'messageMapping', name: 'M', file: 'X.mmap', schemas: ['a.xsd'] }] }), ['X.mmap']).map((i) => i.code)).toEqual(['ATTACHMENT_MISSING'])
+    expect(issues(baseSpec({ steps: [{ type: 'xsltMapping', name: 'X', file: 't.xsl' }] }))[0].message).toMatch(/steps\[0\]\.file: 't\.xsl' is not an attached file/)
+    expect(validate(baseSpec({ steps: [{ type: 'xsltMapping', name: 'X', file: 't.xsl' }] }), { attachments: ['t.xsl'] }).valid).toBe(true)
+  })
+
+  test('default names; other names point to the format', () => {
+    const names = effectiveNames(baseSpec({ steps: [{ type: 'messageMapping', mapping: 'A' }, { type: 'xsltMapping', file: 't.xsl' }] }))
+    expect(names.steps).toEqual(['Message Mapping 1', 'XSLT Mapping 1'])
+    expectError(baseSpec({ steps: [{ type: 'xslt' }] }), /'xslt' — an XSLT step is \{ "type": "xsltMapping"/)
+    expectError(baseSpec({ steps: [{ type: 'graphicalMapping' }] }), /'graphicalMapping' — a Message Mapping is \{ "type": "messageMapping"/)
   })
 })

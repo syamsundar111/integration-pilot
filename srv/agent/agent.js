@@ -66,6 +66,7 @@ const ROUTING_TEXT = /\b(rout(e|es|er|ers|ing)|branch(es|ing)?|conditions?|condi
 const SPLITTING_TEXT = /\b(split(s|ter|ters|ting)?|gather|for (each|every)|each (item|order|record|entry|line|element|row|message)|per (item|order|record|entry|line|element|row)|one by one|individually|local (integration )?process(es)?|process calls?|loop(s|ing)?|iterat\w*|paging|page by page|next page|batch(es)?)\b/i
 const SOAP_TEXT = /\b(soap|wsdl|web ?services?)\b/i
 const MAIL_TEXT = /\b(e-?mails?|mails?|smtp)\b/i
+const MAPPING_TEXT = /\b(mappings?|xslt?|mmap)\b/i
 const PROMPT_SECTIONS = [
   // the conversation has files (attached, written by the assistant, from an iFlow or an import)
   { name: 'attachedFiles', applies: ({ files }) => files.length > 0 },
@@ -76,7 +77,8 @@ const PROMPT_SECTIONS = [
   // splitters, gathers, process calls and local processes: the request works per item or reuses steps, or the draft has them
   { name: 'splitting', applies: ({ userText, draftTypes }) => ['splitter', 'gather', 'processCall'].some((t) => draftTypes.has(t)) || SPLITTING_TEXT.test(userText) },
   { name: 'soap', applies: ({ userText, draftTypes }) => draftTypes.has('requestReplySoap') || SOAP_TEXT.test(userText) },
-  { name: 'mail', applies: ({ userText, draftTypes }) => draftTypes.has('sendMail') || MAIL_TEXT.test(userText) }
+  { name: 'mail', applies: ({ userText, draftTypes }) => draftTypes.has('sendMail') || MAIL_TEXT.test(userText) },
+  { name: 'mapping', applies: ({ userText, draftTypes }) => draftTypes.has('messageMapping') || draftTypes.has('xsltMapping') || MAPPING_TEXT.test(userText) }
 ].map((s) => ({ ...s, text: fs.readFileSync(path.join(__dirname, 'prompt-sections', `${s.name}.md`), 'utf8').trim() }))
 
 const db = (user, fn) => cds.tx({ user }, fn)
@@ -94,7 +96,9 @@ function attachmentsContext(files) {
   const line = (f) =>
     f.kind === 'groovy'
       ? `- ${f.fileName} (Groovy, ${f.lines} lines${ORIGIN_NOTE[f.origin] || ''}): groovyScript step with "fileName": "${f.fileName.replace(/\.groovy$/, '')}" and no "code"`
-      : `- ${f.fileName} (XSLT, ${f.lines} lines${ORIGIN_NOTE[f.origin] || ''}): list it in "resources"`
+      : f.kind === 'xsl'
+        ? `- ${f.fileName} (XSLT, ${f.lines} lines${ORIGIN_NOTE[f.origin] || ''}): an xsltMapping step with "file": "${f.fileName}" (or list it in "resources" if no step uses it)`
+        : `- ${f.fileName} (${f.kind === 'mmap' ? 'Message Mapping' : 'schema'}${ORIGIN_NOTE[f.origin] || ''}): keep it in the messageMapping step that names it`
   return `Files of this conversation (stored on the server; reference them by name; change your own scripts with writeScript; never retype the others):\n${files.map(line).join('\n')}`
 }
 

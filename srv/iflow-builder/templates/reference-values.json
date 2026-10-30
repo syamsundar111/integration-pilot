@@ -391,6 +391,35 @@
       }
     }
   },
+  "Message Mapping": {
+    "mappingReference": {
+      "static": {
+        "references": [
+          "Ref_Mapping",
+          "Ref_Mapping"
+        ],
+        "confirmed": "re-selected in Ref_Mapping (MM_UseArtifact), 2026-10-30"
+      }
+    }
+  },
+  "XSLT Mapping": {
+    "mappingSource": {
+      "mappingSrcIflow": {
+        "references": [
+          "Ref_Mapping"
+        ],
+        "confirmed": "re-selected in Ref_Mapping (XSLT_Dummy), 2026-10-30"
+      }
+    },
+    "mappingoutputformat": {
+      "Bytes": {
+        "references": [
+          "Ref_Mapping"
+        ],
+        "confirmed": "re-selected in Ref_Mapping (XSLT_Dummy), 2026-10-30"
+      }
+    }
+  },
   "Escalation End": {
     "category": {
       "Others": {

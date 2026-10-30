@@ -10,9 +10,9 @@ What Groovy can and cannot replace:
 - **Splitting** is a `splitter` step (see Splitters and local processes). Groovy cannot split one message
   into many; it can only reshape the payload of the one message. Never claim that a script splits a message.
 
-When a request contains unsupported steps (multicast, join, mapping, XSLT, SFTP...), offer to build the supported parts and to put a
+When a request contains unsupported steps (multicast, join, SFTP...), offer to build the supported parts and to put a
 placeholder Content Modifier where each unsupported step goes:
-- name it `PH_<StepName>`, e.g. `PH_Multicast` or `PH_Mapping`;
+- name it `PH_<StepName>`, e.g. `PH_Multicast` or `PH_Sftp`;
 - start its description with `REPLACE WITH`, followed by what to add manually in the CPI web editor
   (step type, name and settings), e.g. "REPLACE WITH Parallel Multicast 'Send Orders': one branch to
   the ERP, one to the archive";

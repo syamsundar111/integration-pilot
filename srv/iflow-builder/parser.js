@@ -162,6 +162,15 @@ function stepOf(node, adaptersBySource, processNames = {}) {
   const local = node.localName
   if (local === 'exclusiveGateway') return { ...base, type: 'router' }
   if (local === 'parallelGateway') return { ...base, type: 'parallelMulticast' }
+  // Message Mapping: an artifact (bundle id) or a mapping inside the iFlow; XSLT Mapping: a file. Settings for update checks
+  if (p.activityType === 'Mapping' && (p.mappingType === 'MessageMapping' || p.subActivityType === 'XSLTMapping')) {
+    const step =
+      p.subActivityType === 'XSLTMapping'
+        ? { ...base, type: 'xsltMapping', file: String(p.mappinguri || '').split('/').pop() }
+        : { ...base, type: 'messageMapping', mapping: p.messageMappingBundleId || null, file: p.messageMappingBundleId ? null : `${p.mappingname}.mmap` }
+    Object.defineProperty(step, 'settings', { value: p, enumerable: false })
+    return step
+  }
 
   switch (p.activityType) {
     case 'Enricher': {
@@ -547,7 +556,31 @@ async function parse(input) {
   // A process that a (Looping, Idempotent) Process Call calls is local too: older exports may lack processType.
   const processes = childrenNamed(definitions, 'process')
   const processNames = Object.fromEntries(processes.map((p) => [p.getAttribute('id'), p.getAttribute('name')]))
-  const stepAt = (n) => stepOf(n, adaptersBySource, processNames)
+  // the mapping files of the iFlow; a mapping inside it names its schemas, which may include others
+  const resourceFiles = Object.keys(files)
+    .filter((f) => /src\/main\/resources\/(mapping\/[^/]+\.(mmap|xslt?)|(xsd|wsdl)\/[^/]+)$/i.test(f))
+    .map((f) => ({ fileName: f.split('/').pop(), path: f.slice(root.length), content: files[f] }))
+  const schemaFiles = resourceFiles.filter((f) => /\.(xsd|wsdl)$/i.test(f.fileName))
+  const schemasOf = (mmap) => {
+    const seen = new Set()
+    const visit = (content, pattern) => {
+      for (const m of String(content).matchAll(pattern)) {
+        const name = m[1].split('/').pop()
+        const schema = schemaFiles.find((f) => f.fileName === name)
+        if (schema && !seen.has(name)) {
+          seen.add(name)
+          visit(schema.content, /schemaLocation="([^"]+)"/g)
+        }
+      }
+    }
+    visit(resourceFiles.find((f) => f.fileName === mmap)?.content, /<elem>([^<]+\.(?:xsd|wsdl))<\/elem>/gi)
+    return [...seen]
+  }
+  const stepAt = (n) => {
+    const step = stepOf(n, adaptersBySource, processNames)
+    if (step.type === 'messageMapping' && step.file) step.schemas = schemasOf(step.file)
+    return step
+  }
   const called = new Set([...definitions.getElementsByTagNameNS('*', 'callActivity')].map((el) => props(el).processId).filter(Boolean))
   const locals = processes.filter((p) => props(p).processType === 'directCall' || called.has(p.getAttribute('id')))
   // several: the one with a trigger (a start event with a timer or message definition) is the main flow
@@ -689,6 +722,7 @@ async function parse(input) {
     parameters,
     scripts,
     mappings,
+    resourceFiles, // mapping, schema and WSDL files with their content, for updates and Import
     linear,
     mainPath: branching, // branching flows only: { steps (routers carry routes), end }
     // branching flows only: the flow as the spec holds it ({ steps, end }), or { unsupported: reason }

@@ -69,7 +69,9 @@ const FIXED_SETTINGS = (() => {
     processCall: fixed(read('step-process-call.xml')),
     loopingProcessCall: fixed(read('step-process-call-looping.xml')),
     soap: fixed(read('messageflow-soap-receiver.xml')),
-    mail: fixed(read('messageflow-mail-receiver.xml'))
+    mail: fixed(read('messageflow-mail-receiver.xml')),
+    messageMapping: fixed(read('step-message-mapping.xml')),
+    xsltMapping: fixed(read('step-xslt-mapping.xml'))
   }
 })()
 /** Throws a blocker for a setting that differs from the builder's fixed value */
@@ -121,7 +123,7 @@ function callFields(s, what) {
 }
 
 /** Spec step from a parsed step, or a blocker text */
-function toStep(s, scripts, where) {
+function toStep(s, scripts, files, where) {
   const base = { type: s.type, ...(s.name && { name: s.name }) }
   switch (s.type) {
     case 'contentModifier': {
@@ -200,6 +202,16 @@ function toStep(s, scripts, where) {
         subject: s.subject,
         ...(s.body !== '${in.body}' && { body: s.body })
       }
+    case 'messageMapping': {
+      checkFixed(s, FIXED_SETTINGS.messageMapping, `${where} '${s.name}'`)
+      if (s.mapping) return { ...base, mapping: s.mapping }
+      if (!files.some((f) => f.fileName === s.file)) throw `${where} '${s.name}': the mapping ${s.file} is not in the iFlow`
+      return { ...base, file: s.file, ...(s.schemas?.length && { schemas: s.schemas }) }
+    }
+    case 'xsltMapping':
+      checkFixed(s, FIXED_SETTINGS.xsltMapping, `${where} '${s.name}'`)
+      if (!files.some((f) => f.fileName === s.file)) throw `${where} '${s.name}': the XSLT file ${s.file} is not in the iFlow`
+      return { ...base, file: s.file }
     case 'gather':
       checkFixed(s, FIXED_SETTINGS.gather, `${where} '${s.name}'`)
       if (s.aggregationAlgorithm === cpiValues.GATHER_AT_XPATH) return { ...base, source: s.source, target: s.target }
@@ -254,7 +266,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
 
   const stepFrom = (s, where) =>
     SUPPORTED_STEPS.includes(s.type) && s.type !== 'router'
-      ? attempt(() => toStep(s, parsed.scripts || [], where))
+      ? attempt(() => toStep(s, parsed.scripts || [], parsed.resourceFiles || [], where))
       : (blockers.push(`${where} '${s.name}': ${s.activityType || s.type} is not supported by the spec`), null)
   const END_EVENTS = { message: 'message', escalation: 'escalation', error: 'error' } // terminate: not in the spec
   // an Escalation End's category must be one the spec allows; another (e.g. ReceiverNotFound) would be reset
@@ -292,7 +304,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     if (!lp.steps.length) blockers.push(`local process ${lp.name} has no steps (the spec needs at least one)`)
     const localStep = (s, where) =>
       SUPPORTED_LOCAL_STEPS.includes(s.type) && s.type !== 'router'
-        ? attempt(() => toStep(s, parsed.scripts || [], where))
+        ? attempt(() => toStep(s, parsed.scripts || [], parsed.resourceFiles || [], where))
         : (blockers.push(`${where} '${s.name}': ${s.activityType || s.type} is not supported there`), null)
     return {
       name: lp.name,
@@ -310,7 +322,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     const sub = parsed.exceptionSubprocess
     const subSteps = sub.steps.map((s, i) =>
       SUPPORTED_EXCEPTION_STEPS.includes(s.type)
-        ? attempt(() => toStep(s, parsed.scripts || [], `exception subprocess step ${i + 1}`))
+        ? attempt(() => toStep(s, parsed.scripts || [], parsed.resourceFiles || [], `exception subprocess step ${i + 1}`))
         : (blockers.push(`exception subprocess step ${i + 1} '${s.name}': ${s.activityType || s.type} is not supported there`), null)
     )
     if (!subSteps.length) blockers.push('the exception subprocess has no steps (the spec needs at least one)')
@@ -338,24 +350,26 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   // Resources the builder does not write (mappings, schemas, other scripts) would be deleted
   // XSLT files are kept as spec.resources (their content comes back in `resources`)
   const routeSteps = (routed?.steps || []).filter((s) => s.type === 'router').flatMap((r) => r.routes.flatMap((x) => x.steps))
-  const scripts = new Set(
-    [
-      ...(parsed.steps || []),
-      ...routeSteps,
-      ...(parsed.exceptionSubprocess?.steps || []),
-      ...(parsed.localProcessSteps || []).flatMap((lp) => lp.steps.flatMap((s) => [s, ...(s.routes || []).flatMap((r) => r.steps || [])]))
-    ]
-      .filter((s) => s.type === 'groovyScript')
-      .map((s) => `script/${s.fileName}.groovy`)
-  )
+  const everyStep = [
+    ...(parsed.steps || []),
+    ...routeSteps,
+    ...(parsed.exceptionSubprocess?.steps || []),
+    ...(parsed.localProcessSteps || []).flatMap((lp) => lp.steps.flatMap((s) => [s, ...(s.routes || []).flatMap((r) => r.steps || [])]))
+  ]
+  const scripts = new Set(everyStep.filter((s) => s.type === 'groovyScript').map((s) => `script/${s.fileName}.groovy`))
+  // files the mapping steps use: built from their step, not listed in spec.resources
+  const stepFiles = new Set(everyStep.flatMap((s) => (s.type === 'xsltMapping' || s.type === 'messageMapping' ? [s.file, ...(s.schemas || [])].filter(Boolean) : [])))
+  const usedFiles = (parsed.resourceFiles || []).filter((f) => stepFiles.has(f.fileName))
+  const usedPaths = new Set(usedFiles.map((f) => f.path.slice(RESOURCES.length)))
   const mappings = Object.fromEntries((parsed.mappings || []).filter((m) => /^[A-Za-z][A-Za-z0-9_.-]*\.xslt?$/.test(m.fileName)).map((m) => [`mapping/${m.fileName}`, m]))
   for (const f of parsed.files || []) {
     if (!f.startsWith(RESOURCES)) continue
     const rel = f.slice(RESOURCES.length)
-    if (rel.startsWith('scenarioflows/') || rel === 'parameters.prop' || rel === 'parameters.propdef' || scripts.has(rel) || mappings[rel]) continue
+    if (rel.startsWith('scenarioflows/') || rel === 'parameters.prop' || rel === 'parameters.propdef' || scripts.has(rel) || mappings[rel] || usedPaths.has(rel)) continue
     blockers.push(`resource ${rel} (would be deleted by an update)`)
   }
-  const resources = Object.fromEntries(Object.values(mappings).map((m) => [m.fileName, m.content]))
+  const resources = Object.fromEntries([...Object.values(mappings), ...usedFiles].map((m) => [m.fileName, m.content]))
+  const specResources = Object.values(mappings).map((m) => m.fileName).filter((f) => !stepFiles.has(f))
 
   // Current configured values win over the defaults in parameters.prop
   const parameters = { ...(parsed.parameters || {}) }
@@ -395,7 +409,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     ...(exceptionSubprocess && { exceptionSubprocess }),
     ...(localProcesses.length && { localProcesses }),
     ...(Object.keys(parameters).length && { parameters }),
-    ...(Object.keys(resources).length && { resources: Object.keys(resources) })
+    ...(specResources.length && { resources: specResources })
   }
   const { valid, errors } = validate(spec, { attachments: Object.keys(resources) })
   if (!valid) return { spec: null, blockers: errors.map((err) => `not representable as a spec: ${err}`) }

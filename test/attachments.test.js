@@ -57,3 +57,23 @@ describe('attachments', () => {
     expect(() => check({ fileName: 'empty.groovy', content: ' ' })).toThrow(/empty/)
   })
 })
+
+describe('mapping files come only from an iFlow (phase 4)', () => {
+  const store = require('../srv/lib/attachments')
+  test('an upload of a .mmap, .xsd or .wsdl is refused; Groovy and XSLT stay allowed', () => {
+    for (const fileName of ['X.mmap', 'a.xsd', 'b.wsdl']) expect(() => store.check({ fileName, content: '<x/>' })).toThrow(/only \.groovy and \.xsl\/\.xslt files can be attached/)
+    expect(store.check({ fileName: 't.xsl', content: '<x/>' })).toMatchObject({ kind: 'xsl' })
+  })
+  test('referencedBy names the files of the mapping steps, each once', () => {
+    const spec = {
+      steps: [
+        { type: 'xsltMapping', file: 't.xsl' },
+        { type: 'messageMapping', mapping: 'MM_Art' },
+        { type: 'messageMapping', file: 'X.mmap', schemas: ['a.xsd'] }
+      ],
+      localProcesses: [{ name: 'L', steps: [{ type: 'messageMapping', file: 'X.mmap', schemas: ['a.xsd', 'b.wsdl'] }] }],
+      resources: ['t.xsl']
+    }
+    expect(store.referencedBy(spec).sort()).toEqual(['X.mmap', 'a.xsd', 'b.wsdl', 't.xsl'])
+  })
+})

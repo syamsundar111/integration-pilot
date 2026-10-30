@@ -11,4 +11,6 @@ Main integration process:
    MM_DummyOrderToNotif (not a mapping stored inside the iFlow).
 4. XSLT_Dummy - XSLT Mapping step using resource DummyTransform.xsl,
    an identity transform.
-5. End - Message End.
+5. MM_Inline - Message Mapping step with a mapping inside the iFlow: MM_Inline_OrderToNotif.mmap,
+   DummyOrder.xsd -> DummyNotif.xsd, id -> externalId, text -> shortText.
+6. End - Message End.

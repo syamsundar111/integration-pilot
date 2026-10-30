@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://iflow-pilot/spec-schema.json",
   "title": "iFlow spec v1",
-  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Routers branch on the main line into routes that end or continue with the step after the router. A splitter on the main line makes the steps after it run once per item, until a gather or the end. Local processes are called with a processCall step. Receivers in steps: HTTP (requestReplyHttp), SOAP 1.x (requestReplySoap) and Mail (sendMail). Mapping is not supported yet. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver, and as a constant header or property value. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
+  "description": "Integration flow: one trigger, ordered steps, one end, plus an optional exception subprocess that runs when any step fails. Routers branch on the main line into routes that end or continue with the step after the router. A splitter on the main line makes the steps after it run once per item, until a gather or the end. Local processes are called with a processCall step. Receivers in steps: HTTP (requestReplyHttp), SOAP 1.x (requestReplySoap) and Mail (sendMail). Mappings: messageMapping and xsltMapping. Externalized parameters ({{Name}}) are supported as the whole URL, credentialName or locationId of an HTTP receiver, and as a constant header or property value. HTTP receivers: authType None, Basic or OAuth2 Client Credentials with a credentialName (never a secret), proxyType Internet or On-Premise with an optional locationId, and a timeout in ms.",
   "type": "object",
   "required": [
     "id",
@@ -154,7 +154,7 @@
       "items": {
         "$ref": "#/definitions/localProcess"
       },
-      "description": "Local integration processes, each called by processCall steps (main line, routes or exception subprocess); their steps: contentModifier, groovyScript, jsonToXml, xmlToJson, requestReplyHttp, requestReplySoap, sendMail, writeVariables, router (its routes continue or end with a plain End, { \"event\": \"message\" })"
+      "description": "Local integration processes, each called by processCall steps (main line, routes or exception subprocess); their steps: contentModifier, groovyScript, jsonToXml, xmlToJson, requestReplyHttp, requestReplySoap, sendMail, messageMapping, xsltMapping, writeVariables, router (its routes continue or end with a plain End, { \"event\": \"message\" })"
     },
     "parameters": {
       "type": "object",
@@ -168,7 +168,7 @@
     },
     "resources": {
       "type": "array",
-      "description": "Attached XSLT files (with extension) added to the iFlow as src/main/resources/mapping/<file>. v1 has no XSLT step: the user wires an XSLT Mapping step to the file in the CPI web editor.",
+      "description": "Attached XSLT files no xsltMapping step uses, added as mapping/<file>",
       "uniqueItems": true,
       "maxItems": 20,
       "items": {
@@ -666,7 +666,9 @@
             "gather",
             "processCall",
             "requestReplySoap",
-            "sendMail"
+            "sendMail",
+            "messageMapping",
+            "xsltMapping"
           ]
         }
       },
@@ -814,6 +816,30 @@
           "then": {
             "$ref": "#/definitions/sendMail"
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "messageMapping"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/messageMapping"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "xsltMapping"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/xsltMapping"
+          }
         }
       ]
     },
@@ -830,7 +856,9 @@
             "jsonToXml",
             "xmlToJson",
             "processCall",
-            "sendMail"
+            "sendMail",
+            "messageMapping",
+            "xsltMapping"
           ]
         }
       },
@@ -905,6 +933,30 @@
           },
           "then": {
             "$ref": "#/definitions/sendMail"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "messageMapping"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/messageMapping"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "xsltMapping"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/xsltMapping"
           }
         }
       ]
@@ -1085,7 +1137,9 @@
             "writeVariables",
             "router",
             "requestReplySoap",
-            "sendMail"
+            "sendMail",
+            "messageMapping",
+            "xsltMapping"
           ]
         }
       },
@@ -1196,6 +1250,30 @@
           },
           "then": {
             "$ref": "#/definitions/sendMail"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "messageMapping"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/messageMapping"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "xsltMapping"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/xsltMapping"
           }
         }
       ]
@@ -1319,6 +1397,67 @@
         "body": {
           "type": "string",
           "description": "Mail body, default ${in.body} (the message body)"
+        }
+      }
+    },
+    "messageMapping": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "description": "Message Mapping: mapping = an artifact on the tenant, or file (with schemas) = a mapping inside the iFlow, carried from an imported or existing iFlow",
+      "properties": {
+        "type": {
+          "const": "messageMapping"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "mapping": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,100}$",
+          "description": "Id of the Message Mapping artifact; it must exist on the tenant and be deployed before the iFlow can run"
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^[^/\\\\]+\\.mmap$",
+          "description": "A .mmap file of this conversation from an imported or existing iFlow; never written by the assistant"
+        },
+        "schemas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^/\\\\]+\\.(xsd|XSD|wsdl|WSDL)$"
+          },
+          "description": "The .xsd and .wsdl files of that mapping, files of this conversation"
+        }
+      }
+    },
+    "xsltMapping": {
+      "type": "object",
+      "required": [
+        "type",
+        "file"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "xsltMapping"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]*\\.xslt?$",
+          "description": "An attached .xsl or .xslt file; added to the iFlow as mapping/<file>"
         }
       }
     }

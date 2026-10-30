@@ -174,12 +174,15 @@ async function importIflow(buffer, { fileName, packageId }) {
       .join('; ')
 
   // XSLT files travel as attachments; v1 has no XSLT step, so they are listed in resources
-  const resources = []
+  let resources = []
+  const xslNames = {} // file name in the iFlow -> name in the spec
   for (const m of parsed.mappings || []) {
     const name = XSL_NAME.test(m.fileName) ? m.fileName : `${identifier(m.fileName.replace(/\.xslt?$/i, ''), 'mapping')}.xsl`
     attachments[name] = m.content
+    xslNames[m.fileName] = name
     resources.push(name)
   }
+  const usedXsl = new Set() // XSLT files a step uses: not listed in resources
 
   /** A data type in the case the references have (java.lang.string -> java.lang.String), with a note */
   const datatypeOf = (datatype, where) => {
@@ -264,6 +267,26 @@ async function importIflow(buffer, { fileName, packageId }) {
         const step = { type: 'requestReplyHttp', ...(name && { name }), system, url, method: METHODS.includes(s.method) ? s.method : 'GET', ...receiverFields(s, system) }
         if (s.unsupportedSettings?.length) step.description = `Set ${s.unsupportedSettings.map(withDefaults).join(', ')} on ${system} in the CPI web editor.`
         return [step]
+      }
+      case 'messageMapping': {
+        const raw = s.settings || {}
+        const what = `Message Mapping ${label} (${s.mapping ? `artifact ${s.mapping}` : s.file})`
+        if (raw.mappingReference !== 'static' || raw.mappingSourceValue || /\{\{/.test(s.mapping || s.file || '')) return [placeholder(name, `${what}: a mapping chosen at runtime or by a parameter`)]
+        if (s.mapping) return [{ type: 'messageMapping', ...(name && { name }), mapping: s.mapping }]
+        // a mapping inside the iFlow: the file and its schemas travel as attachments, under their own names (the file refers to them)
+        const carried = [s.file, ...(s.schemas || [])].map((f) => (parsed.resourceFiles || []).find((x) => x.fileName === f))
+        if (!carried[0]) return [placeholder(name, `${what}: the file is missing in the export`)]
+        for (const f of carried) if (f) attachments[f.fileName] = f.content
+        return [{ type: 'messageMapping', ...(name && { name }), file: s.file, ...(s.schemas?.length && { schemas: s.schemas }) }]
+      }
+      case 'xsltMapping': {
+        const raw = s.settings || {}
+        const what = `XSLT Mapping ${label} (${s.file})`
+        const file = xslNames[s.file]
+        if (!file) return [placeholder(name, `${what}: the file is missing in the export`)]
+        if (raw.mappingSource !== 'mappingSrcIflow' || raw.mappingoutputformat !== 'Bytes') return [placeholder(name, `${what}: source ${raw.mappingSource}, output format ${raw.mappingoutputformat}`)]
+        usedXsl.add(file)
+        return [{ type: 'xsltMapping', ...(name && { name }), file }]
       }
       case 'requestReplySoap': {
         const raw = s.settings || {}
@@ -589,6 +612,7 @@ async function importIflow(buffer, { fileName, packageId }) {
   }
   for (const lp of localProcesses) lp.steps = finishLine(lp.steps)
 
+  resources = resources.filter((r) => !usedXsl.has(r))
   const description = truncate(`Imported from ${fileName}.${parsed.description ? ` ${parsed.description}` : ''}`, 1000)
   const spec = {
     id,

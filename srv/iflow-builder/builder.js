@@ -553,7 +553,13 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const withCode = injectAttachments(spec, attachments)
   for (const s of specSteps.allSteps(withCode).map((x) => x.step).filter((s) => s.type === 'groovyScript'))
     add(`src/main/resources/script/${s.fileName}.groovy`, s.code)
-  for (const r of spec.resources || []) add(`src/main/resources/mapping/${r}`, attachments[r])
+  // mapping files: of the steps and in spec.resources, each once (steps may share a file or a schema)
+  const mappingFiles = new Map((spec.resources || []).map((r) => [`src/main/resources/mapping/${r}`, attachments[r]]))
+  for (const { step: s } of specSteps.allSteps(spec)) {
+    if (s.type === 'xsltMapping' || (s.type === 'messageMapping' && s.file)) mappingFiles.set(`src/main/resources/mapping/${s.file}`, attachments[s.file])
+    for (const f of (s.type === 'messageMapping' && s.schemas) || []) mappingFiles.set(`src/main/resources/${/\.wsdl$/i.test(f) ? 'wsdl' : 'xsd'}/${f}`, attachments[f])
+  }
+  for (const [p, content] of mappingFiles) add(p, content)
   add(
     'src/main/resources/parameters.prop',
     `#${date}\n` + [...paramNames].sort().map((k) => `${propEscape(k, true)}=${propEscape(params[k])}\n`).join('')
@@ -688,6 +694,26 @@ function nodeToXml(n) {
       return fill('iflw/step-request-reply.xml', io)
     case 'sendMail':
       return fill('iflw/step-send.xml', io)
+    case 'messageMapping': {
+      // an artifact has its bundle id; a mapping inside the iFlow has its file. The same path and uri either way
+      const base = s.mapping || s.file.replace(/\.mmap$/, '')
+      return fill('iflw/step-message-mapping.xml', {
+        ...io,
+        MAPPING_NAME_VALUE: val(base),
+        MAPPING_PATH_VALUE: val(`src/main/resources/mapping/${base}`),
+        MAPPING_URI_VALUE: val(`dir://mmap/src/main/resources/mapping/${base}.mmap`),
+        BUNDLE_ID_VALUE: val(s.mapping)
+      })
+    }
+    case 'xsltMapping': {
+      const base = s.file.replace(/\.xslt?$/, '')
+      return fill('iflw/step-xslt-mapping.xml', {
+        ...io,
+        MAPPING_NAME_VALUE: val(base),
+        MAPPING_PATH_VALUE: val(`src/main/resources/mapping/${base}`),
+        MAPPING_URI_VALUE: val(`dir://mapping/xslt/src/main/resources/mapping/${s.file}`)
+      })
+    }
     case 'splitter': {
       // the item XPath also goes to the Iterating Splitter's token value, as the CPI editor writes it
       const expression = val(s.expression)

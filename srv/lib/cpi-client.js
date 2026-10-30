@@ -310,6 +310,19 @@ async function downloadPackageZip(id) {
   return Buffer.from(res.data)
 }
 
+// --- Message mapping artifacts -------------------------------------------------
+
+/** A Message Mapping artifact by id, or null when the tenant has none: { id, name, version, packageId } */
+async function getMessageMapping(id) {
+  try {
+    const e = entity(await get(`/MessageMappingDesigntimeArtifacts(Id=${lit(id)},Version='active')`))
+    return { id: e.Id, name: e.Name, version: e.Version, packageId: e.PackageId }
+  } catch (err) {
+    if (err.status === 404) return null
+    throw err
+  }
+}
+
 // --- iFlows ------------------------------------------------------------------
 
 async function listIflows(packageId) {
@@ -545,6 +558,7 @@ module.exports = {
   updatePackage,
   deletePackage,
   downloadPackageZip,
+  getMessageMapping,
   // iflows
   listIflows,
   getIflow,

@@ -96,5 +96,18 @@
     "content_type": {
       "text/plain": "re-selected in Ref_Receivers (SND_Alert), confirmed 2026-10-30"
     }
+  },
+  "Message Mapping": {
+    "mappingReference": {
+      "static": "re-selected in Ref_Mapping (MM_UseArtifact), 2026-10-30"
+    }
+  },
+  "XSLT Mapping": {
+    "mappingSource": {
+      "mappingSrcIflow": "re-selected in Ref_Mapping (XSLT_Dummy), 2026-10-30"
+    },
+    "mappingoutputformat": {
+      "Bytes": "re-selected in Ref_Mapping (XSLT_Dummy), 2026-10-30"
+    }
   }
 }

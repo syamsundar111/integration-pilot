@@ -385,6 +385,16 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(activeFor(base([cm('A')])).xmlSoapText).toBe('')
   })
 
+  test('mapping cards and the XML note (phase 4): the artifact must exist and be deployed', () => {
+    const active = activeFor(base([cm('CM_SetBody'), { type: 'messageMapping', name: 'MM', mapping: 'MM_Art' }, { type: 'xsltMapping', name: 'XS', file: 't.xsl' }, { type: 'messageMapping', name: 'IN', file: 'X.mmap', schemas: ['a.xsd'] }]))
+    const card = (title) => active.stepCards.find((c) => c.title === title)
+    expect(card('2. MM')).toMatchObject({ type: 'Message Mapping', lines: 'Refers to the artifact MM_Art: it must exist on the tenant and be deployed before the iFlow can run' })
+    expect(card('3. XS')).toMatchObject({ type: 'XSLT Mapping', lines: 'mapping/t.xsl (attached file)' })
+    expect(card('4. IN')).toMatchObject({ lines: 'Mapping inside the iFlow: X.mmap, with a.xsd' })
+    expect(active.xmlMappingText).toMatch(/^A Message Mapping takes XML or JSON\. CPI may show a notice about XML or JSON input on MM \(after CM_SetBody\), IN \(after XS\): .* make sure the body is XML or JSON at that point\. An XSLT Mapping takes XML\. CPI may show a notice about XML input on XS \(after MM\): /)
+    expect(activeFor(base([{ type: 'jsonToXml', name: 'J' }, { type: 'messageMapping', name: 'MM', mapping: 'A' }])).xmlMappingText).toBe('')
+  })
+
   test('an XML router after a Content Modifier (routers in between skipped) gets the XML input notice', () => {
     const nonXml = { type: 'router', name: 'RT_Check', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1' }, { name: 'D', default: true }] }
     expect(activeFor(base([cm('CM_SetInput'), nonXml, xmlRouter])).xmlRouterText).toMatch(/on the routes of RT_Type \(after CM_SetInput\): it cannot tell/)

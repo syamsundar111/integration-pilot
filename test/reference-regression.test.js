@@ -513,3 +513,70 @@ describe('Ref_Receivers: SOAP 1.x and Mail receivers (phase 3)', () => {
     expect(imported.spec.parameters).toMatchObject(spec.parameters)
   })
 })
+
+describe('Ref_Mapping: Message Mapping (artifact and inside the iFlow) and XSLT Mapping (phase 4)', () => {
+  const STEPS = ['MM_UseArtifact', 'XSLT_Dummy', 'MM_Inline']
+  // test/reference-prompts/Ref_Mapping.txt
+  const spec = {
+    id: 'Ref_Mapping',
+    name: 'Ref_Mapping',
+    packageId: 'PilotReference',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [
+      { type: 'contentModifier', name: 'CM_SetBody', body: '<Order><id>1</id><text>Test</text></Order>' },
+      { type: 'messageMapping', name: 'MM_UseArtifact', mapping: 'MM_DummyOrderToNotif' },
+      { type: 'xsltMapping', name: 'XSLT_Dummy', file: 'DummyTransform.xsl' },
+      { type: 'messageMapping', name: 'MM_Inline', file: 'MM_Inline_OrderToNotif.mmap', schemas: ['DummyNotif.xsd', 'DummyOrder.xsd'] }
+    ],
+    end: { type: 'none' }
+  }
+
+  let builtZip, built, reference, attachments
+  beforeAll(async () => {
+    reference = await parse(readRef('Ref_Mapping.zip'))
+    attachments = Object.fromEntries(reference.resourceFiles.map((f) => [f.fileName, f.content]))
+    builtZip = Buffer.from((await build(spec, { attachments })).zipBase64, 'base64')
+    built = await parse(builtZip)
+  })
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec, { attachments: Object.keys(attachments) })
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('the inline mapping stores both field mappings and names its schemas', () => {
+    const mmap = attachments['MM_Inline_OrderToNotif.mmap']
+    expect(mmap).toMatch(/<brick gid="0" path="\/Notification\/externalId" type="Dst">[\s\S]*?<brick gid="0" path="\/Order\/id" type="Src">/)
+    expect(mmap).toMatch(/<brick gid="0" path="\/Notification\/shortText" type="Dst">[\s\S]*?<brick gid="0" path="\/Order\/text" type="Src">/)
+    expect(reference.steps.find((s) => s.name === 'MM_Inline').schemas.sort()).toEqual(['DummyNotif.xsd', 'DummyOrder.xsd'])
+  })
+
+  test('every property of the mapping steps is as in the reference', async () => {
+    for (const name of STEPS) expect([name, await elementProps(builtZip, name)]).toEqual([name, await elementProps(readRef('Ref_Mapping.zip'), name)])
+  })
+
+  test('the same parsed steps and the same mapping files in the same places', () => {
+    const steps = (p) => JSON.parse(JSON.stringify(p.steps.filter((s) => STEPS.includes(s.name)), (k, v) => (k === 'id' ? undefined : v)))
+    expect(steps(built)).toEqual(steps(reference))
+    const files = (p) => p.resourceFiles.map((f) => [f.path, f.content]).sort()
+    expect(files(built)).toEqual(files(reference))
+  })
+
+  test('an update of the reference keeps them (no blockers), with the files as resources but not in spec.resources', () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const r = specFromParsed(reference, { packageId: 'PilotReference' })
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps.filter((s) => STEPS.includes(s.name))).toEqual(spec.steps.slice(1))
+    expect(r.spec.resources).toBeUndefined()
+    expect(Object.keys(r.resources).sort()).toEqual(Object.keys(attachments).sort())
+  })
+
+  test('Import holds them without placeholders; the files travel as attachments', async () => {
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const r = await importIflow(readRef('Ref_Mapping.zip'), { fileName: 'Ref_Mapping.zip', packageId: 'PilotReference' })
+    expect(r).toMatchObject({ valid: true, errors: [], placeholders: 0 })
+    expect(r.spec.steps.filter((s) => STEPS.includes(s.name))).toEqual(spec.steps.slice(1))
+    expect(r.spec.resources).toBeUndefined()
+    for (const f of Object.keys(attachments)) expect(r.attachments[f]).toBe(attachments[f])
+  })
+})

@@ -83,3 +83,16 @@ describe('flow diagram: SOAP and Mail receivers (phase 3)', () => {
     expect(steps.find((s) => s.name === 'SND_Alert')).toMatchObject({ type: 'sendMail', detail: 'to {{Mail_To}}', receiver: { detail: '{{Mail_Server}}' } })
   })
 })
+
+describe('flow diagram: mappings (phase 4)', () => {
+  test('the type and the artifact or file', async () => {
+    const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Mapping.zip')))
+    const steps = flowDiagram.fromParsed(parsed).steps
+    expect(steps.map((s) => [s.name, s.type, s.detail || ''])).toEqual([
+      ['CM_SetBody', 'contentModifier', ''],
+      ['MM_UseArtifact', 'messageMapping', 'MM_DummyOrderToNotif'],
+      ['XSLT_Dummy', 'xsltMapping', 'DummyTransform.xsl'],
+      ['MM_Inline', 'messageMapping', 'MM_Inline_OrderToNotif.mmap']
+    ])
+  })
+})

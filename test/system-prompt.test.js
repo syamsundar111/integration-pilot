@@ -299,3 +299,16 @@ describe('system prompt: SOAP and Mail receivers (phase 3)', () => {
     await expect(build(spec)).resolves.toBeTruthy()
   })
 })
+
+describe('system prompt: mappings (phase 4)', () => {
+  const mapping = sectionFlat('mapping')
+  test('the rules are in the section, the core keeps a pointer', () => {
+    expect(flat).toMatch(/a `messageMapping` step refers to a mapping artifact on the tenant, an `xsltMapping` step runs an attached XSLT file/)
+    expect(flat).toMatch(/call `getSupportedSteps` with `topics: \["mapping"\]` first/)
+    expect(flat).not.toMatch(/MAPPING_NOT_FOUND/)
+    expect(mapping).toMatch(/refused with `MAPPING_NOT_FOUND`, never invent a mapping\. Put a placeholder Content Modifier `PH_<StepName>` there/)
+    expect(mapping).toMatch(/The artifact must also be deployed before the iFlow can run/)
+    expect(mapping).toMatch(/you never write XSLT/)
+    expect(mapping).toMatch(/It only comes from an imported or existing iFlow.*keep such a step as it is, and never create one/)
+  })
+})

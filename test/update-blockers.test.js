@@ -279,3 +279,29 @@ describe('SOAP and Mail receivers on update (phase 3)', () => {
     expect(await blocker('Mail', 'attachments', 'x')).toEqual(["step 2 'SND': receiver SysM: attachments is 'x'; an update would reset it to '(empty)'"])
   })
 })
+
+describe('mapping steps on update (phase 4)', () => {
+  const spec_ = baseSpec({ id: 'Blocker_Mapping', steps: [{ type: 'messageMapping', name: 'MM', mapping: 'MM_Art' }, { type: 'xsltMapping', name: 'XS', file: 't.xsl' }] })
+  async function readBackStep(name, patch = (x) => x) {
+    const zip = await JSZip.loadAsync(Buffer.from((await build(spec_, { attachments: { 't.xsl': '<xsl/>' } })).zipBase64, 'base64'))
+    const file = Object.keys(zip.files).find((f) => IFLW.test(f))
+    const xml = await zip.file(file).async('string')
+    const el = xml.match(new RegExp(`<bpmn2:callActivity id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:callActivity>`))[0]
+    zip.file(file, xml.replace(el, patch(el)))
+    return specFromParsed(await parse(await zip.generateAsync({ type: 'nodebuffer' })), { packageId: spec_.packageId })
+  }
+  test('the same spec back; a mapping chosen at runtime or another output format is a blocker', async () => {
+    const r = await readBackStep('MM')
+    expect(r.blockers).toEqual([])
+    expect(r.spec.steps).toEqual(spec_.steps)
+    expect(r.resources).toEqual({ 't.xsl': '<xsl/>' })
+    expect((await readBackStep('MM', (el) => setting(el, 'mappingReference', 'dynamic'))).blockers).toEqual(["step 1 'MM': mappingReference is 'dynamic'; an update would reset it to 'static'"])
+    expect((await readBackStep('XS', (el) => setting(el, 'mappingoutputformat', 'String'))).blockers).toEqual(["step 2 'XS': mappingoutputformat is 'String'; an update would reset it to 'Bytes'"])
+  })
+  test('an unused mapping file would be deleted: a blocker', async () => {
+    const zip = await JSZip.loadAsync(Buffer.from((await build(spec_, { attachments: { 't.xsl': '<xsl/>' } })).zipBase64, 'base64'))
+    zip.file('src/main/resources/mapping/Unused.mmap', '<m/>')
+    const r = specFromParsed(await parse(await zip.generateAsync({ type: 'nodebuffer' })), { packageId: spec_.packageId })
+    expect(r.blockers).toEqual(['resource mapping/Unused.mmap (would be deleted by an update)'])
+  })
+})

@@ -12,22 +12,22 @@ const specSteps = require('./spec-steps')
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router', 'splitter', 'gather', 'processCall']
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping']
 // steps with a receiver of their own (a participant and an adapter)
 const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'sendMail']
 // main line only: not inside routes, the exception subprocess or local processes
 const MAIN_LINE_ONLY = ['router', 'splitter', 'gather']
 // Steps allowed in the exception subprocess (of the receivers only a Send step: no reply to wait for; Write Variables
 // only in the main flow so far)
-const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail']
+const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail', 'messageMapping', 'xsltMapping']
 // Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
-const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router']
+const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'timer']
 const MAX_MAIN_STEPS = 50 // per process: the main flow and each local process, with its routers and the steps inside routes
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
 
 // Step kinds people (and LLMs) ask for that v1 deliberately does not build
-const NOT_IN_V1 = /gateway|mapping|multicast|join|aggregat|filter|sequential|parallel|xslt/i
+const NOT_IN_V1 = /gateway|multicast|join|aggregat|filter|sequential|parallel/i
 // Error handling is supported, but as the top-level exceptionSubprocess field, not as a step
 const EXCEPTION_STEP = /exception|error|subprocess|catch/i
 // Start and end events are not steps: the trigger and the end are top-level fields
@@ -46,7 +46,9 @@ const DEFAULT_STEP_NAMES = {
   gather: 'Gather',
   processCall: 'Process Call',
   loopingProcessCall: 'Looping Process Call',
-  sendMail: 'Send'
+  sendMail: 'Send',
+  messageMapping: 'Message Mapping',
+  xsltMapping: 'XSLT Mapping'
 }
 /** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call, any Request Reply counts as one */
 const defaultKey = (s) =>
@@ -240,6 +242,8 @@ function validate(spec, { attachments = [] } = {}) {
       err('USE_ROUTER', `${where}: '${type}' — a router is { "type": "router", "expressionType": "XML"|"NonXML", "routes": [{ "name", "condition", "steps"?, "end"? }, ..., { "name", "default": true }] }`)
     else if (/split/i.test(type))
       err('USE_SPLITTER', `${where}: '${type}' — a splitter is { "type": "splitter", "kind": "iterating"|"general", "expression": "//item", "stopOnException": true|false }; the steps after it run per item until a { "type": "gather", "source", "target" }`)
+    else if (/xsl/i.test(type)) err('USE_MAPPING', `${where}: '${type}' — an XSLT step is { "type": "xsltMapping", "file": "transform.xsl" }, with the file attached`)
+    else if (/mapping/i.test(type)) err('USE_MAPPING', `${where}: '${type}' — a Message Mapping is { "type": "messageMapping", "mapping": "<artifact id>" }`)
     else if (/soap/i.test(type)) err('USE_SOAP', `${where}: '${type}' — a SOAP call is { "type": "requestReplySoap", "url", "authType": "Basic", "credentialName", "proxyType": "On-Premise", "locationId"? }`)
     else if (/mail|smtp/i.test(type)) err('USE_MAIL', `${where}: '${type}' — a mail is { "type": "sendMail", "server": "host:port", "credentialName", "from", "to", "subject", "body"? }`)
     else if (/gather/i.test(type)) err('USE_GATHER', `${where}: '${type}' — a gather is { "type": "gather" } (Combine), or with "source" and "target" (Combine at XPath), after a splitter`)
@@ -255,7 +259,7 @@ function validate(spec, { attachments = [] } = {}) {
     else if (NOT_IN_V1.test(type))
       err(
         'STEP_NOT_IN_V1',
-        `${where}: '${type}' is not supported yet (no multicast, join or mapping). Supported step types: ${supportedList}. Mapping logic can often be done in a groovyScript step.`
+        `${where}: '${type}' is not supported yet (no multicast or join). Supported step types: ${supportedList}.`
       )
     else err('UNKNOWN_STEP', `${where}: unknown step type '${type}'. Supported step types: ${supportedList}.`)
   }
@@ -508,6 +512,20 @@ function validate(spec, { attachments = [] } = {}) {
       err('ATTACHMENT_MISSING', `${where}: no code and no attached file '${file}' — give the code, or ask the user to attach ${file}`)
     if (s.code != null && attached.has(file))
       err('ATTACHED_CODE', `${where}.code: '${file}' is a file of this conversation — omit code to use it (change it with writeScript, or choose another fileName)`)
+  }
+  // mapping steps: an artifact or a file; files must be of this conversation (the assistant never writes them)
+  for (const [s, where] of allSteps) {
+    if (s?.type === 'messageMapping') {
+      if (!s.mapping === !s.file) err('MAPPING_SOURCE', `${where}: a Message Mapping needs either 'mapping' (an artifact id) or 'file' (a .mmap file of this conversation), not ${s.mapping ? 'both' : 'neither'}`)
+      if (s.mapping && s.schemas) err('MAPPING_SOURCE', `${where}.schemas: only with 'file' — an artifact has its own schemas`)
+      if (s.mapping) valueCheck('Message Mapping', [['mappingReference', 'static']], where)
+      if (typeof s.file === 'string' && !attached.has(s.file)) err('ATTACHMENT_MISSING', `${where}.file: '${s.file}' is not a file of this conversation — a mapping inside the iFlow comes from an imported or existing iFlow and is never written; refer to an artifact with 'mapping', or use a placeholder`)
+      for (const f of s.file && Array.isArray(s.schemas) ? s.schemas : []) if (typeof f === 'string' && !attached.has(f)) err('ATTACHMENT_MISSING', `${where}.schemas: '${f}' is not a file of this conversation`)
+    }
+    if (s?.type === 'xsltMapping') {
+      if (typeof s.file === 'string' && !attached.has(s.file)) err('ATTACHMENT_MISSING', `${where}.file: '${s.file}' is not an attached file — ask the user to attach it`)
+      valueCheck('XSLT Mapping', [['mappingSource', 'mappingSrcIflow'], ['mappingoutputformat', 'Bytes']], where)
+    }
   }
   ;(Array.isArray(spec.resources) ? spec.resources : []).forEach((r, i) => {
     if (typeof r === 'string' && !attached.has(r)) err('ATTACHMENT_MISSING', `resources[${i}]: '${r}' is not an attached file — ask the user to attach it`)

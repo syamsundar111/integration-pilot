@@ -15,7 +15,7 @@ turns into extra questions.
 | | Supported | Not supported |
 |---|---|---|
 | Trigger | HTTPS sender (with a path), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, SOAP, other senders |
-| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Router, Iterating and General Splitter, Gather (these three on the main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; nested splits; join step, multicast, mapping, XSLT step, Idempotent Process Call |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (these three on the main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; nested splits; join step, multicast, mapping, XSLT step, Idempotent Process Call |
 | Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
@@ -48,6 +48,10 @@ Hard limits:
   `//order`, not `/orders/order` (not yet confirmed on a deployed run).
 - A Looping Process Call runs its local process again while a Non-XML condition is true
   (`${property.hasMore} = 'true'`, spaces around the operator), at most a maximum number of times.
+- A Message Mapping refers to a mapping artifact on the tenant, which must exist and be deployed before
+  the iFlow can run; if it doesn't exist, the assistant puts a placeholder there. An XSLT Mapping runs
+  a file you attach. Mappings inside an iFlow (`.mmap` with its schemas) come only from Import or an
+  existing iFlow. An XSLT Mapping takes XML, a Message Mapping XML or JSON; CPI may show an input notice on them.
 - Step names, receiver names and Groovy file names must be **unique**.
 - `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver,
   the **URL** of a SOAP receiver, the **server**, **credential name** or **recipients** of a mail, or as a
@@ -80,7 +84,7 @@ Error handling: <exception subprocess: what to set, log or return when a step fa
 
 Before sending, the chat checks the request without calling the model. It warns about:
 
-- steps v1 cannot build (join step, multicast, XSLT, mapping, SFTP)
+- steps v1 cannot build (join step, multicast, SFTP)
 - more than 25 numbered steps
 - `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID
 - template fields that are still unfilled
@@ -135,6 +139,8 @@ spec:
   router, the route with a condition), and the other routes are described in the router's placeholder.
 - `{{Param}}` values outside receiver URLs, credential names, location IDs and constant values become
   the parameter's default; a receiver URL combined from parameters becomes one `<Receiver>_URL` parameter.
+- Message Mappings (artifact or inside the iFlow, with its schemas) and XSLT Mappings are kept. A mapping
+  chosen at runtime becomes a placeholder.
 - SOAP 1.x request-replies without a WSDL and Mail steps are kept; a setting given as a parameter takes
   its default unless the field can hold a parameter. A SOAP channel with a WSDL or another
   authentication becomes a placeholder.

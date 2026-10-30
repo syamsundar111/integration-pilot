@@ -36,8 +36,8 @@ prompt and the tokens used reported per prompt.
 | 1b | Branching: Router with conditions and a default route; routes that end (Message, Escalation or Error End) or join again; Error and Escalation End in the exception subprocess (format agreed, see below) | Ref_Router_Ends | done |
 | 2 | General and Iterating Splitter, Gather; local integration process with Process Call and Looping Process Call | Ref_Structure | done |
 | 3 | SOAP 1.x and Mail receivers (format below) | Ref_Receivers | done |
-| 4 | Message Mapping that refers to an existing mapping artifact (a `PH_` placeholder if it does not exist); XSLT Mapping step | Ref_Mapping, MM_DummyOrderToNotif | open |
-| 9 | Multicast, Join, Content Enricher, Poll Enrich | Ref_Multicast_Enrich | next after phase 4 (the real iFlows need multicast and join) |
+| 4 | Message Mapping: an existing artifact (a `PH_` placeholder if it does not exist) or a mapping inside the iFlow carried from Import; XSLT Mapping step (format below) | Ref_Mapping, MM_DummyOrderToNotif | done |
+| 9 | Multicast, Join, Content Enricher, Poll Enrich | Ref_Multicast_Enrich | next (the real iFlows need multicast and join) |
 | 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern | Ref_Sender_* | waits for the user's go |
 | 6 | Receivers 2: OData V2, RFC, IDoc, SFTP, JDBC, ProcessDirect | Ref_Receivers_2 | waits for the user's go |
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS | Ref_Persistence | waits for the user's go |
@@ -51,7 +51,7 @@ A linear request must not pay for features it does not use. Each phase puts its 
 section (`srv/agent/prompt-sections/<topic>.md`, added by `agent.js` when the request's words or the
 draft need it, sticky per conversation) and its step formats under the same topic in `getSupportedSteps`
 (`tools.js` TOPICS; the model can also ask for a topic). The core prompt keeps one pointer line per
-topic. Topics so far: `routing` (1b), `splitting` (2), `soap` and `mail` (3). Measured on 2026-10-29 (scenario b, one live
+topic. Topics so far: `routing` (1b), `splitting` (2), `soap` and `mail` (3), `mapping` (4). Measured on 2026-10-29 (scenario b, one live
 run): 30k input tokens before, 25k after; largest prompt 12k -> 9k. A request that needs both topics
 without their trigger words ("send every order separately; type A also goes to ...") fetched both
 through `getSupportedSteps` and proposed a valid splitter with a router (25.6k input tokens).
@@ -59,7 +59,7 @@ through `getSupportedSteps` and proposed a valid splitter with a router (25.6k i
 ## Open before a step can start
 
 - **Confirmed values per phase** (add to `reference/confirmed-values.json` when the phase starts):
-  in: phase 3's (Mail: Plain User/Password, STARTTLS Mandatory, text/plain; SOAP: Basic, On-Premise), step c's (OAuth2 Client Credentials, On-Premise), 1a's
+  in: phase 4's (static mapping reference; XSLT source inside the iFlow and output format Bytes), phase 3's (Mail: Plain User/Password, STARTTLS Mandatory, text/plain; SOAP: Basic, On-Premise), step c's (OAuth2 Client Credentials, On-Premise), 1a's
   (Global/Local Variable source types, Write Variables types, scopes and data type, timer every 15 minutes,
   Header and Property sources), 1b's (the expression type XML of the default route `R_Other`) and phase
   2's (re-selected in Ref_Structure, 2026-10-29: both splitters' expression type XPath, Parallel
@@ -68,7 +68,7 @@ through `getSupportedSteps` and proposed a valid splitter with a router (25.6k i
   `GA_Orders` with Same Format and Combine at XPath, `GA_Combine` with Same Format and Combine; the Looping Process Call's expression type Non XML).
   Not confirmed yet, so it warns: the Content Modifier data type java.lang.Boolean.
 - **Phase 8:** Ref_Transform refers to `DummyItems.xsd` and `DummyItem.xsd`, which are missing in
-  its ZIP.
+  its ZIP. The XML Validator needs `.xsd` files as uploads, which are refused since phase 4.
 
 ## The branch format and how later phases fit it
 
@@ -123,6 +123,21 @@ Phase 3 (format agreed 2026-10-30):
 - **Where:** both on the main line, in routes and in local processes; `sendMail` also in the exception
   subprocess, its receiver right below the main pool. No SOAP or Mail receiver at the end of a flow.
 
+Phase 4 (format agreed 2026-10-30):
+
+- **`messageMapping`:** `mapping` is an artifact's id, checked on the tenant at proposal time
+  (`MessageMappingDesigntimeArtifacts`): missing is refused and the AI puts a `PH_` placeholder there;
+  another package gives a note, since it is not known whether the editor lists those. The artifact must
+  be deployed before the iFlow runs. Or `file` with `schemas`: a mapping inside the iFlow, as all 16 Message
+  Mappings of the real iFlows; carried from Import or an existing iFlow, never written by the AI.
+- **`xsltMapping`:** `file` is an attached `.xsl`; the AI never writes XSLT. `resources` stays for XSLT
+  files no step uses.
+- **Where:** the main line, routes, local processes and the exception subprocess.
+- **Files:** `.mmap`, `.xsd` and `.wsdl` can only come from an iFlow. Files from an iFlow have a limit of
+  200 per conversation, uploads and written scripts 20.
+- **Panel note, as confirmed in the tenant check:** CPI's notice says XML or JSON input on a Message
+  Mapping and XML input on an XSLT Mapping; the note stays "may".
+
 ## Later (no phase yet)
 
 From the former reference export checklist; each needs a reference export first.
@@ -144,8 +159,8 @@ From the former reference export checklist; each needs a reference export first.
 - Looping Process Call: "Action when Max. Iterations Reached" is fixed to Throw Exception (as in
   Ref_Structure); add End Loop as a choice when a real interface needs it.
 - Escalation and Error End in local processes (needs a reference export).
-- SOAP receiver: Internet, no authentication, a WSDL with service, port and operation; the credential name
-  and location ID as parameters.
+- SOAP receiver: Internet, no authentication, a WSDL with service, port and operation (needs `.wsdl` and
+  its `.xsd` files as uploads, refused since phase 4); the credential name and location ID as parameters.
 - Mail: other protection, authentication and body types, attachments; a mail or SOAP receiver at the end.
 - From real iFlows (test/local/real-iflows/NOTES.txt): exception subprocesses inside local processes; the
   OData V2 receiver of the HR cloud adapter (in no phase yet); a Send step with an SFTP receiver.

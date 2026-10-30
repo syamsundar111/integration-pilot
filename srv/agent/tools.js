@@ -47,8 +47,8 @@ const definitions = [
   }),
   fn(
     'getSupportedSteps',
-    'Spec v1 format in short, with an example. Call once before proposing. topics: also the format and rules of routing (router), splitting (splitter, gather, process calls, local processes), soap (SOAP 1.x call) or mail (send a mail) when you need them. full: the JSON schema (rarely needed).',
-    { topics: { type: 'array', items: { type: 'string', enum: ['routing', 'splitting', 'soap', 'mail'] } }, full: { type: 'boolean' } }
+    'Spec v1 format in short, with an example. Call once before proposing. topics: also the format and rules of routing (router), splitting (splitter, gather, process calls, local processes), soap (SOAP 1.x call), mail (send a mail) or mapping (message mapping, XSLT) when you need them. full: the JSON schema (rarely needed).',
+    { topics: { type: 'array', items: { type: 'string', enum: ['routing', 'splitting', 'soap', 'mail', 'mapping'] } }, full: { type: 'boolean' } }
   ),
   fn('validateSpec', 'Check a spec without proposing it; only after a failed proposal. Returns { valid } or errors "CODE path: message".', {
     spec: { type: 'object' },
@@ -129,22 +129,48 @@ const SPEC_FORMAT = {
     gather: '{ type, name?, description?, source?, target? } — closes a split: Combine; with source (XPath, e.g. //order) and target (e.g. /orders): Combine at XPath',
     processCall: '{ type, name?, description?, process (localProcesses name), loop?: { condition (as NonXML), max } } — main line, routes, exceptionSubprocess',
     requestReplySoap: '{ type, name?, description?, system?, url ("{{Param}}" allowed), authType: Basic, credentialName, proxyType: On-Premise, locationId?, timeout? } — no WSDL: the body is sent as it is; not in exceptionSubprocess',
+    messageMapping: '{ type, name?, description?, mapping (artifact id) } — or file (.mmap) and schemas from an imported or existing iFlow, never written by you',
+    xsltMapping: '{ type, name?, description?, file (an attached .xsl) }',
     sendMail: '{ type, name?, description?, system?, server (host:port), credentialName, from, to (comma-separated), cc?, bcc?, subject, body? (default ${in.body}) } — one-way; server, credentialName, to may be "{{Param}}"; also in exceptionSubprocess'
   },
   end: ['{ "type": "none", event?: message|escalation|error, category? (escalation: Others|RoutingConditionNotMet) }', '{ "type": "httpReceiver", system?, url, method, authType, credentialName?, proxyType?, locationId?, timeout? } (as requestReplyHttp)'],
   exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson | processCall | sendMail, end?: { event: message|escalation|error, name?, category? } (new iFlows: escalation or error) }',
   localProcesses: '[{ name, description?, steps: [step] (routers as on the main line, route ends only { event: message }, which returns to the caller; no splitter, gather, processCall) }]',
   parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId, a mail server or to, or a constant header/property value "{{Name}}"',
-  resources: '[ "file.xsl" ] — attached XSLT files, added as mapping/<file>',
+  resources: '[ "file.xsl" ] — attached XSLT files no step uses, added as mapping/<file>',
   names: 'id: letters, digits, _ · packageId: letters, digits, dots (a Name with _ or spaces is turned into the ID) · fileName, system: letter first, then letters, digits, _ · step names unique'
 }
+
+/**
+ * Message Mapping artifacts a spec refers to, checked on the tenant: { issues, notes }. A missing one cannot be
+ * approved successfully. Another package gets a note: it is not known whether the editor lists those artifacts.
+ */
+async function checkMappingArtifacts(spec) {
+  const ids = [...new Set(allSteps(spec).map((x) => x.step).filter((s) => s?.type === 'messageMapping' && s.mapping).map((s) => s.mapping))]
+  const issues = []
+  const notes = []
+  for (const id of ids) {
+    let artifact
+    try {
+      artifact = await cpi.getMessageMapping(id)
+    } catch {
+      notes.push(`The Message Mapping artifact ${id} could not be checked on the tenant; make sure it exists and is deployed.`)
+      continue
+    }
+    if (!artifact) issues.push({ code: 'MAPPING_NOT_FOUND', message: `messageMapping: no Message Mapping artifact '${id}' on the tenant` })
+    else if (artifact.packageId !== spec.packageId) notes.push(`The Message Mapping artifact ${id} is in package ${artifact.packageId}, the iFlow in ${spec.packageId}; check in the CPI editor that it can be selected.`)
+  }
+  return { issues, notes }
+}
+const MAPPING_INSTRUCTION = 'Never invent a mapping: replace each such step with a placeholder Content Modifier PH_<StepName> (description starting REPLACE WITH, one constant property REPLACE_WITH), propose again and tell the user which artifact is missing.'
 
 // Topics: steps whose format and rules are sent only when a conversation needs them (srv/agent/prompt-sections/<topic>.md)
 const TOPICS = {
   routing: { steps: ['router'], summary: 'router: branch into routes by conditions (route ends, joins)' },
   splitting: { steps: ['splitter', 'gather', 'processCall'], summary: 'splitter / gather: steps per item; local processes run by a processCall (also looping)' },
   soap: { steps: ['requestReplySoap'], summary: 'requestReplySoap: a SOAP 1.x call' },
-  mail: { steps: ['sendMail'], summary: 'sendMail: send a mail, one-way' }
+  mail: { steps: ['sendMail'], summary: 'sendMail: send a mail, one-way' },
+  mapping: { steps: ['messageMapping', 'xsltMapping'], summary: 'messageMapping (an artifact) and xsltMapping (an attached file)' }
 }
 for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
 
@@ -722,8 +748,11 @@ const handlers = {
     spec = typed.spec
     if (args.spec || chosen) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
-    const { valid, issues, warnings: specNotes } = validate(spec, { attachments: Object.keys(attachments) })
+    const { valid, issues, warnings } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix only what these errors name and propose again.')
+    const artifacts = await checkMappingArtifacts(spec)
+    if (artifacts.issues.length) return compactInvalid(artifacts.issues, MAPPING_INSTRUCTION)
+    const specNotes = [...(warnings || []), ...artifacts.notes]
 
     // Fail early on things the user could not approve successfully. An iFlow that exists already (same
     // id anywhere, or the same name in the target package) is the user's decision: update it or create
@@ -800,6 +829,8 @@ const handlers = {
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix only what these errors name and propose again.')
+    const artifacts = await checkMappingArtifacts(spec)
+    if (artifacts.issues.length) return compactInvalid(artifacts.issues, MAPPING_INSTRUCTION)
     const current = await currentSpec(spec.id)
     if (!current) return { valid: false, errors: [`id: iFlow '${spec.id}' does not exist — use proposeIflow to create a new iFlow`] }
     if (current.packageId !== spec.packageId)
@@ -837,7 +868,7 @@ const handlers = {
     // … but the iFlow's own plain-value expressions do become constants: say so
     if (currentTyped.fixes.length) changes.push(`type expression -> constant (the value has no \${...}): ${currentTyped.fixes.join(', ')}`)
     if (JSON.stringify(current.spec.resources || []) !== JSON.stringify(spec.resources || [])) changes.push('XSLT files changed')
-    for (const f of spec.resources || []) if (current.resources?.[f] != null && current.resources[f] !== attachments[f]) changes.push(`${f} replaced`)
+    for (const f of attachmentStore.referencedBy(spec).filter((x) => !/\.groovy$/.test(x))) if (current.resources?.[f] != null && current.resources[f] !== attachments[f]) changes.push(`${f} replaced`)
     for (const [f, status] of Object.entries(scripts)) if (status !== 'unchanged') changes.push(`script ${f} ${status === 'new' ? 'added' : 'changed'}`)
     if (!changes.length) return { valid: false, errors: ['NO_CHANGE spec: nothing changed compared to the current iFlow'] }
     const { summary } = await build(spec, { attachments })
@@ -935,7 +966,8 @@ async function execute(name, rawArgs, ctx) {
     }
   }
   let json = JSON.stringify(result ?? null)
-  if (json.length > MAX_RESULT_CHARS) json = json.slice(0, MAX_RESULT_CHARS) + '… [truncated]'
+  // the format is our own, bounded text: cut off, the model would get broken JSON
+  if (json.length > MAX_RESULT_CHARS && name !== 'getSupportedSteps') json = json.slice(0, MAX_RESULT_CHARS) + '… [truncated]'
   return json
 }
 

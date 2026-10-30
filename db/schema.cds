@@ -20,7 +20,7 @@ entity ChatSession : cuid, managed {
 entity Attachment : cuid, managed {
   session  : Association to ChatSession;
   fileName : String(255); // with extension, unique per session: mapUsers.groovy, transform.xsl
-  kind     : String(10) enum { groovy; xsl };
+  kind     : String(10) enum { groovy; xsl; mmap; xsd; wsdl };
   origin   : String(10) enum { upload; iflow; import; ai } default 'upload'; // iflow: script of an existing iFlow (getIflowSpec); ai: written with writeScript
   content  : LargeString;
   size     : Integer; // bytes

@@ -236,7 +236,7 @@ describe('builder', () => {
   })
 
   test('throws INVALID_SPEC with readable errors', async () => {
-    await expect(build(baseSpec({ steps: [{ type: 'messageMapping' }] }))).rejects.toMatchObject({ code: 'INVALID_SPEC', errors: [expect.stringContaining("'messageMapping' is not supported yet")] })
+    await expect(build(baseSpec({ steps: [{ type: 'parallelMulticast' }] }))).rejects.toMatchObject({ code: 'INVALID_SPEC', errors: [expect.stringContaining("'parallelMulticast' is not supported yet")] })
   })
 
   test('helpers: java date, properties escaping, manifest folding', () => {
@@ -586,5 +586,27 @@ describe('gather: Combine or Combine at XPath', () => {
     const { doc } = await built(baseSpec({ steps: [split('S1'), { type: 'gather', name: 'Combine' }, split('S2'), { type: 'gather', name: 'AtXPath', source: '//item', target: '/items' }] }))
     expect(props(stepElement(doc, 'Combine'))).toMatchObject({ messageType: 'SameXMLFormat', aggregationAlgorithm: 'sap-identical-multi-mapping', sourceXPath: '', targetXPath: '' })
     expect(props(stepElement(doc, 'AtXPath'))).toMatchObject({ messageType: 'SameXMLFormat', aggregationAlgorithm: 'xpath-merge-strategy', sourceXPath: '//item', targetXPath: '/items' })
+  })
+})
+
+describe('Message Mapping and XSLT Mapping (phase 4)', () => {
+  const attachments = { 't.xsl': '<xsl/>', 'X.mmap': '<m/>', 'a.xsd': '<a/>', 'b.wsdl': '<b/>' }
+  test('files go to mapping/, xsd/ and wsdl/, each once, also when two steps share them; an artifact adds no file', async () => {
+    const spec = baseSpec({
+      steps: [
+        { type: 'messageMapping', name: 'A', mapping: 'MM_Art' },
+        { type: 'xsltMapping', name: 'T1', file: 't.xsl' },
+        { type: 'xsltMapping', name: 'T2', file: 't.xsl' },
+        { type: 'messageMapping', name: 'I1', file: 'X.mmap', schemas: ['a.xsd', 'b.wsdl'] },
+        { type: 'messageMapping', name: 'I2', file: 'X.mmap', schemas: ['a.xsd', 'b.wsdl'] }
+      ]
+    })
+    const { files } = await build(spec, { attachments })
+    const paths = files.map((f) => f.path).filter((p) => /mapping\/|xsd\/|wsdl\//.test(p)).sort()
+    expect(paths).toEqual(['src/main/resources/mapping/X.mmap', 'src/main/resources/mapping/t.xsl', 'src/main/resources/wsdl/b.wsdl', 'src/main/resources/xsd/a.xsd'])
+    const doc = parseXml(files.find((f) => f.path.endsWith('.iflw')).content)
+    expect(props(stepElement(doc, 'A'))).toMatchObject({ messageMappingBundleId: 'MM_Art', mappinguri: 'dir://mmap/src/main/resources/mapping/MM_Art.mmap', mappingname: 'MM_Art' })
+    expect(props(stepElement(doc, 'I1'))).toMatchObject({ messageMappingBundleId: '', mappinguri: 'dir://mmap/src/main/resources/mapping/X.mmap', mappingname: 'X' })
+    expect(props(stepElement(doc, 'T1'))).toMatchObject({ mappinguri: 'dir://mapping/xslt/src/main/resources/mapping/t.xsl', mappingname: 't', mappingHeaderNameKey: '', mappingSource: 'mappingSrcIflow', mappingoutputformat: 'Bytes' })
   })
 })

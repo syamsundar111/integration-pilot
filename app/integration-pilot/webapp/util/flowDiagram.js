@@ -20,7 +20,9 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     gather: 'Gather',
     processCall: 'Process Call',
     requestReplySoap: 'Request Reply (SOAP)',
-    sendMail: 'Send (Mail)'
+    sendMail: 'Send (Mail)',
+    messageMapping: 'Message Mapping',
+    xsltMapping: 'XSLT Mapping'
   }
   const DEFAULT_NAMES = {
     contentModifier: 'Content Modifier',
@@ -34,7 +36,9 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     gather: 'Gather',
     processCall: 'Process Call',
     loopingProcessCall: 'Looping Process Call',
-    sendMail: 'Send'
+    sendMail: 'Send',
+    messageMapping: 'Message Mapping',
+    xsltMapping: 'XSLT Mapping'
   }
   /** The key of a step's default name, as the builder counts them (validator.js defaultKey) */
   const defaultKey = (s) =>
@@ -53,6 +57,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     requestReplyHttp: 'sap-icon://outbox',
     requestReplySoap: 'sap-icon://outbox',
     sendMail: 'sap-icon://email',
+    messageMapping: 'sap-icon://map-2',
+    xsltMapping: 'sap-icon://map-2',
     writeVariables: 'sap-icon://save',
     router: 'sap-icon://split',
     splitter: 'sap-icon://expand-group',
@@ -79,7 +85,11 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           : 'Combine'
         : s.type === 'processCall'
           ? `→ ${s.process || '?'}${s.loop ? `, loop max ${s.loop.max}` : ''}`
-          : undefined
+          : s.type === 'messageMapping'
+            ? s.mapping || s.file
+            : s.type === 'xsltMapping'
+              ? s.file
+              : undefined
 
   /** Marks the steps after a splitter up to its gather (or the end) as per item */
   function markPerItem(steps) {

@@ -110,7 +110,10 @@ or deployed unless a tool result says so.
 - Other receivers in steps: `requestReplySoap` (a SOAP 1.x call) and `sendMail` (a one-way mail, also from
   the exception subprocess). Their rules are in the sections "SOAP receivers" and "Mail" when the
   conversation needs them; else call `getSupportedSteps` with `topics: ["soap"]` or `["mail"]` first.
-- Mapping, multicast and join are not supported. Say so plainly, and offer an alternative (see
+- Mappings: a `messageMapping` step refers to a mapping artifact on the tenant, an `xsltMapping` step runs an
+  attached XSLT file. Their rules are in the section "Mappings" when the conversation needs them; else call
+  `getSupportedSteps` with `topics: ["mapping"]` first.
+- Multicast and join are not supported. Say so plainly, and offer an alternative (see
   "When something is not supported").
 
 ## Attached files
