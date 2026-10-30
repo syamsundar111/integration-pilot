@@ -51,7 +51,8 @@ Hard limits:
 - A **Multicast** sends the message down at least 2 branches, in parallel or in sequence (name the order for
   sequence). The builder adds the Join; the next step must be a **Gather** (Combine). Branches hold ordinary steps,
   process calls and routers, and every branch must reach the Join. In a branch exactly one route of a router continues
-  and the others end: CPI does not accept routes that join again there. CPI also refuses a router before a gather,
+  and the others end: CPI does not accept routes that join again there. To join routes again, put the router into a
+  local process and call it with a Process Call. CPI also refuses a router before a gather,
   even if only one route reaches it: to route each item of a split, call a local process that contains the router.
   Multicasts sit on the main line only.
 - A Message Mapping refers to a mapping artifact on the tenant, which must exist and be deployed before

@@ -324,6 +324,7 @@ describe('system prompt: multicast (phase 9)', () => {
     expect(multicast).toMatch(/there is no router after which a `gather` follows in the branch/)
     expect(multicast).toMatch(/use a `processCall` to a local process that contains the router/)
     expect(multicast).toMatch(/exactly one route of a router in a branch continues, every other route has an `end`/)
+    expect(multicast).toMatch(/to join routes again, put the router into a local process and call it with a `processCall`/)
   })
 })
 
