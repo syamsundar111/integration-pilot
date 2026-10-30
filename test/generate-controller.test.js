@@ -350,6 +350,10 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(active.gatherText).toBe('Exchange properties set while processing one item do not reach the steps after GA: results must travel in the message body.')
     expect(active.scripts.map((x) => x.fileName)).toEqual(['handle.groovy']) // scripts of local processes are listed too
     expect(activeFor(base([cm('A')])).gatherText).toBe('')
+    // Combine: the envelope note, with "may" until a deployed run confirms it; not after Combine at XPath
+    expect(active.combineText).toBe('')
+    const combine = activeFor(base([{ type: 'splitter', name: 'S', kind: 'iterating', expression: '//a', stopOnException: false }, { type: 'gather', name: 'GC' }]))
+    expect(combine.combineText).toMatch(/^After GC \(Combine\), CPI may wrap the combined items in a multi-mapping envelope \(multimap:Messages \/ multimap:Message1\) instead of the original root\. An XPath like \/orders\/order may then find nothing; \/\/order works/)
   })
 
   test('SOAP and Mail cards (phase 3): no-WSDL warning in plain words, fixed mail settings shown, credentials in the note', () => {

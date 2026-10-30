@@ -43,7 +43,9 @@ Hard limits:
   (Stop on Exception): it has no default. No second splitter and no router before the Gather (CPI
   refuses a router there): to route each item, call a local process that contains the router. A
   router after a splitter without a Gather is fine. Exchange properties set while processing one item do not reach the steps after the
-  Gather: results must travel in the message body (the proposal panel says so too).
+  Gather: results must travel in the message body (the proposal panel says so too). After a Combine
+  Gather the items may sit in a multi-mapping envelope instead of the original root: read them with
+  `//order`, not `/orders/order` (not yet confirmed on a deployed run).
 - A Looping Process Call runs its local process again while a Non-XML condition is true
   (`${property.hasMore} = 'true'`, spaces around the operator), at most a maximum number of times.
 - Step names, receiver names and Groovy file names must be **unique**.

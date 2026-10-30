@@ -317,6 +317,7 @@
                   <MessageStrip text="{chat>/active/xmlRouterText}" type="Information" showIcon="true" visible="{= !!${chat>/active/xmlRouterText} }" />
                   <MessageStrip text="{chat>/active/xmlSoapText}" type="Information" showIcon="true" visible="{= !!${chat>/active/xmlSoapText} }" />
                   <MessageStrip text="{chat>/active/gatherText}" type="Information" showIcon="true" visible="{= !!${chat>/active/gatherText} }" />
+                  <MessageStrip text="{chat>/active/combineText}" type="Information" showIcon="true" visible="{= !!${chat>/active/combineText} }" />
                 </VBox>
 
                 <!-- package proposal -->

@@ -5,7 +5,9 @@ A `splitter` step on the main line splits the message: `{ "type": "splitter", "n
 `streaming` default true). Iterating sends each item on its own; General keeps the enveloping elements
 above each item. The steps after it run once per item, until a `gather` (`{ "type": "gather", "name" }`:
 XML Same Format, Combine; with `"source": "//order", "target": "/orders"` only when the request asks for
-Combine at XPath), or to the end when there is no gather. Always set `stopOnException`: `true` = one failing item stops the rest, `false` = the other
+Combine at XPath), or to the end when there is no gather. After a Combine gather the items may sit in a
+multi-mapping envelope (multimap:Messages / multimap:Message1) instead of the original root: read them
+with `//order`, not `/orders/order`. Always set `stopOnException`: `true` = one failing item stops the rest, `false` = the other
 items still run; if the request does not say, ask. Splitters and gathers sit on the main line only, and
 there is no second splitter and **no router** between a splitter and its gather (CPI refuses a router
 there): to route each item, call a local process that contains the router (a `processCall` between the

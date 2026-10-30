@@ -37,11 +37,13 @@ prompt and the tokens used reported per prompt.
 | 2 | General and Iterating Splitter, Gather; local integration process with Process Call and Looping Process Call | Ref_Structure | done |
 | 3 | SOAP 1.x and Mail receivers (format below) | Ref_Receivers | done |
 | 4 | Message Mapping that refers to an existing mapping artifact (a `PH_` placeholder if it does not exist); XSLT Mapping step | Ref_Mapping, MM_DummyOrderToNotif | open |
+| 9 | Multicast, Join, Content Enricher, Poll Enrich | Ref_Multicast_Enrich | next after phase 4 (the real iFlows need multicast and join) |
 | 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern | Ref_Sender_* | waits for the user's go |
 | 6 | Receivers 2: OData V2, RFC, IDoc, SFTP, JDBC, ProcessDirect | Ref_Receivers_2 | waits for the user's go |
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS | Ref_Persistence | waits for the user's go |
 | 8 | Transforms: XML Validator, Filter, CSV converters, encoders | Ref_Transform | waits for the user's go |
-| 9 | Multicast, Join, Content Enricher, Poll Enrich | Ref_Multicast_Enrich | waits for the user's go |
+
+Order from here (the user's decision, 2026-10-30): phase 4, then phase 9, then phases 5-8.
 
 ## Prompt size (every phase)
 
@@ -134,6 +136,8 @@ From the former reference export checklist; each needs a reference export first.
 - Escalation End: the receiver categories (Receiver not reachable, Receiver not found, Not authenticated,
   Not authorized, Receiver tries to redirect, Internal server error in receiver); today Others and
   Routing condition not met.
+- Gather Combine: confirm the output on a deployed run (the panel says the items "may" sit in a
+  multi-mapping envelope), then make the note definite or remove it.
 - Proposal panel, diagram summary: show the Escalation End category on the route lines and the "On error"
   line, as the step cards do.
 - User-facing notes: phrase them without the builder version ("For a method v1 does not set…").

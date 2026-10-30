@@ -79,6 +79,17 @@ sap.ui.define(
       return g < 0 ? `${range}, up to the end` : `${range}; ${spec.steps[last].name || 'the gather'} (step ${last + 1}) combines the items again`
     }
 
+    /**
+     * The note after a Combine gather: its stored value (sap-identical-multi-mapping) suggests a multi-mapping envelope
+     * instead of the original root. Not confirmed yet on a deployed run, so the wording stays "may".
+     */
+    function combineNote(spec) {
+      const gathers = spec.steps.filter((s) => s.type === 'gather' && !s.source).map((s) => s.name || 'the gather')
+      return gathers.length
+        ? `After ${gathers.join(', ')} (Combine), CPI may wrap the combined items in a multi-mapping envelope (multimap:Messages / multimap:Message1) instead of the original root. An XPath like /orders/order may then find nothing; //order works. Check the output in a test run.`
+        : ''
+    }
+
     /** The note for a split that ends in a gather: properties set per item do not reach the steps after it */
     function gatherNote(spec) {
       const gathers = spec.steps.filter((s) => s.type === 'gather').map((s) => s.name || 'the gather')
@@ -921,7 +932,8 @@ sap.ui.define(
           receiversText: '',
           xmlRouterText: '',
           xmlSoapText: '',
-          gatherText: ''
+          gatherText: '',
+          combineText: ''
         }
 
         // local: a step of a local process, where a route's End returns to the caller (the flow continues after the call)
@@ -1064,6 +1076,7 @@ sap.ui.define(
           active.xmlRouterText = xmlRouterNote(spec)
           active.xmlSoapText = xmlSoapNote(spec)
           active.gatherText = gatherNote(spec)
+          active.combineText = combineNote(spec)
         }
 
         // package editor defaults: closest existing package, else create under the requested id

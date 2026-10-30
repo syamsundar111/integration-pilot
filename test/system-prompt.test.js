@@ -244,6 +244,7 @@ describe('system prompt: splitters and local processes (phase 2)', () => {
     expect(splitting).toMatch(/there is no second splitter and \*\*no router\*\* between a splitter and its gather \(CPI refuses a router there\): to route each item, call a local process that contains the router/)
     expect(splitting).toMatch(/A router after a splitter without a gather is fine/)
     expect(splitting).toMatch(/`\{ "type": "gather", "name" \}`: XML Same Format, Combine; with `"source": "\/\/order", "target": "\/orders"` only when the request asks for Combine at XPath/)
+    expect(splitting).toMatch(/After a Combine gather the items may sit in a multi-mapping envelope \(multimap:Messages \/ multimap:Message1\) instead of the original root: read them with `\/\/order`, not `\/orders\/order`/)
     expect(splitting).toMatch(/Exchange properties set while processing one item do not reach the steps after the gather: results must travel in the message body/)
     expect(splitting).toMatch(/on the main line, in a route or in the exception subprocess/)
     expect(splitting).toMatch(/a route there continues or ends with a plain End, `\{ "event": "message" \}`, which returns to the caller: the flow goes on after the `processCall`/)
