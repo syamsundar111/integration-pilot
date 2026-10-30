@@ -342,6 +342,7 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(card('2. SPL')).toMatchObject({ type: 'General Splitter', lines: 'XPath /orders/order\nOne failing item does not stop the rest\nSteps 3–4 run once per item; GA (step 5) combines the items again' })
     expect(card('7. SPL2')).toMatchObject({ type: 'Iterating Splitter', lines: 'XPath //x\nOne failing item stops the rest\nNo step runs per item, up to the end' })
     expect(card('5. GA')).toMatchObject({ type: 'Gather', lines: 'Combines the items: //order into /orders (XML, same format)' })
+    expect(activeFor(base([{ type: 'splitter', name: 'S', kind: 'iterating', expression: '//a', stopOnException: false }, { type: 'gather', name: 'GC' }])).stepCards.find((c) => c.title === '2. GC').lines).toBe('Combines the items (XML, same format)')
     expect(card('6. LPC')).toMatchObject({ type: 'Looping Process Call', lines: "Calls local process LIP_Handle\nAgain while ${property.more} = 'true', at most 5 times" })
     expect(card('LIP_Handle')).toMatchObject({ type: 'Local Process', lines: 'Called by PC, LPC' })
     expect(card('LIP_Unused')).toMatchObject({ lines: 'No step calls it, so it never runs' })

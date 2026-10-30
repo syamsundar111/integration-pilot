@@ -367,7 +367,8 @@ describe('Ref_Structure: splitters, gather, process calls and local processes (p
       { type: 'processCall', name: 'PC_HandleOrder', process: 'LIP_HandleOrder' },
       { type: 'gather', name: 'GA_Orders', source: '//order', target: '/orders' },
       { type: 'processCall', name: 'LPC_FetchPages', process: 'LIP_FetchPage', loop: { condition: "${property.hasMore} = 'true'", max: 5 } },
-      { type: 'splitter', name: 'GSPL_Orders', kind: 'general', expression: '/orders/order', streaming: false, stopOnException: true }
+      { type: 'splitter', name: 'GSPL_Orders', kind: 'general', expression: '/orders/order', streaming: false, stopOnException: true },
+      { type: 'gather', name: 'GA_Combine' }
     ],
     end: { type: 'none' },
     localProcesses: [
@@ -375,7 +376,7 @@ describe('Ref_Structure: splitters, gather, process calls and local processes (p
       { name: 'LIP_HandleOrder', steps: [{ type: 'contentModifier', name: 'CM_MarkOrder', headers: [{ name: 'orderId', type: 'xpath', value: '/order/id', datatype: 'java.lang.String' }] }] }
     ]
   }
-  const STEPS = ['ITSPL_Orders', 'PC_HandleOrder', 'GA_Orders', 'LPC_FetchPages', 'GSPL_Orders']
+  const STEPS = ['ITSPL_Orders', 'PC_HandleOrder', 'GA_Orders', 'LPC_FetchPages', 'GSPL_Orders', 'GA_Combine']
 
   let builtZip, built, reference
   beforeAll(async () => {

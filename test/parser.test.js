@@ -81,7 +81,7 @@ describe('main process: by type, not by position (Ref_Structure: a local process
   test('the integration process is the main flow; the local processes stay local', async () => {
     const r = await parse(readRef('Ref_Structure.zip'))
     expect(r.trigger).toMatchObject({ type: 'timer', mode: 'once' })
-    expect(r.steps.map((s) => s.name)).toEqual(['CM_SetBody', 'ITSPL_Orders', 'PC_HandleOrder', 'GA_Orders', 'LPC_FetchPages', 'GSPL_Orders'])
+    expect(r.steps.map((s) => s.name)).toEqual(['CM_SetBody', 'ITSPL_Orders', 'PC_HandleOrder', 'GA_Orders', 'LPC_FetchPages', 'GSPL_Orders', 'GA_Combine'])
     expect(r.integrationProcesses).toEqual(['Integration Process'])
     expect([...r.localProcesses].sort()).toEqual(['LIP_FetchPage', 'LIP_HandleOrder'])
     expect(r.localProcessSteps.map((p) => `${p.name}: ${p.steps.map((s) => s.name)}`).sort()).toEqual(['LIP_FetchPage: CM_SetHasMore', 'LIP_HandleOrder: CM_MarkOrder'])

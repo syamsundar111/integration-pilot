@@ -355,6 +355,15 @@ describe('import: splitters, gathers, process calls and local processes (phase 2
     ])
   })
 
+  test('a Combine gather stays a gather; another aggregation becomes a placeholder', async () => {
+    const combine = baseSpec({ steps: [split('S1'), { type: 'gather', name: 'G' }] })
+    const r = await importIflow(await zipWith(combine), { fileName: 'split.zip', packageId: 'PilotReference' })
+    expect(r).toMatchObject({ valid: true, placeholders: 0 })
+    expect(r.spec.steps[1]).toEqual({ type: 'gather', name: 'G' })
+    const other = await importIflow(await zipWith(combine, (x) => setting(x, 'G', 'aggregationAlgorithm', 'sap-pi-multi-mapping')), { fileName: 'split.zip', packageId: 'PilotReference' })
+    expect(other.spec.steps[1].description).toMatch(/^REPLACE WITH Gather 'G' \(SameXMLFormat, sap-pi-multi-mapping\)/)
+  })
+
   test('a Looping Process Call keeps its loop; a condition without spaces gets them', async () => {
     const looping = baseSpec({ steps: [{ type: 'processCall', name: 'LPC', process: 'L', loop: { condition: "${property.more} = 'true'", max: 4 } }], localProcesses: [{ name: 'L', steps: [cm('L1')] }] })
     const r = await importIflow(await zipWith(looping, (x) => x.replace("${property.more} = 'true'", "${property.more}='true'")), { fileName: 'loop.zip', packageId: 'PilotReference' })

@@ -390,7 +390,9 @@ async function importIflow(buffer, { fileName, packageId }) {
       case 'gather': {
         const what = `Gather ${label} (${s.messageType || 'format'}, ${s.aggregationAlgorithm || 'algorithm'})`
         if (where !== 'main') return [placeholder(name, `${what}: gathers are supported on the main line only`)]
-        if (s.messageType !== 'SameXMLFormat' || s.aggregationAlgorithm !== 'xpath-merge-strategy' || !s.source || !s.target) return [placeholder(name, what)]
+        if (s.messageType !== 'SameXMLFormat') return [placeholder(name, what)]
+        if (s.aggregationAlgorithm === cpiValues.GATHER_COMBINE) return [{ type: 'gather', ...(name && { name }) }]
+        if (s.aggregationAlgorithm !== cpiValues.GATHER_AT_XPATH || !s.source || !s.target) return [placeholder(name, what)]
         return [{ type: 'gather', ...(name && { name }), source: s.source, target: s.target }]
       }
       default:
@@ -457,6 +459,7 @@ async function importIflow(buffer, { fileName, packageId }) {
     ? routed.steps.flatMap((s) => (s.type === 'router' ? [routerOf(s)] : convert(s)))
     : (branching ? branching.steps : parsed.steps || []).flatMap((s) => convert(s))
   // a gather needs the splitter before it, and there is no second splitter until then: else a placeholder
+  const gatherText = (g) => (g.source ? ` (combine at ${g.source} into ${g.target})` : ' (combine)')
   let split = null
   let routed_ = false // a router since the splitter: CPI refuses one before the gather
   steps = steps.map((s) => {
@@ -470,9 +473,9 @@ async function importIflow(buffer, { fileName, packageId }) {
       routed_ = false
     }
     if (s.type === 'gather') {
-      if (!split) return placeholder(s.name, `Gather '${s.name || ''}' (combine at ${s.source} into ${s.target}) without a splitter before it`)
+      if (!split) return placeholder(s.name, `Gather '${s.name || ''}'${gatherText(s)} without a splitter before it`)
       split = null
-      if (routed_) return placeholder(s.name, `Gather '${s.name || ''}' (combine at ${s.source} into ${s.target}) after a router in the split; move the routing into a local process`)
+      if (routed_) return placeholder(s.name, `Gather '${s.name || ''}'${gatherText(s)} after a router in the split; move the routing into a local process`)
     }
     return s
   })

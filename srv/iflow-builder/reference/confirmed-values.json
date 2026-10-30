@@ -66,10 +66,11 @@
   },
   "Gather": {
     "messageType": {
-      "SameXMLFormat": "XML (Same Format), re-selected in Ref_Structure (GA_Orders), 2026-10-29"
+      "SameXMLFormat": "XML (Same Format), re-selected in Ref_Structure (GA_Orders and GA_Combine), 2026-10-30"
     },
     "aggregationAlgorithm": {
-      "xpath-merge-strategy": "Combine at XPath, re-selected in Ref_Structure (GA_Orders), 2026-10-29"
+      "xpath-merge-strategy": "Combine at XPath, re-selected in Ref_Structure (GA_Orders), 2026-10-29",
+      "sap-identical-multi-mapping": "Combine, re-selected in Ref_Structure (GA_Combine), 2026-10-30"
     }
   },
   "Looping Process Call": {

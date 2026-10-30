@@ -243,6 +243,7 @@ describe('system prompt: splitters and local processes (phase 2)', () => {
     expect(splitting).toMatch(/Always set `stopOnException`: `true` = one failing item stops the rest, `false` = the other items still run; if the request does not say, ask/)
     expect(splitting).toMatch(/there is no second splitter and \*\*no router\*\* between a splitter and its gather \(CPI refuses a router there\): to route each item, call a local process that contains the router/)
     expect(splitting).toMatch(/A router after a splitter without a gather is fine/)
+    expect(splitting).toMatch(/`\{ "type": "gather", "name" \}`: XML Same Format, Combine; with `"source": "\/\/order", "target": "\/orders"` only when the request asks for Combine at XPath/)
     expect(splitting).toMatch(/Exchange properties set while processing one item do not reach the steps after the gather: results must travel in the message body/)
     expect(splitting).toMatch(/on the main line, in a route or in the exception subprocess/)
     expect(splitting).toMatch(/a route there continues or ends with a plain End, `\{ "event": "message" \}`, which returns to the caller: the flow goes on after the `processCall`/)

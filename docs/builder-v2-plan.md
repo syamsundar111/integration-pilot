@@ -63,7 +63,7 @@ through `getSupportedSteps` and proposed a valid splitter with a router (25.6k i
   2's (re-selected in Ref_Structure, 2026-10-29: both splitters' expression type XPath, Parallel
   Processing off, Streaming (on in `ITSPL_Orders`, off in `GSPL_Orders`) and Stop On Exception (off in
   `ITSPL_Orders`, on in `GSPL_Orders`); the Gather
-  `GA_Orders` with Same Format and Combine at XPath; the Looping Process Call's expression type Non XML).
+  `GA_Orders` with Same Format and Combine at XPath, `GA_Combine` with Same Format and Combine; the Looping Process Call's expression type Non XML).
   Not confirmed yet, so it warns: the Content Modifier data type java.lang.Boolean.
 - **Phase 8:** Ref_Transform refers to `DummyItems.xsd` and `DummyItem.xsd`, which are missing in
   its ZIP.
@@ -82,8 +82,9 @@ Phase 2 (format agreed 2026-10-29):
   general), `expression` (XPath; the only expression type in the references), `grouping` (default 1),
   `streaming` (default on), `parallel` (off only) and `stopOnException`, which has no default: the AI
   always sets it, and the panel says it in plain words ("one failing item stops / does not stop the
-  rest"). A `gather` has `name`, `source` and `target` XPath (XML Same Format, Combine at XPath; the
-  Different Format gathers of Ref_Multicast_Enrich come with phase 9).
+  rest"). A `gather` with only `name` is Combine (XML Same Format; all 18 Gathers of the real iFlows); with
+  `source` and `target` XPath it is Combine at XPath. The Different Format gathers of Ref_Multicast_Enrich
+  come with phase 9.
 - **Main line only.** Splitters and gathers sit on the main line; a gather needs a splitter before it;
   a second splitter between a splitter and its gather (nested split) is refused with a clear message.
   So is a router between them (tenant check: CPI says "You cannot use Router with gather"); the message
@@ -142,8 +143,7 @@ From the former reference export checklist; each needs a reference export first.
 - SOAP receiver: Internet, no authentication, a WSDL with service, port and operation; the credential name
   and location ID as parameters.
 - Mail: other protection, authentication and body types, attachments; a mail or SOAP receiver at the end.
-- From real iFlows (test/local/real-iflows/NOTES.txt): Gather "Combine" (`sap-identical-multi-mapping`, all
-  18 Gathers there; today only Combine at XPath); exception subprocesses inside local processes; the
+- From real iFlows (test/local/real-iflows/NOTES.txt): exception subprocesses inside local processes; the
   OData V2 receiver of the HR cloud adapter (in no phase yet); a Send step with an SFTP receiver.
 - More timer schedules: every N hours, daily, weekly and monthly at a time, other time zones, and the
   scheduler externalized as `{{Scheduler}}`.

@@ -39,7 +39,7 @@ Hard limits:
   is not an error; make sure the body is XML there. The same notice may appear on the line of a SOAP
   receiver, whose body must be XML.
 - A splitter (Iterating or General, XPath) makes the steps after it run once per item, until a Gather
-  (XML, same format, combine at XPath) or the end. Say whether **one failing item stops the rest**
+  (XML, same format; Combine, or Combine at XPath with a source and target) or the end. Say whether **one failing item stops the rest**
   (Stop on Exception): it has no default. No second splitter and no router before the Gather (CPI
   refuses a router there): to route each item, call a local process that contains the router. A
   router after a splitter without a Gather is fine. Exchange properties set while processing one item do not reach the steps after the

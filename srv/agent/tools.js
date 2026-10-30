@@ -126,7 +126,7 @@ const SPEC_FORMAT = {
       '{ type, name?, description?, system?, url: "https://…" | "{{Param}}", method: GET|POST|PUT|PATCH|DELETE, authType: None|Basic|"OAuth2 Client Credentials", credentialName? (deployed credential name or "{{Param}}", never a secret; required unless None), proxyType?: Internet|On-Premise, locationId? (On-Premise only; name or "{{Param}}"), timeout? (ms, default 60000) }',
     splitter:
       '{ type, name?, description?, kind: iterating|general, expression (XPath, e.g. //order), grouping? (1), streaming? (true), stopOnException: true|false (always set), parallel?: false } — main line; the next steps run per item until a gather or the end (no nested split, no router before the gather: route in a called local process); properties set per item are lost after the gather',
-    gather: '{ type, name?, description?, source (XPath, e.g. //order), target (e.g. /orders) } — closes a split',
+    gather: '{ type, name?, description?, source?, target? } — closes a split: Combine; with source (XPath, e.g. //order) and target (e.g. /orders): Combine at XPath',
     processCall: '{ type, name?, description?, process (localProcesses name), loop?: { condition (as NonXML), max } } — main line, routes, exceptionSubprocess',
     requestReplySoap: '{ type, name?, description?, system?, url ("{{Param}}" allowed), authType: Basic, credentialName, proxyType: On-Premise, locationId?, timeout? } — no WSDL: the body is sent as it is; not in exceptionSubprocess',
     sendMail: '{ type, name?, description?, system?, server (host:port), credentialName, from, to (comma-separated), cc?, bcc?, subject, body? (default ${in.body}) } — one-way; server, credentialName, to may be "{{Param}}"; also in exceptionSubprocess'

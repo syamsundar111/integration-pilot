@@ -354,9 +354,10 @@
       },
       "SameXMLFormat": {
         "references": [
+          "Ref_Structure",
           "Ref_Structure"
         ],
-        "confirmed": "XML (Same Format), re-selected in Ref_Structure (GA_Orders), 2026-10-29"
+        "confirmed": "XML (Same Format), re-selected in Ref_Structure (GA_Orders and GA_Combine), 2026-10-30"
       }
     },
     "aggregationAlgorithm": {
@@ -371,6 +372,12 @@
           "Ref_Structure"
         ],
         "confirmed": "Combine at XPath, re-selected in Ref_Structure (GA_Orders), 2026-10-29"
+      },
+      "sap-identical-multi-mapping": {
+        "references": [
+          "Ref_Structure"
+        ],
+        "confirmed": "Combine, re-selected in Ref_Structure (GA_Combine), 2026-10-30"
       }
     }
   },

@@ -518,3 +518,14 @@ describe('SOAP 1.x and Mail receivers (phase 3)', () => {
     expectError(baseSpec({ steps: [{ type: 'email' }] }), /'email' — a mail is \{ "type": "sendMail"/)
   })
 })
+
+describe('gather: Combine or Combine at XPath', () => {
+  const split = { type: 'splitter', name: 'S', kind: 'iterating', expression: '//item', stopOnException: false }
+  test('only a name is Combine; source and target are Combine at XPath; one without the other is refused', () => {
+    expect(validate(baseSpec({ steps: [split, { type: 'gather', name: 'G' }] }))).toMatchObject({ valid: true, warnings: [] })
+    expect(validate(baseSpec({ steps: [split, { type: 'gather', name: 'G', source: '//item', target: '/items' }] }))).toMatchObject({ valid: true, warnings: [] })
+    expect(validate(baseSpec({ steps: [split, { type: 'gather', name: 'G', source: '//item' }] })).issues).toEqual([
+      { code: 'GATHER_XPATH', message: 'steps[1]: Combine at XPath needs both source and target — set both, or remove them for Combine' }
+    ])
+  })
+})

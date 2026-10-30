@@ -327,8 +327,8 @@ async function main() {
     })
   const splitterProps = { Streaming: 'STREAMING_VALUE', StopOnExecution: 'STOP_ON_EXCEPTION_VALUE', splitExprValue: 'EXPRESSION_VALUE', grouping: 'GROUPING_VALUE' }
   t['iflw/step-splitter-iterating.xml'] = structureStep('CallActivity_8', 'ITSPL_Orders', 'SequenceFlow_7', 'SequenceFlow_8', { ...splitterProps, tokenValue: 'TOKEN_VALUE' })
-  t['iflw/step-splitter-general.xml'] = structureStep('CallActivity_22', 'GSPL_Orders', 'SequenceFlow_21', 'SequenceFlow_22', splitterProps)
-  t['iflw/step-gather.xml'] = structureStep('CallActivity_15', 'GA_Orders', 'SequenceFlow_14', 'SequenceFlow_15', { sourceXPath: 'SOURCE_VALUE', targetXPath: 'TARGET_VALUE' })
+  t['iflw/step-splitter-general.xml'] = structureStep('CallActivity_22', 'GSPL_Orders', 'SequenceFlow_21', 'SequenceFlow_25', splitterProps)
+  t['iflw/step-gather.xml'] = structureStep('CallActivity_15', 'GA_Orders', 'SequenceFlow_14', 'SequenceFlow_15', { aggregationAlgorithm: 'ALGORITHM_VALUE', sourceXPath: 'SOURCE_VALUE', targetXPath: 'TARGET_VALUE' })
   t['iflw/step-process-call.xml'] = structureStep('CallActivity_14', 'PC_HandleOrder', 'SequenceFlow_8', 'SequenceFlow_14', { processId: 'PROCESS_ID_VALUE' })
   const loop = block(st, 'id="CallActivity_21"')
   const loopId = loop.match(/id="(StandardLoopCharacteristics_\d+)"/)[1] // with an export timestamp

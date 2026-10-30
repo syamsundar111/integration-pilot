@@ -74,7 +74,9 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     s.type === 'splitter'
       ? `${s.kind === 'general' ? 'General' : s.kind === 'iterating' ? 'Iterating' : s.splitType || ''} ${s.expression || ''}`.trim()
       : s.type === 'gather'
-        ? `into ${s.target || '?'}`
+        ? s.target
+          ? `into ${s.target}`
+          : 'Combine'
         : s.type === 'processCall'
           ? `→ ${s.process || '?'}${s.loop ? `, loop max ${s.loop.max}` : ''}`
           : undefined

@@ -701,7 +701,7 @@ function nodeToXml(n) {
       })
     }
     case 'gather':
-      return fill('iflw/step-gather.xml', { ...io, SOURCE_VALUE: val(s.source), TARGET_VALUE: val(s.target) })
+      return fill('iflw/step-gather.xml', { ...io, ALGORITHM_VALUE: val(cpiValues.gatherAlgorithm(s)), SOURCE_VALUE: val(s.source), TARGET_VALUE: val(s.target) })
     case 'processCall':
       return s.loop
         ? fill('iflw/step-process-call-looping.xml', {

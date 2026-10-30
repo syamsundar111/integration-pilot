@@ -242,7 +242,7 @@ function validate(spec, { attachments = [] } = {}) {
       err('USE_SPLITTER', `${where}: '${type}' — a splitter is { "type": "splitter", "kind": "iterating"|"general", "expression": "//item", "stopOnException": true|false }; the steps after it run per item until a { "type": "gather", "source", "target" }`)
     else if (/soap/i.test(type)) err('USE_SOAP', `${where}: '${type}' — a SOAP call is { "type": "requestReplySoap", "url", "authType": "Basic", "credentialName", "proxyType": "On-Premise", "locationId"? }`)
     else if (/mail|smtp/i.test(type)) err('USE_MAIL', `${where}: '${type}' — a mail is { "type": "sendMail", "server": "host:port", "credentialName", "from", "to", "subject", "body"? }`)
-    else if (/gather/i.test(type)) err('USE_GATHER', `${where}: '${type}' — a gather is { "type": "gather", "source": "//item", "target": "/items" }, after a splitter`)
+    else if (/gather/i.test(type)) err('USE_GATHER', `${where}: '${type}' — a gather is { "type": "gather" } (Combine), or with "source" and "target" (Combine at XPath), after a splitter`)
     else if (END_STEP.test(type))
       err('END_AS_STEP', `${where}: '${type}' is the end of the flow, not a step — remove it from steps; the end is the top-level 'end' (or a route's 'end'), e.g. { "type": "none" }`)
     else if (TRIGGER_STEP.test(type))
@@ -474,7 +474,8 @@ function validate(spec, { attachments = [] } = {}) {
         )
       split = null
       routersInSplit = []
-      valueCheck('Gather', [['messageType', 'SameXMLFormat'], ['aggregationAlgorithm', 'xpath-merge-strategy']], where)
+      if (!s.source !== !s.target) err('GATHER_XPATH', `${where}: Combine at XPath needs both source and target — set both, or remove them for Combine`)
+      else valueCheck('Gather', [['messageType', 'SameXMLFormat'], ['aggregationAlgorithm', cpiValues.gatherAlgorithm(s)]], where)
     }
   })
 

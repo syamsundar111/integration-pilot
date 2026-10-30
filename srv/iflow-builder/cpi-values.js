@@ -27,6 +27,11 @@ const scopeOf = (variable) => (variable.global ? 'global' : 'local')
 // must be in the references and confirmed (receiver categories come when an interface needs them)
 const DEFAULT_ESCALATION_CATEGORY = 'Others'
 
+// Gather (XML, same format): Combine, or Combine at XPath with a source and target
+const GATHER_COMBINE = 'sap-identical-multi-mapping'
+const GATHER_AT_XPATH = 'xpath-merge-strategy'
+const gatherAlgorithm = (gather) => (gather.source ? GATHER_AT_XPATH : GATHER_COMBINE)
+
 // XPath values need a data type; java.lang.String as in the references (and the CPI editor's default)
 const DEFAULT_XPATH_DATATYPE = 'java.lang.String'
 
@@ -76,6 +81,9 @@ module.exports = {
   scopeOf,
   DEFAULT_XPATH_DATATYPE,
   DEFAULT_ESCALATION_CATEGORY,
+  GATHER_COMBINE,
+  GATHER_AT_XPATH,
+  gatherAlgorithm,
   TIME_ZONE,
   scheduleOf,
   parseSchedule,

@@ -970,7 +970,9 @@ sap.ui.define(
                         'One-way: the flow continues after it'
                       ].join('\n')
                     : s.type === 'gather'
-                    ? `Combines the items: ${s.source} into ${s.target} (XML, same format)`
+                    ? s.source
+                      ? `Combines the items: ${s.source} into ${s.target} (XML, same format)`
+                      : 'Combines the items (XML, same format)'
                     : s.type === 'processCall'
                     ? `Calls local process ${s.process}${s.loop ? `\nAgain while ${s.loop.condition}, at most ${s.loop.max} times` : ''}`
                     : ''

@@ -60,7 +60,8 @@ describe('flow diagram: splitters, gathers, process calls and local processes (p
       ['PC_HandleOrder', '→ LIP_HandleOrder', true],
       ['GA_Orders', 'into /orders', false],
       ['LPC_FetchPages', '→ LIP_FetchPage, loop max 5', false],
-      ['GSPL_Orders', 'General /orders/order', false]
+      ['GSPL_Orders', 'General /orders/order', false],
+      ['GA_Combine', 'Combine', false]
     ])
     expect(model.locals.map((lp) => lp.name).sort()).toEqual(['LIP_FetchPage', 'LIP_HandleOrder'])
   })

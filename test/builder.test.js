@@ -579,3 +579,12 @@ describe('SOAP 1.x and Mail receivers (phase 3)', () => {
     expect(refs).toEqual([['SysS.Receiver.System', 'address', 'U'], ['SysM', 'server', 'Sv'], ['SysM', 'to', 'T'], ['SysM', 'user', 'C']])
   })
 })
+
+describe('gather: Combine or Combine at XPath', () => {
+  test('the stored algorithm and XPaths', async () => {
+    const split = (name) => ({ type: 'splitter', name, kind: 'iterating', expression: '//item', stopOnException: false })
+    const { doc } = await built(baseSpec({ steps: [split('S1'), { type: 'gather', name: 'Combine' }, split('S2'), { type: 'gather', name: 'AtXPath', source: '//item', target: '/items' }] }))
+    expect(props(stepElement(doc, 'Combine'))).toMatchObject({ messageType: 'SameXMLFormat', aggregationAlgorithm: 'sap-identical-multi-mapping', sourceXPath: '', targetXPath: '' })
+    expect(props(stepElement(doc, 'AtXPath'))).toMatchObject({ messageType: 'SameXMLFormat', aggregationAlgorithm: 'xpath-merge-strategy', sourceXPath: '//item', targetXPath: '/items' })
+  })
+})

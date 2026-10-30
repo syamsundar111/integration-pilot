@@ -229,8 +229,11 @@ describe('splitters, gathers, process calls and local processes on update (phase
     expect((await readBackPatched('Split', (el) => setting(el, 'exprType', 'LineBreak'))).blockers).toEqual(["step 1 'Split': exprType is 'LineBreak'; an update would reset it to 'XPath'"])
     expect((await readBackPatched('Split', (el) => setting(el, 'timeOut', '600'))).blockers).toEqual(["step 1 'Split': timeOut is '600'; an update would reset it to '300'"])
     expect((await readBackPatched('Gather', (el) => setting(el, 'aggregationAlgorithm', 'sap-pi-multi-mapping'))).blockers).toEqual([
-      "step 3 'Gather': aggregationAlgorithm is 'sap-pi-multi-mapping'; an update would reset it to 'xpath-merge-strategy'"
+      "step 3 'Gather': aggregation 'sap-pi-multi-mapping' is not supported by the spec (only Combine and Combine at XPath)"
     ])
+    expect((await readBackPatched('Gather', (el) => setting(el, 'messageType', 'DiffXMLFormat'))).blockers).toEqual(["step 3 'Gather': messageType is 'DiffXMLFormat'; an update would reset it to 'SameXMLFormat'"])
+    // Combine at XPath with its XPaths moved away, and Combine with XPaths left over: never changed silently
+    expect((await readBackPatched('Gather', (el) => setting(el, 'aggregationAlgorithm', 'sap-identical-multi-mapping'))).blockers).toEqual(["step 3 'Gather': a Combine with source or target XPath, which an update would remove"])
     expect((await readBackPatched('Loop', (el) => setting(el, 'expressionType', 'XML'))).blockers).toEqual(["step 4 'Loop': expressionType is 'XML'; an update would reset it to 'Non XML'"])
   })
 

@@ -202,7 +202,10 @@ function toStep(s, scripts, where) {
       }
     case 'gather':
       checkFixed(s, FIXED_SETTINGS.gather, `${where} '${s.name}'`)
-      return { ...base, source: s.source, target: s.target }
+      if (s.aggregationAlgorithm === cpiValues.GATHER_AT_XPATH) return { ...base, source: s.source, target: s.target }
+      if (s.aggregationAlgorithm !== cpiValues.GATHER_COMBINE) throw `${where} '${s.name}': aggregation '${s.aggregationAlgorithm}' is not supported by the spec (only Combine and Combine at XPath)`
+      if (s.source || s.target) throw `${where} '${s.name}': a Combine with source or target XPath, which an update would remove`
+      return base
     case 'processCall': {
       const looping = s.subActivityType === 'LoopingProcess'
       if (!looping && s.subActivityType !== 'NonLoopingProcess') throw `${where} '${s.name}': a ${s.subActivityType || 'process call'} is not supported by the spec (only Process Call and Looping Process Call)`
