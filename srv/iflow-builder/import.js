@@ -6,7 +6,7 @@
  * Modifier whose description (and REPLACE_WITH property) says what to put there in the CPI web
  * editor. A branching flow keeps only its main path (at each router the route with a condition);
  * the other routes are described in the router's placeholder. Consecutive placeholders are merged
- * if the flow would exceed 50 steps, names are made unique, XPath values of Content Modifiers move
+ * if a process would exceed its limit (50 steps each, 10 in the exception subprocess), names are made unique, XPath values of Content Modifiers move
  * into a generated Groovy script, and {{Param}} references outside receiver URLs become the
  * parameter's default value.
  * Groovy scripts, XSLT files and the generated scripts are returned as attachments, so the
@@ -530,7 +530,9 @@ async function importIflow(buffer, { fileName, packageId }) {
   else if (parsed.warnings?.length) notes.push(...parsed.warnings)
 
   // --- limits: merge consecutive placeholders, longest runs first ---------------------------
-  const mergeRuns = (list, max, where) => {
+  // per process: limit, with inRoutes steps already taken by the routes of this process
+  const mergeRuns = (list, limit, where, inRoutes = 0) => {
+    const max = limit - inRoutes
     let out = list
     while (out.length > max) {
       const runs = []
@@ -540,18 +542,20 @@ async function importIflow(buffer, { fileName, packageId }) {
       const parts = run.map((i) => out[i].placeholder)
       const merged = placeholder(out[run[0]].name, parts.join('; then '))
       out = [...out.slice(0, run[0]), merged, ...out.slice(run.at(-1) + 1)]
-      notes.push(`${where}: ${run.length} consecutive placeholders were merged into one to stay within ${max} steps`)
+      notes.push(`${where}: ${run.length} consecutive placeholders were merged into one to stay within ${limit} steps`)
     }
     if (out.length > max)
-      throw fail('IMPORT_TOO_LARGE', `The ${where.toLowerCase()} has ${out.length} steps after merging placeholders; v1 builds at most ${max}.`, 'Split the iFlow, or remove steps before importing.')
+      throw fail(
+        'IMPORT_TOO_LARGE',
+        `${where} has ${out.length + inRoutes} steps after merging placeholders${inRoutes ? `, ${inRoutes} of them inside routes` : ''}; its limit is ${limit}.`,
+        'Split the iFlow, or remove steps before importing.'
+      )
     return out
   }
-  // routers, the steps inside routes and the steps of local processes count towards the limit; only main-line
-  // placeholders are merged
-  const inRoutes = steps.filter((s) => s.type === 'router').reduce((n, r) => n + r.routes.reduce((m, x) => m + (x.steps?.length || 0), 0), 0)
-  const stepCount = (list) => list.reduce((n, s) => n + 1 + (s.type === 'router' ? s.routes.reduce((m, x) => m + (x.steps?.length || 0), 0) : 0), 0)
-  const inLocals = localProcesses.reduce((n, lp) => n + stepCount(lp.steps), 0)
-  steps = mergeRuns(steps, MAX_STEPS - inRoutes - inLocals, 'Main flow')
+  // each process has its own limit: routers and the steps inside its routes count; only placeholders on its line are merged
+  const inRoutes = (list) => list.filter((s) => s.type === 'router').reduce((n, r) => n + r.routes.reduce((m, x) => m + (x.steps?.length || 0), 0), 0)
+  steps = mergeRuns(steps, MAX_STEPS, 'Main flow', inRoutes(steps))
+  for (const lp of localProcesses) lp.steps = mergeRuns(lp.steps, MAX_STEPS, `Local process ${lp.name}`, inRoutes(lp.steps))
   if (exceptionSubprocess) exceptionSubprocess.steps = mergeRuns(exceptionSubprocess.steps, MAX_EXCEPTION_STEPS, 'Exception subprocess')
 
   // --- unique names, placeholder markers removed ------------------------------------------------

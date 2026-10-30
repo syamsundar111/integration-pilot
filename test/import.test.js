@@ -413,3 +413,38 @@ describe('import: SOAP 1.x and Mail receivers (phase 3)', () => {
     expect(r.valid).toBe(true)
   })
 })
+
+describe('import: the step limit is per process (real iFlow with large local processes)', () => {
+  const cm = (name) => ({ type: 'contentModifier', name, properties: [{ name: 'p', type: 'constant', value: name }] })
+  const many = (n, prefix) => Array.from({ length: n }, (_, i) => cm(`${prefix}${i}`))
+  const call = { type: 'processCall', name: 'PC', process: 'L' }
+  /** Turns a step into a step the spec cannot hold (a placeholder on import): 'Mapping' */
+  const unsupported = (xml, names) => retype(xml, names, 'Mapping')
+
+  test('a main flow and a local process of 50 steps each import without merging', async () => {
+    const spec = baseSpec({ steps: [call, ...many(49, 'M')], localProcesses: [{ name: 'L', steps: many(50, 'A') }] })
+    const r = await importIflow(await zipWith(spec), { fileName: 'big.zip', packageId: 'PilotReference' })
+    expect(r.valid).toBe(true)
+    expect(r.spec.steps).toHaveLength(50)
+    expect(r.spec.localProcesses[0].steps).toHaveLength(50)
+    expect(r.placeholders).toBe(0)
+  })
+
+  test('a process over its own limit merges its own placeholders; the note names it', async () => {
+    const spec = baseSpec({ steps: [call, cm('Main')], localProcesses: [{ name: 'L', steps: [...many(50, 'A')] }] })
+    const zip = await zipWith(spec, (x) => unsupported(addStepAfter(x, 'A49', 'A50'), ['A0', 'A1', 'A2']))
+    const r = await importIflow(zip, { fileName: 'big.zip', packageId: 'PilotReference' })
+    expect(r.valid).toBe(true)
+    expect(r.spec.localProcesses[0].steps).toHaveLength(49)
+    expect(r.notes).toContain('Local process L: 3 consecutive placeholders were merged into one to stay within 50 steps')
+    expect(r.spec.steps.map((s) => s.name)).toEqual(['PC', 'Main'])
+  })
+
+  test('a process that stays over its limit is refused: the message names it and its limit', async () => {
+    const spec = baseSpec({ steps: [call], localProcesses: [{ name: 'L', steps: many(50, 'A') }] })
+    const zip = await zipWith(spec, (x) => addStepAfter(x, 'A49', 'A50'))
+    await expect(importIflow(zip, { fileName: 'big.zip' })).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE', message: 'Local process L has 51 steps after merging placeholders; its limit is 50.' })
+    const main = await zipWith(baseSpec({ steps: many(50, 'M') }), (x) => addStepAfter(x, 'M49', 'M50'))
+    await expect(importIflow(main, { fileName: 'big.zip' })).rejects.toMatchObject({ message: 'Main flow has 51 steps after merging placeholders; its limit is 50.' })
+  })
+})

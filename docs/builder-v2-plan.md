@@ -72,7 +72,7 @@ through `getSupportedSteps` and proposed a valid splitter with a router (25.6k i
 
 Since 1b the spec is a main line of steps in which a step may hold nested step lists that either end or
 continue with the next main-line step (a router's routes). Later phases use the same shape, so the
-validator (step paths, names, the 50-step count over all nested steps), the builder (a lane per nested
+validator (step paths, names, the 50-step limit per process over its nested steps), the builder (a lane per nested
 list, one column per node, receivers above the pool) and import/update need no rework.
 
 Phase 2 (format agreed 2026-10-29):
@@ -95,7 +95,8 @@ Phase 2 (format agreed 2026-10-29):
   main pool. Their steps are the existing step types and routers (the main-line router rules; no nested
   routers; a route continues or ends with the local process's plain End, the only end event the
   references have there; that End returns to the caller, the flow goes on after the Process Call), without splitters and process calls. A local process nothing calls gives a
-  warning. Their steps count towards the 50-step limit.
+  warning. Each has its own 50-step limit, like the main flow (the real iFlows in test/local showed that a
+  shared limit refuses large flows).
 - **XML router notice:** the panel shows it for every XML router unless the step before it is known to
   produce XML (a JSON to XML converter); the tenant check showed it after a splitter too.
 - **Process Call:** a `processCall` step with `name` and `process` (the local process's name), on the

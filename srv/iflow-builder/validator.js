@@ -23,7 +23,7 @@ const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml
 // Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
 const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'timer']
-const MAX_MAIN_STEPS = 50 // main-flow steps, routers, the steps inside routes and the steps of local processes together
+const MAX_MAIN_STEPS = 50 // per process: the main flow and each local process, with its routers and the steps inside routes
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
 
 // Step kinds people (and LLMs) ask for that v1 deliberately does not build
@@ -415,11 +415,15 @@ function validate(spec, { attachments = [] } = {}) {
   }
 
   // --- routers, ends, size ------------------------------------------------------------
-  // Steps count together: main-flow steps, routers, the steps inside routes and the steps of local processes
-  // (route ends do not count)
-  const total = names.flat.length + names.local.length
-  if (total > MAX_MAIN_STEPS && steps.length <= MAX_MAIN_STEPS)
-    err('TOO_MANY_STEPS', `steps: ${total} steps with the routers, the steps inside routes and the steps of local processes — at most ${MAX_MAIN_STEPS}; merge Content Modifiers or move logic into one Groovy script`)
+  // The limit is per process: the main flow and each local process count their steps, routers and the steps inside
+  // routes (route ends do not count); the exception subprocess has its own limit in the schema
+  const tooMany = (where, count) => `${where}: ${count} steps with the routers and the steps inside routes — at most ${MAX_MAIN_STEPS} per process; merge Content Modifiers or move logic into one Groovy script`
+  if (names.flat.length > MAX_MAIN_STEPS && steps.length <= MAX_MAIN_STEPS) err('TOO_MANY_STEPS', tooMany('steps', names.flat.length))
+  locals.forEach((p, i) => {
+    const list = Array.isArray(p.steps) ? p.steps : []
+    const count = specSteps.lineSteps(list, '').length
+    if (count > MAX_MAIN_STEPS && list.length <= MAX_MAIN_STEPS) err('TOO_MANY_STEPS', tooMany(`localProcesses[${i}] '${p.name}'`, count))
+  })
   /** The router rules for one line: the main line, or a local process (which has no end of its own to set) */
   const checkRouters = (list, prefix, isMain) =>
     list.forEach((r, i) => {

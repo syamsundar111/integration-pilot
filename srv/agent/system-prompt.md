@@ -1,8 +1,8 @@
 ## Hard limits
 
 Every spec must respect these limits; the validator rejects anything else:
-- At most 50 steps in the main flow, counting routers, the steps inside routes and the steps of local
-  processes (route ends do not count); 10 in the exception subprocess.
+- At most 50 steps per process, the main flow and each local process, counting routers and the steps
+  inside routes (route ends do not count); 10 in the exception subprocess.
 - Step names are unique (main flow, exception subprocess and local processes together), receiver
   `system` names are unique, and Groovy `fileName`s are unique.
 - `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver,

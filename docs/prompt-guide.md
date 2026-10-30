@@ -24,8 +24,8 @@ turns into extra questions.
 
 Hard limits:
 
-- At most **50 steps** in the main flow, counting routers, the steps inside routes and the steps of
-  local processes (route ends do not count); 10 in the exception subprocess. Large flows are written and checked in parts of up to
+- At most **50 steps per process**, the main flow and each local process, counting routers and the
+  steps inside routes (route ends do not count); 10 in the exception subprocess. Large flows are written and checked in parts of up to
   8 steps, so their size does not cause timeouts.
 - A router: routes are evaluated in order; each has a condition (XML: an XPath; Non-XML:
   `${property.x} = 'A'` with spaces around the operator), except one **default route**, listed last.
@@ -126,8 +126,8 @@ XSLT Mapping step that you add in the CPI web editor (v1 has no XSLT step).
 spec:
 
 - Steps v1 cannot build become placeholder Content Modifiers whose description says
-  *REPLACE WITH …*, one per CPI component. Only if the flow would exceed 50 steps are consecutive
-  placeholders merged.
+  *REPLACE WITH …*, one per CPI component. Only if a process would exceed its limit (50 steps, 10 in the exception
+  subprocess) are its consecutive placeholders merged.
 - Routers on the main line are kept with their routes, route steps and end events. A flow whose
   routes go back, join somewhere else or contain another router keeps its main path instead (at each
   router, the route with a condition), and the other routes are described in the router's placeholder.

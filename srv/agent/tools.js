@@ -111,7 +111,7 @@ At most ${MAX_STEPS_PER_EDIT} steps per call. Returns the outline and open error
  * of a topic (TOPICS) are only sent when the conversation needs them, like the prompt section of the same name.
  */
 const SPEC_FORMAT = {
-  spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50, counting route and local process steps), end, exceptionSubprocess?, localProcesses?, parameters?, resources? }',
+  spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50 per process, counting route steps), end, exceptionSubprocess?, localProcesses?, parameters?, resources? }',
   trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
   steps: {
     contentModifier:

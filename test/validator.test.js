@@ -307,7 +307,7 @@ describe('routers (phase 1b)', () => {
     ])
     const big = router([{ name: 'R1', condition: '${a} = 1', steps: Array.from({ length: 30 }, (_, i) => cm(`S${i}`)) }, { name: 'R2', default: true }])
     const main = Array.from({ length: 20 }, (_, i) => cm(`M${i}`))
-    expect(errs([...main, big])).toEqual(['steps: 51 steps with the routers, the steps inside routes and the steps of local processes — at most 50; merge Content Modifiers or move logic into one Groovy script'])
+    expect(errs([...main, big])).toEqual(['steps: 51 steps with the routers and the steps inside routes — at most 50 per process; merge Content Modifiers or move logic into one Groovy script'])
   })
 
   test('end events: message, escalation or error; a receiver end is a Message End', () => {
@@ -417,13 +417,19 @@ describe('splitters, gathers, process calls and local processes (phase 2)', () =
     ])
   })
 
-  test('local processes: unique names, a warning when nothing calls one, steps count towards 50, names unique with the main flow', () => {
+  test('local processes: unique names, a warning when nothing calls one, each with its own limit of 50, names unique with the main flow', () => {
     expect(validate(baseSpec({ steps: [cm('A')], localProcesses: [local('L')] })).warnings).toEqual(["localProcesses[0]: no processCall calls the local process 'L', so it never runs"])
     expectError(baseSpec({ steps: [{ type: 'processCall', process: 'L' }], localProcesses: [local('L'), local('L', [cm('B')])] }), /local process name 'L' is used more than once/)
     expectError(baseSpec({ steps: [cm('A'), { type: 'processCall', process: 'L' }], localProcesses: [local('L', [cm('A')])] }), /step name 'A' is used more than once, at steps\[0\] and localProcesses\[0\]\.steps\[0\]/)
     const many = (n, prefix) => Array.from({ length: n }, (_, i) => cm(`${prefix}${i}`))
-    expect(issues(baseSpec({ steps: [{ type: 'processCall', process: 'L' }, ...many(29, 'M')], localProcesses: [local('L', many(21, 'L'))] })).map((i) => i.code)).toEqual(['TOO_MANY_STEPS'])
-    expect(validate(baseSpec({ steps: [{ type: 'processCall', process: 'L' }, ...many(29, 'M')], localProcesses: [local('L', many(20, 'L'))] })).valid).toBe(true)
+    // 50 on the main flow and 50 in each local process
+    const call = { type: 'processCall', process: 'L' }
+    expect(validate(baseSpec({ steps: [call, ...many(49, 'M')], localProcesses: [local('L', many(50, 'A')), { name: 'Unused', steps: many(50, 'B') }] })).valid).toBe(true)
+    // over it: counted with the steps inside routes, the message names the local process
+    const routed = { type: 'router', name: 'LR', expressionType: 'NonXML', routes: [{ name: 'A', condition: '${a} = 1', steps: many(30, 'R') }, { name: 'D', default: true }] }
+    expect(issues(baseSpec({ steps: [call], localProcesses: [local('L', [...many(20, 'A'), routed])] }))).toEqual([
+      { code: 'TOO_MANY_STEPS', message: "localProcesses[0] 'L': 51 steps with the routers and the steps inside routes — at most 50 per process; merge Content Modifiers or move logic into one Groovy script" }
+    ])
   })
 
   test('effectiveNames: default names count over the local processes too, receivers get unique systems', () => {
