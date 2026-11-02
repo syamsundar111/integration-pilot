@@ -41,12 +41,13 @@ prompt and the tokens used reported per prompt.
 | 4 | Message Mapping: an existing artifact (a `PH_` placeholder if it does not exist) or a mapping inside the iFlow carried from Import; XSLT Mapping step (format below) | Ref_Mapping, MM_DummyOrderToNotif | done |
 | 9 | Multicast and Join (format below) | Ref_Multicast | done |
 | 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | done (error response, SOAP, ProcessDirect, JMS; SFTP committed as e637698) |
-| 6 | Receivers 2: OData V2, RFC, IDoc, SFTP, JDBC, ProcessDirect | Ref_Receivers_2 | waits for the user's go |
+| 6 | Receivers 2, in this order: ProcessDirect, SFTP, OData V2, IDoc, then the IDoc sender, JDBC, RFC. One small export per adapter, built from scratch in the CPI editor; the user makes each just before it starts, from a field-by-field checklist | Ref_Receiver_* and Ref_Sender_IDoc (new); Ref_Receivers_2 (iGlow) only for comparison | in progress: the ProcessDirect receiver waits for its export |
 | 6b | Content Enricher and Poll Enrich (they need phase 6's OData and SFTP adapters; neither real iFlow uses them) | Ref_Multicast_Enrich, to be re-selected first | after phase 6 |
+| 6c | The OData V2 receiver of the HR cloud adapter (both real iFlows use it) | an export to come | after 6b |
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS (check transaction handling first, see Later) | Ref_Persistence | waits for the user's go |
 | 8 | Transforms: XML Validator, Filter, CSV converters, encoders | Ref_Transform | waits for the user's go |
 
-Order from here (the user's decision, 2026-11-02): phases 5, 6, 6b, 7 and 8, then the **acceptance test**: the first
+Order from here (the user's decision, 2026-11-02): phases 5, 6, 6b, 6c, 7 and 8, then the **acceptance test**: the first
 full prompt from the start of the project, run through the app after the last phase.
 
 ## Prompt size (every phase)
@@ -241,8 +242,10 @@ From the former reference export checklist; each needs a reference export first.
 - SOAP receiver: Internet, no authentication, a WSDL with service, port and operation (needs `.wsdl` and
   its `.xsd` files as uploads, refused since phase 4); the credential name and location ID as parameters.
 - Mail: other protection, authentication and body types, attachments; a mail or SOAP receiver at the end.
-- From real iFlows (test/local/real-iflows/NOTES.txt): exception subprocesses inside local processes; the
-  OData V2 receiver of the HR cloud adapter (in no phase yet); a Send step with an SFTP receiver.
+- From real iFlows (test/local/real-iflows/NOTES.txt): exception subprocesses inside local processes; a
+  Send step with an SFTP receiver. (The OData V2 receiver of the HR cloud adapter is phase 6c.)
+- OData V4 receiver: needs an export built in the CPI editor (Query (GET), resource path, query options, Basic,
+  Internet); no real iFlow uses it.
 - More timer schedules: every N hours, daily, weekly and monthly at a time, other time zones, and the
   scheduler externalized as `{{Scheduler}}`.
 
