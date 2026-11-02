@@ -126,7 +126,7 @@ describe('allowed values (templates/reference-values.json)', () => {
 async function elementProps(zipBuffer, name) {
   const zip = await JSZip.loadAsync(zipBuffer)
   const iflw = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
-  const element = iflw.match(new RegExp(`<bpmn2:(callActivity|startEvent|parallelGateway) id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:\\1>`))[0]
+  const element = iflw.match(new RegExp(`<bpmn2:(callActivity|startEvent|endEvent|parallelGateway) id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:\\1>`))[0]
   return Object.fromEntries(
     [...element.matchAll(/<key>([^<]*)<\/key>\s*(?:<value>([^<]*)<\/value>|<value\/>)/g)].filter((m) => !/^(cmdVariantUri|componentVersion)$/.test(m[1])).map((m) => [m[1], m[2] ?? ''])
   )
@@ -712,5 +712,44 @@ describe('Ref_Multicast: Parallel and Sequential Multicast, Join and the Gather 
     expect(branch.map((s) => s.name)).toEqual(['ITSPL_Items', 'RT_Item', 'GA_Items'])
     expect(branch[0].description).toMatch(/^REPLACE WITH Iterating Splitter 'ITSPL_Items' \(\/\/order\) without a gather in its branch/)
     expect(branch[2].description).toMatch(/^REPLACE WITH Gather 'GA_Items' \(combine\) after a router in the split; move the routing into a local process/)
+  })
+})
+
+describe('Ref_Sender_HTTPS: the HTTP error response (phase 5)', () => {
+  // test/reference-prompts/Ref_Sender_HTTPS.txt, without iGlow's "Set log headers"
+  const prop = (name, value) => ({ name, type: 'constant', value, datatype: 'java.lang.String' })
+  const spec = {
+    id: 'Ref_Sender_HTTPS',
+    name: 'Ref_Sender_HTTPS',
+    packageId: 'PilotReference',
+    trigger: { type: 'httpsSender', address: '/dummy/orders' },
+    steps: [{ type: 'contentModifier', name: 'CM_Mark', properties: [prop('iFlowName', 'Ref_Sender_HTTPS')] }],
+    end: { type: 'none' },
+    exceptionSubprocess: {
+      steps: [{ type: 'contentModifier', name: 'CM_ErrorResponse', headers: [prop('CamelHttpResponseCode', '500'), prop('Content-Type', 'application/json')], body: '{"error": "${exception.message}"}' }],
+      end: { event: 'message', name: 'Error End' }
+    }
+  }
+  const endKind = async (zipBuffer, name) => {
+    const zip = await JSZip.loadAsync(zipBuffer)
+    const iflw = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+    return iflw.match(new RegExp(`<bpmn2:endEvent id="[^"]+" name="${name}">[\\s\\S]*?</bpmn2:endEvent>`))[0].match(/<bpmn2:(\w+EventDefinition)/)[1]
+  }
+  let builtZip
+  beforeAll(async () => {
+    builtZip = Buffer.from((await build(spec)).zipBase64, 'base64')
+  })
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('CM_ErrorResponse and the Message End of the exception subprocess are as in the reference', async () => {
+    const ref = readRef('Ref_Sender_HTTPS.zip')
+    expect(await elementProps(builtZip, 'CM_ErrorResponse')).toEqual(await elementProps(ref, 'CM_ErrorResponse'))
+    expect(await elementProps(builtZip, 'Error End')).toEqual(await elementProps(ref, 'Error End'))
+    expect(await endKind(builtZip, 'Error End')).toBe('messageEventDefinition')
+    expect(await endKind(ref, 'Error End')).toBe('messageEventDefinition')
   })
 })

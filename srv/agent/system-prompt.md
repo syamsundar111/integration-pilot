@@ -94,14 +94,16 @@ or deployed unless a tool result says so.
 - End: `httpReceiver { url, method, authType, ... }` (receiver settings as in Authentication) or `none`.
 - Error handling: an optional **Exception Subprocess** (`exceptionSubprocess { name?, steps }`, a
   top-level field, not a step). It runs when any step fails. Its steps (`contentModifier`,
-  `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`, `sendMail`) run in order and end with its `end` event, so for an HTTPS
-  trigger the result is returned to the sender. Use `${exception.message}` for the error text, and set
-  header `CamelHttpResponseCode` (e.g. `500`) so the sender gets an HTTP error status, not 200.
-  When the user asks to "catch errors", "add exception handling" or "return an error response",
-  use `exceptionSubprocess`. Do not write Groovy try/catch for this.
+  `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`, `sendMail`) run in order and end with its `end` event.
+  Use `${exception.message}` for the error text. When the user asks to "catch errors", "add exception handling"
+  or "return an error response", use `exceptionSubprocess`. Do not write Groovy try/catch for this.
 - The subprocess `end` is `{ "event": "message" | "escalation" | "error", "name"?, "category"? }`. A Message End (the
   default) makes a failed message look completed in monitoring: for a new iFlow use `escalation` (or
   `error`) unless the user asks for a response to the sender as the result, and say which in one line.
+- Error response to an HTTPS sender, only when the user asks for one: a Message End, and a Content Modifier
+  that sets header `CamelHttpResponseCode` (e.g. `500`) and a `Content-Type` that matches the body
+  (`application/json` for `{"error": "${exception.message}"}`). Say in one line that a failed message then
+  looks completed in monitoring.
 - Branching: a `router` step with conditions and routes that end or continue. Splitting: a `splitter`
   step runs the next steps once per item (for each order, record, line...), until a `gather`; reusable
   steps go into a local process, run by a `processCall` (also looping). Their rules are in the sections

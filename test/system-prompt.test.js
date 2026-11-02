@@ -328,3 +328,9 @@ describe('system prompt: multicast (phase 9)', () => {
   })
 })
 
+describe('system prompt: error response to an HTTPS sender (phase 5)', () => {
+  test('next to the subprocess end rule: only on request, a Message End, the status code and a matching Content-Type', () => {
+    expect(flat).toMatch(/for a new iFlow use `escalation` \(or `error`\) unless the user asks for a response to the sender as the result, and say which in one line\. - Error response to an HTTPS sender, only when the user asks for one: a Message End, and a Content Modifier that sets header `CamelHttpResponseCode` \(e\.g\. `500`\) and a `Content-Type` that matches the body \(`application\/json` for `\{"error": "\$\{exception\.message\}"\}`\)\. Say in one line that a failed message then looks completed in monitoring\./)
+  })
+})
+
