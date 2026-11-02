@@ -300,6 +300,81 @@
       }
     }
   },
+  "SFTP Sender": {
+    "authentication": {
+      "public_key": {
+        "references": [
+          "Ref_Sender_SFTP"
+        ],
+        "confirmed": "Public Key, re-selected in Ref_Sender_SFTP (named by the user in the phase 5 answers), 2026-11-02"
+      },
+      "user_password": {
+        "references": [
+          "Ref_Sender_SFTP_UserPw"
+        ],
+        "confirmed": "User Name/Password, re-selected in Ref_Sender_SFTP_UserPw, 2026-11-02"
+      }
+    },
+    "noop": {
+      "delete": {
+        "references": [
+          "Ref_Sender_SFTP"
+        ],
+        "confirmed": "Post-Processing Delete File, re-selected in Ref_Sender_SFTP (phase 5 answers), 2026-11-02"
+      },
+      "move": {
+        "references": [
+          "Ref_Sender_SFTP_UserPw"
+        ],
+        "confirmed": "Post-Processing Move File, re-selected in Ref_Sender_SFTP_UserPw, 2026-11-02"
+      }
+    },
+    "proxyType": {
+      "none": {
+        "references": [
+          "Ref_Sender_SFTP",
+          "Ref_Sender_SFTP_UserPw"
+        ],
+        "confirmed": "Proxy Type Internet, re-selected in Ref_Sender_SFTP and Ref_Sender_SFTP_UserPw, 2026-11-02"
+      }
+    },
+    "readLock": {
+      "none": {
+        "references": [
+          "Ref_Sender_SFTP",
+          "Ref_Sender_SFTP_UserPw"
+        ],
+        "confirmed": "Read Lock Strategy None, re-selected in Ref_Sender_SFTP_UserPw, 2026-11-02"
+      }
+    },
+    "emptyFileHandling": {
+      "processFile": {
+        "references": [
+          "Ref_Sender_SFTP",
+          "Ref_Sender_SFTP_UserPw"
+        ],
+        "confirmed": "Empty File Handling Process Empty Files, re-selected in Ref_Sender_SFTP_UserPw, 2026-11-02"
+      }
+    },
+    "every": {
+      "15": {
+        "references": [
+          "Ref_Sender_SFTP",
+          "Ref_Sender_SFTP_UserPw"
+        ],
+        "confirmed": "Schedule to Recur Daily, every 15 minutes from 00:00 to 24:00, set by hand in Ref_Sender_SFTP_UserPw; polling re-selected in Ref_Sender_SFTP, 2026-11-02"
+      }
+    },
+    "timeZone": {
+      "Etc/GMT": {
+        "references": [
+          "Ref_Sender_SFTP",
+          "Ref_Sender_SFTP_UserPw"
+        ],
+        "confirmed": "(UTC 0:00) Greenwich Mean Time (Etc/GMT), set by hand in Ref_Sender_SFTP_UserPw, 2026-11-02"
+      }
+    }
+  },
   "SOAP Receiver": {
     "authentication": {
       "Basic": {

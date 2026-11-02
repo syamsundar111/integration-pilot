@@ -97,8 +97,8 @@ describe('prompt linter', () => {
     const first = 'Create an iFlow in package Pilot, HTTPS sender /orders, no authentication. Split the orders with a splitter and send them via SFTP, then post to https://example.org/orders.'
 
     test('the check runs on the whole conversation: a step kind warned about before is not repeated', () => {
-      expect(keys(lint('Build it with SFTP.'))).toEqual(['unsupported'])
-      expect(lint('Build it with SFTP.', { history: [first] })).toEqual([])
+      expect(keys(lint('Build it with an SFTP receiver.'))).toEqual(['unsupported'])
+      expect(lint('Build it with an SFTP receiver.', { history: [first] })).toEqual([])
     })
 
     test('unsupported step names in a negation are not flagged', () => {
@@ -113,6 +113,20 @@ describe('prompt linter', () => {
       // routers (phase 1b), splitters, gathers and process calls (phase 2) are supported
       expect(lint('Build an iFlow on a timer in package P, no authentication, use a router.')).toEqual([])
       expect(lint('Build an iFlow on a timer in package P, no authentication: a General Splitter, a Process Call to a local process, then a Gather.')).toEqual([])
+    })
+
+    test('an SFTP sender is supported; SFTP as a receiver is not; its five fields may be parameters', () => {
+      expect(lint('Create an iFlow in package P with an SFTP sender, no auth.')).toEqual([])
+      expect(lint('Create an iFlow in package P that polls files from an SFTP server every 15 minutes, no auth.')).toEqual([])
+      // the chat prompt of the phase 5 tenant check: SFTP in the iFlow name and an SFTP server as the source
+      expect(lint('Create iFlow Builder V2 Phase5 SFTP Chat in package iglow. It picks up order files from an SFTP server: directory /dummy/in, file name *.xml, authentication user name and password with the credential DUMMY_SFTP_CREDENTIAL. For each file, set the property fileName from the header CamelFileName. If something fails, store the error message in a property.')).toEqual([])
+      expect(lint('Build an iFlow in package P with SFTP, no auth.')).toEqual([])
+      for (const text of ['write the files to SFTP', 'send them via SFTP', 'store the result on the SFTP server', 'an sftp-receiver'])
+        expect(keys(lint(`Create an iFlow in package P and ${text}, no auth.`))).toEqual(['unsupported'])
+      expect(keys(lint('Create an iFlow in package P with an SFTP receiver, no auth.'))).toEqual(['unsupported'])
+      expect(keys(lint('Create an iFlow in package P and upload the result to SFTP, no auth.'))).toEqual(['unsupported'])
+      expect(lint('Create an iFlow in package P with an SFTP sender: host {{SFTP_Address}}, directory {{SFTP_Directory}}, file name {{SFTP_FileName}}, credential {{SFTP_Credential}}, archive directory {{SFTP_Archive}}, no auth.')).toEqual([])
+      expect(keys(lint('Create an iFlow in package P with an SFTP sender, user name {{SFTP_User}}, no auth.'))).toEqual(['params'])
     })
 
     test('the reply "skip them" does not repeat the warning of the first message', () => {

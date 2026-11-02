@@ -338,7 +338,7 @@ describe('system prompt: senders (phase 5)', () => {
   const senders = sectionFlat('senders')
   test('the core prompt names soapSender and points to the topic; the default trigger stays httpsSender', () => {
     expect(flat).toMatch(/unless the user names a timer, another sender or another path;/)
-    expect(flat).toMatch(/Other senders: `soapSender` \(a SOAP 1\.x sender\), `processDirectSender` \(called by other iFlows on the tenant\) and `jmsSender` \(reads a queue\)\. Their rules are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with `topics: \["senders"\]` first\./)
+    expect(flat).toMatch(/Other senders: `soapSender` \(a SOAP 1\.x sender\), `processDirectSender` \(called by other iFlows on the tenant\), `jmsSender` \(reads a queue\) and `sftpSender` \(polls files on an SFTP server\)\. Their rules are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with `topics: \["senders"\]` first\./)
   })
   test('the Senders section: soapSender is XML in and out, not the JSON default', () => {
     expect(senders).toMatch(/^## Senders/)
@@ -387,6 +387,26 @@ describe('system prompt: JMS sender (phase 5)', () => {
     expect(senders).toMatch(/The queue is created automatically when the iFlow is first deployed: never tell the user to create it or to make sure it exists\./)
     expect(senders).toMatch(/Another iFlow fills the queue with a JMS receiver, which cannot be built yet; say so\./)
     expect(senders).toMatch(/With an `exceptionSubprocess`, its end is `\{ "event": "error" \}` unless the user asks for another, so a failed message is retried; say so in one line\. A Message End, and possibly an Escalation End, may stop the retry\./)
+  })
+})
+
+describe('system prompt: SFTP sender (phase 5)', () => {
+  const senders = sectionFlat('senders')
+  test('asks for host, directory, file name and authentication; post-processing in the same message, else delete; an Error End by default', () => {
+    expect(senders).toMatch(/\*\*Host, directory, file name pattern and the authentication with its names are values only the user knows: ask for the missing ones in one message, and never invent them\.\*\*/)
+    expect(senders).toMatch(/\*\*Whenever you ask about SFTP values and the user has not said what happens to a processed file, also ask in the same message: delete or move \(and to which directory\)\?\*\* Only when nothing else is missing, use `delete` and say so in one line\./)
+    expect(senders).toMatch(/Your proposal summary always says what happens to the files after processing \(deleted, or moved to which directory\)\./)
+    expect(senders).toMatch(/With an `exceptionSubprocess`, its end is `\{ "event": "error" \}` unless the user asks for another, so a failed file may stay in the directory instead of being deleted or moved; say so in one line\./)
+    expect(senders).toMatch(/the SFTP server's host key must be in the tenant's known hosts before deploying, and with `publicKey` that the key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts\./)
+  })
+  test('the five SFTP sender fields may be parameters: in the hard limits and under Externalized parameters', () => {
+    expect(flat).toMatch(/- `\{\{Param\}\}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver, the whole `host`, `directory`, `fileName`, `credentialName` or `archiveDirectory` of an `sftpSender`, or as the whole value of a `constant` header or property; literal values everywhere else\./)
+    expect(flat).toMatch(/An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and `archiveDirectory` can be parameters the same way \(`\{\{SFTP_Address\}\}` with the host as its default\)\. Parameters are supported nowhere else: use literal values there\./)
+  })
+  test('the example of the Senders section is a valid trigger', () => {
+    const { validate } = require('../srv/iflow-builder/validator')
+    const trigger = JSON.parse(senders.match(/`(\{ "type": "sftpSender"[^`]*\})`/)[1])
+    expect(validate({ id: 'A', name: 'A', packageId: 'P', trigger, steps: [], end: { type: 'none' } })).toMatchObject({ valid: true, warnings: [] })
   })
 })
 

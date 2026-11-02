@@ -175,7 +175,7 @@ describe('validator', () => {
     const constantValue = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'constant', value: '{{P}}' }] }], parameters: { P: 'v' } })
     expect(errorsOf(constantValue)).toEqual([])
     const wrongPlace = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'expression', value: '{{P}}' }] }], parameters: { P: 'v' } })
-    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, or as a constant value/)
+    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, or as a constant value/)
 
     const senderParam = baseSpec({ trigger: { type: 'httpsSender', address: '{{Path}}' }, parameters: { Path: '/x' } })
     expectError(senderParam, /trigger\.address: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
@@ -645,6 +645,42 @@ describe('senders (phase 5)', () => {
     for (const queue of ['orders in', '{{Queue}}', 'Q'.repeat(81), ''])
       expect(validate(baseSpec({ trigger: { type: 'jmsSender', queue } })).valid).toBe(false)
     expect(validate(baseSpec({ trigger: { type: 'jmsSender' } })).valid).toBe(false)
+  })
+  describe('sftpSender', () => {
+    const sftp = (fields = {}, parameters) =>
+      baseSpec({
+        trigger: { type: 'sftpSender', host: 'sftp.example.com', directory: '/in', fileName: '*.xml', authentication: 'publicKey', username: 'SFTP_USER', privateKeyAlias: 'SFTP_KEY', postProcessing: 'delete', minutes: 15, ...fields },
+        ...(parameters && { parameters })
+      })
+    const userPw = { authentication: 'userPassword', username: undefined, privateKeyAlias: undefined, credentialName: 'SFTP_CREDENTIAL' }
+    test('public key with Delete, user name/password with Move: valid without warnings; the host with or without a port', () => {
+      expect(validate(sftp())).toMatchObject({ valid: true, warnings: [] })
+      expect(validate(sftp({ host: 'sftp.example.com:2222' }))).toMatchObject({ valid: true, warnings: [] })
+      expect(validate(sftp({ ...userPw, postProcessing: 'move', archiveDirectory: '.archive' }))).toMatchObject({ valid: true, warnings: [] })
+    })
+    test('each variant needs its fields and refuses the other ones', () => {
+      expectError(sftp({ username: undefined }), /trigger: missing required field 'username' \(authentication publicKey\)/)
+      expectError(sftp({ credentialName: 'X' }), /trigger\.credentialName: only used with authentication userPassword — remove it, or set authentication "userPassword"/)
+      expectError(sftp({ ...userPw, credentialName: undefined }), /trigger: missing required field 'credentialName' \(authentication userPassword\)/)
+      expectError(sftp({ ...userPw, username: 'U' }), /trigger\.username: only used with authentication publicKey/)
+      expectError(sftp({ postProcessing: 'move' }), /trigger: missing required field 'archiveDirectory' \(postProcessing move\)/)
+      expectError(sftp({ archiveDirectory: '.archive' }), /trigger\.archiveDirectory: only used with postProcessing move/)
+      for (const field of ['host', 'directory', 'fileName', 'authentication', 'postProcessing', 'minutes']) expectError(sftp({ [field]: undefined }), new RegExp(`missing required field '${field}'`))
+    })
+    test('only the polling interval of the references (15); a password field is unknown', () => {
+      expectError(sftp({ minutes: 20 }), /trigger: every '20' is in no reference export \(known: 15\)/)
+      expectError(sftp({ password: 'x' }), /trigger: unknown field 'password'/)
+      expectError(sftp({ host: 'https://sftp.example.com' }), /trigger\.host: invalid value — use host or host:port, e\.g\. sftp\.example\.com:22, or a whole parameter/)
+      expectError(sftp({ fileName: 'orders.xml;rm' }), /trigger\.fileName: invalid value — use a file name or pattern like \*\.xml/)
+    })
+    test('host, directory, file name, credential name and archive directory can be a whole parameter; user name and key alias cannot', () => {
+      const params = { SFTP_Address: 'sftp.example.com:22', SFTP_Directory: '/in', SFTP_FileName: '*.xml', SFTP_Credential: 'C', SFTP_ArchiveDirectory: '.archive' }
+      const all = { ...userPw, host: '{{SFTP_Address}}', directory: '{{SFTP_Directory}}', fileName: '{{SFTP_FileName}}', credentialName: '{{SFTP_Credential}}', postProcessing: 'move', archiveDirectory: '{{SFTP_ArchiveDirectory}}' }
+      expect(validate(sftp(all, params))).toMatchObject({ valid: true, warnings: [] })
+      expectError(sftp(all, (({ SFTP_Address, ...rest }) => rest)(params)), /trigger\.host: parameter 'SFTP_Address' is referenced but not defined in 'parameters'/)
+      expect(validate(sftp({ username: '{{SFTP_User}}' }, { SFTP_User: 'U' })).valid).toBe(false)
+      expect(validate(sftp({ directory: '/in/{{Sub}}' }, { Sub: 'x' })).valid).toBe(false)
+    })
   })
   test('an unknown sender names the supported ones', () => {
     expect(validate(baseSpec({ trigger: { type: 'ftpSender', host: 'h' } })).issues).toEqual([{ code: 'TRIGGER_UNSUPPORTED', message: expect.stringContaining('soapSender { address }, processDirectSender { address }, jmsSender { queue }') }])

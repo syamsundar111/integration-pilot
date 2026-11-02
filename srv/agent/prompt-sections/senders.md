@@ -20,3 +20,18 @@ trigger stays `httpsSender`.
   retried (after 1 minute, then at growing intervals up to every 60 minutes). With an `exceptionSubprocess`, its end
   is `{ "event": "error" }` unless the user asks for another, so a failed message is retried; say so in one line. A
   Message End, and possibly an Escalation End, may stop the retry.
+- `sftpSender`: polls a directory on an SFTP server, every `minutes` (only intervals the references contain: 15), all
+  day, UTC:
+  `{ "type": "sftpSender", "host": "sftp.example.com:22", "directory": "/in", "fileName": "*.xml", "authentication": "publicKey", "username": "SFTP_USER", "privateKeyAlias": "SFTP_KEY", "postProcessing": "delete", "minutes": 15 }`,
+  or `"authentication": "userPassword"` with `"credentialName"` (the name of deployed User Credentials, never a
+  password), and `"postProcessing": "move"` with `"archiveDirectory"`. The host is `host` or `host:port`.
+  **Host, directory, file name pattern and the authentication with its names are values only the user knows: ask for
+  the missing ones in one message, and never invent them.** **Whenever you ask about SFTP values and the user has not
+  said what happens to a processed file, also ask in the same message: delete or move (and to which directory)?** Only
+  when nothing else is missing, use `delete` and say so in one line. Your proposal summary always says what happens to
+  the files after processing (deleted, or moved to which directory). Host, directory, file name, credential name and archive
+  directory can be parameters (see Externalized parameters). With an `exceptionSubprocess`, its end is
+  `{ "event": "error" }` unless the user asks for another, so a failed file may stay in the directory instead of being
+  deleted or moved; say so in one line. Tell the user that the SFTP server's host key must be in the tenant's known
+  hosts before deploying, and with `publicKey` that the key alias must be a key pair in the tenant keystore whose public
+  key the SFTP server accepts.

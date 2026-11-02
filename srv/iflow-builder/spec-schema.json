@@ -47,6 +47,7 @@
             "soapSender",
             "processDirectSender",
             "jmsSender",
+            "sftpSender",
             "timer"
           ]
         }
@@ -98,6 +99,18 @@
           },
           "then": {
             "$ref": "#/definitions/jmsSender"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sftpSender"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/sftpSender"
           }
         },
         {
@@ -318,6 +331,76 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_.-]{1,80}$",
           "description": "Queue name, given by the user (never invented): letters, digits, _ - . up to 80 characters"
+        }
+      }
+    },
+    "sftpSender": {
+      "type": "object",
+      "required": [
+        "type",
+        "host",
+        "directory",
+        "fileName",
+        "authentication",
+        "postProcessing",
+        "minutes"
+      ],
+      "additionalProperties": false,
+      "description": "SFTP sender: polls a directory every N minutes (all day, UTC), proxy Internet, no read lock, empty files processed. publicKey needs username and privateKeyAlias; userPassword needs credentialName; move needs archiveDirectory. host, directory, fileName, credentialName and archiveDirectory can be a whole {{Param}}.",
+      "properties": {
+        "type": {
+          "const": "sftpSender"
+        },
+        "host": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "SFTP server, host or host:port (CPI uses 22 without a port), given by the user"
+        },
+        "directory": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.~/-]{1,255}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Directory to poll, e.g. /in, given by the user"
+        },
+        "fileName": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.*?-]{1,255}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "File name or pattern, e.g. *.xml"
+        },
+        "authentication": {
+          "enum": [
+            "publicKey",
+            "userPassword"
+          ]
+        },
+        "username": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.@-]{1,100}$",
+          "description": "publicKey: the user on the SFTP server"
+        },
+        "privateKeyAlias": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,100}$",
+          "description": "publicKey: the alias of a key pair in the tenant keystore"
+        },
+        "credentialName": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.-]{1,100}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "userPassword: the name of the deployed User Credentials (never the password)"
+        },
+        "postProcessing": {
+          "enum": [
+            "delete",
+            "move"
+          ]
+        },
+        "archiveDirectory": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.~/-]{1,255}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "move: the directory a processed file moves to, e.g. .archive"
+        },
+        "minutes": {
+          "type": "integer",
+          "description": "Polling interval in minutes; only intervals the references contain (15)"
         }
       }
     },

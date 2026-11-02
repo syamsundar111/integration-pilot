@@ -129,6 +129,16 @@ sap.ui.define(
     const END_EVENTS = { message: 'Message End', escalation: 'Escalation End', error: 'Error End' }
     // what callers of an HTTPS or SOAP sender need: on the trigger card, so it does not depend on the AI's message
     const CALLER_ROLE = 'Callers need the role ESBMessaging.send, for example through a service key of a Process Integration Runtime instance with plan integration-flow.'
+    // an SFTP sender: what it polls, its authentication and post-processing, and what the tenant needs before deploying
+    const sftpText = (t) =>
+      [
+        `SFTP sender polling ${t.host}, directory ${t.directory}, files ${t.fileName}, every ${t.minutes} minutes (UTC, all day). Authentication: ${
+          t.authentication === 'publicKey' ? `public key (user ${t.username}, key alias ${t.privateKeyAlias})` : `user name and password (credential ${t.credentialName})`
+        }. After processing, each file is ${t.postProcessing === 'move' ? `moved to ${t.archiveDirectory}` : 'deleted'}.`,
+        ...(t.authentication === 'publicKey' ? ['The key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts.'] : []),
+        "The SFTP server's host key must be in the tenant's known hosts before deploying.",
+        'With a Message End in the exception subprocess, the file may count as processed and be deleted or moved.'
+      ].join('\n')
     const CATEGORIES = { Others: 'Others - not further qualified', RoutingConditionNotMet: 'Routing condition not met' }
     const endText = (end) => {
       const event = (end && end.event) || 'message'
@@ -1046,7 +1056,7 @@ sap.ui.define(
           active.stepCards = [
             {
               title: 'Trigger',
-              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : spec.trigger.type === 'soapSender' ? 'SOAP sender' : spec.trigger.type === 'processDirectSender' ? 'ProcessDirect sender' : spec.trigger.type === 'jmsSender' ? 'JMS sender' : 'Timer',
+              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : spec.trigger.type === 'soapSender' ? 'SOAP sender' : spec.trigger.type === 'processDirectSender' ? 'ProcessDirect sender' : spec.trigger.type === 'jmsSender' ? 'JMS sender' : spec.trigger.type === 'sftpSender' ? 'SFTP sender' : 'Timer',
               lines:
                 spec.trigger.type === 'httpsSender'
                   ? `${spec.trigger.address}\n${CALLER_ROLE}`
@@ -1056,6 +1066,8 @@ sap.ui.define(
                       ? `ProcessDirect sender at ${spec.trigger.address}. Called by other iFlows on the same tenant with this address; no authentication, not reachable from outside the tenant. A caller that waits for the reply gets the message body at the end of the flow.\nHeaders and the body reach this iFlow, but exchange properties may not: the caller passes values as headers.\nThe address must be unique among the ProcessDirect senders on the tenant; a second iFlow with the same address may fail to deploy.`
                       : spec.trigger.type === 'jmsSender'
                         ? `JMS sender on queue ${spec.trigger.queue}. Another iFlow fills the queue with a JMS receiver, which the app cannot build yet. A failed message is retried after 1 minute, then at growing intervals up to every 60 minutes; dead-letter queue on.\nWith a Message End in the exception subprocess, the message may count as successful, so JMS may not retry it.\nThe tenant may need message queues (JMS capacity in Integration Suite) before this iFlow can be deployed; the queue is created on the first deployment.`
+                        : spec.trigger.type === 'sftpSender'
+                          ? sftpText(spec.trigger)
                         : spec.trigger.mode === 'every'
                     ? `Every ${spec.trigger.minutes} minutes, all day, UTC`
                     : 'Runs once after deployment'

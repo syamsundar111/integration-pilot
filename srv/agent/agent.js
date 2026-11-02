@@ -60,16 +60,16 @@ const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 
  * prefix for prompt caching); a section, once included, stays for the rest of the conversation
  * (sticky), so the rules do not change between messages. Order is fixed, not the order of activation.
  */
-const UNSUPPORTED_TEXT = /\b(router|splitter|gather|content enricher|poll enrich|aggregator|xslt|(message|graphical|operation|xml|edmx|value)\s+mapping|mapping\s+(step|artifact)|sftp|write variables?|process ?call|processdirect|local integration process)\b/i
+const UNSUPPORTED_TEXT = /\b(router|splitter|gather|content enricher|poll enrich|aggregator|xslt|(message|graphical|operation|xml|edmx|value)\s+mapping|mapping\s+(step|artifact)|sftp(?![ -]senders?)|write variables?|process ?call|processdirect|local integration process)\b/i
 // words of a request that needs a feature section; the core prompt keeps a pointer line for requests that use other words
 const ROUTING_TEXT = /\b(rout(e|es|er|ers|ing)|branch(es|ing)?|conditions?|conditional|otherwise|depending on|if (it|the|a)\b[^.\n]{0,60}\b(else|otherwise))\b/i
 const SPLITTING_TEXT = /\b(split(s|ter|ters|ting)?|gather|for (each|every)|each (item|order|record|entry|line|element|row|message)|per (item|order|record|entry|line|element|row)|one by one|individually|local (integration )?process(es)?|process calls?|loop(s|ing)?|iterat\w*|paging|page by page|next page|batch(es)?)\b/i
 const SOAP_TEXT = /\b(soap|wsdl|web ?services?)\b/i
 const MAIL_TEXT = /\b(e-?mails?|mails?|smtp)\b/i
 const MAPPING_TEXT = /\b(mappings?|xslt?|mmap)\b/i
-const SENDERS_TEXT = /\b(senders?|process ?direct|jms|(message )?queues?|soap (service|endpoint|interface|requests?|calls? (it|the iflow))|called (by|via) soap|expose[sd]? (it )?as (a )?soap)\b/i
+const SENDERS_TEXT = /\b(senders?|process ?direct|jms|(message )?queues?|sftp|poll(s|ing)? (for )?files|soap (service|endpoint|interface|requests?|calls? (it|the iflow))|called (by|via) soap|expose[sd]? (it )?as (a )?soap)\b/i
 const MULTICAST_TEXT = /\b(multicasts?|parallel branch(es)?|fan[- ]?out|at the same time|in parallel|join step)\b/i
-const SENDER_TRIGGERS = ['soapSender', 'processDirectSender', 'jmsSender']
+const SENDER_TRIGGERS = ['soapSender', 'processDirectSender', 'jmsSender', 'sftpSender']
 const PROMPT_SECTIONS = [
   // the conversation has files (attached, written by the assistant, from an iFlow or an import)
   { name: 'attachedFiles', applies: ({ files }) => files.length > 0 },

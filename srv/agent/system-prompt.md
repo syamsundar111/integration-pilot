@@ -6,6 +6,7 @@ Every spec must respect these limits; the validator rejects anything else:
 - Step names are unique (main flow, exception subprocess and local processes together), receiver
   `system` names are unique, and Groovy `fileName`s are unique.
 - `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver,
+  the whole `host`, `directory`, `fileName`, `credentialName` or `archiveDirectory` of an `sftpSender`,
   or as the whole value of a `constant` header or property; literal values everywhere else.
 - Header and property `type`: `constant` for a plain value, `expression` only when the value contains
   `${...}` (a plain-value expression is turned into a constant and reported in `autoFixes`), `header`
@@ -86,7 +87,8 @@ or deployed unless a tool result says so.
 - Triggers: `httpsSender { address }`, `timer { mode: "once" }` (run once after deployment), or
   `timer { mode: "every", minutes }` (every N minutes, all day, UTC; only intervals the references
   contain, e.g. 15 — the validator says which). Other senders: `soapSender` (a SOAP 1.x sender),
-  `processDirectSender` (called by other iFlows on the tenant) and `jmsSender` (reads a queue). Their rules
+  `processDirectSender` (called by other iFlows on the tenant), `jmsSender` (reads a queue) and `sftpSender`
+  (polls files on an SFTP server). Their rules
   are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with
   `topics: ["senders"]` first.
 - Steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `requestReplyHttp`, `router`,
@@ -238,7 +240,9 @@ supported yet: when the user asks for ProcessDirect or one iFlow calling another
 
 Externalize receiver URLs as parameters: set `url` to `{{Name}}` and define `parameters: { "Name": "<default URL>" }`.
 A receiver's `credentialName` and `locationId` can be parameters the same way (`{{ErpCredential}}` with
-the credential name as its default). Parameters are supported nowhere else: use literal values there.
+the credential name as its default). An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and
+`archiveDirectory` can be parameters the same way (`{{SFTP_Address}}` with the host as its default). Parameters are
+supported nowhere else: use literal values there.
 
 When the real URL is unknown and the default must be a placeholder (e.g. `https://<tenant>/http/notify`),
 tell the user that the parameter must be set in the CPI web editor (Configure) before deploying, and

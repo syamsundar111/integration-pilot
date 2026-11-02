@@ -14,7 +14,7 @@ turns into extra questions.
 
 | | Supported | Not supported |
 |---|---|---|
-| Trigger | HTTPS sender, SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out) , ProcessDirect sender or JMS sender (a queue), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP and other senders; the ProcessDirect call itself (a placeholder for now) |
+| Trigger | HTTPS sender, SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out), ProcessDirect sender, JMS sender (a queue) or SFTP sender (polls a directory every 15 minutes; public key or user name/password; the file is deleted or moved; host, directory, file name, credential name and archive directory can be parameters), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules and other senders; SFTP sender settings as parameters other than those five; the ProcessDirect call itself (a placeholder for now) |
 | Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
 | Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
@@ -91,9 +91,10 @@ Error handling: <exception subprocess: what to set, log or return when a step fa
 
 Before sending, the chat checks the request without calling the model. It warns about:
 
-- steps v1 cannot build (Content Enricher, Poll Enrich, SFTP)
+- steps the app cannot build yet (Content Enricher, Poll Enrich, SFTP as a step, i.e. an SFTP receiver); an SFTP sender is fine
 - more than 25 numbered steps
-- `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID
+- `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID, or an SFTP sender's host,
+  directory, file name, credential name or archive directory
 - template fields that are still unfilled
 - a password, secret or token in the message (give the credential name instead)
 

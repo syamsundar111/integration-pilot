@@ -129,6 +129,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
               ? { kind: 'other', label: 'ProcessDirect', detail: spec.trigger.address }
               : spec.trigger.type === 'jmsSender'
                 ? { kind: 'other', label: 'JMS', detail: spec.trigger.queue }
+                : spec.trigger.type === 'sftpSender'
+                  ? { kind: 'other', label: 'SFTP', detail: `${spec.trigger.host} ${spec.trigger.directory}` }
                 : { kind: 'timer', label: 'Timer', detail: timerText(spec.trigger) },
       steps: markPerItem(spec.steps.map((s) => {
         const name = nameOf(s)

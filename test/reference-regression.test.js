@@ -918,3 +918,99 @@ describe('Ref_Sender_JMS: the JMS sender (phase 5)', () => {
     expect(fallback.notes.join()).toMatch(/the JMS sender \(the queue name is the parameter \{\{Queue\}\}\) was replaced by an HTTPS sender/)
   })
 })
+
+describe('Ref_Sender_SFTP and Ref_Sender_SFTP_UserPw: the SFTP sender (phase 5)', () => {
+  // test/reference-prompts/Ref_Sender_SFTP_UserPw.txt; Ref_Sender_SFTP.txt for the public-key variant
+  const userPw = {
+    id: 'Ref_Sender_SFTP_UserPw',
+    name: 'Ref_Sender_SFTP_UserPw',
+    packageId: 'PilotReference',
+    trigger: { type: 'sftpSender', host: '{{SFTP_Address}}', directory: '{{SFTP_Directory}}', fileName: '{{SFTP_FileName}}', authentication: 'userPassword', credentialName: '{{SFTP_Credential}}', postProcessing: 'move', archiveDirectory: '{{SFTP_ArchiveDirectory}}', minutes: 15 },
+    steps: [],
+    end: { type: 'none' },
+    parameters: { SFTP_Address: 'sftp.example.com:22', SFTP_ArchiveDirectory: '.archive', SFTP_Credential: 'DUMMY_SFTP_CREDENTIAL', SFTP_Directory: '/dummy/in', SFTP_FileName: '*.xml' }
+  }
+  const publicKey = {
+    id: 'Ref_Sender_SFTP',
+    name: 'Ref_Sender_SFTP',
+    packageId: 'PilotReference',
+    trigger: { type: 'sftpSender', host: 'sftp.example.com:22', directory: '/dummy/in', fileName: '*.xml', authentication: 'publicKey', username: 'DUMMY_USER', privateKeyAlias: 'DUMMY_KEY', postProcessing: 'delete', minutes: 15 },
+    steps: [{ type: 'contentModifier', name: 'CM_Mark', properties: [{ name: 'iFlowName', type: 'constant', value: 'Ref_Sender_SFTP' }] }],
+    end: { type: 'none' }
+  }
+  const sender = (parsed) => {
+    const a = parsed.adapters.find((x) => x.direction === 'Sender')
+    return Object.fromEntries(Object.entries(a.settings).filter(([k]) => !IGNORED.test(k)))
+  }
+  const schedule1 = (scheduleKey) => scheduleKey.match(/<cell>schedule1<\/cell><cell>([^<]*)<\/cell>/)[1]
+  const refsOf = async (zipBuffer) => {
+    const zip = await JSZip.loadAsync(zipBuffer)
+    const propdef = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('parameters.propdef'))).async('string')
+    return [...propdef.matchAll(/<reference [^>]*\/>/g)].map((m) => m[0]).sort()
+  }
+  const builtZip = async (spec) => Buffer.from((await build(spec)).zipBase64, 'base64')
+  const { validate } = require('../srv/iflow-builder/validator')
+
+  test('both specs are valid without warnings (every value is confirmed)', () => {
+    for (const spec of [userPw, publicKey]) expect(validate(spec)).toMatchObject({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('user name/password and Move: every setting as in Ref_Sender_SFTP_UserPw, the scheduler included', async () => {
+    expect(sender(await parse(await builtZip(userPw)))).toEqual(sender(await parse(readRef('Ref_Sender_SFTP_UserPw.zip'))))
+  })
+
+  test('public key and Delete: every setting as in Ref_Sender_SFTP, except the scheduler rows the CPI editor wrote in UserPw', async () => {
+    const built = sender(await parse(await builtZip(publicKey)))
+    const reference = sender(await parse(readRef('Ref_Sender_SFTP.zip')))
+    const { scheduleKey: a, ...rest } = built
+    const { scheduleKey: b, ...referenceRest } = reference
+    expect(rest).toEqual(referenceRest)
+    expect(schedule1(a)).toBe(schedule1(b)) // every 15 minutes, all day, Etc/GMT
+    expect(rest).toMatchObject({ authentication: 'public_key', username: 'DUMMY_USER', privateKeyAlias: 'DUMMY_KEY', credential_name: '', noop: 'delete', proxyType: 'none', readLock: 'none' })
+  })
+
+  test('the parameter references of the five fields are as the CPI editor wrote them', async () => {
+    expect(await refsOf(await builtZip(userPw))).toEqual(await refsOf(readRef('Ref_Sender_SFTP_UserPw.zip')))
+    expect(await refsOf(await builtZip(publicKey))).toEqual([])
+  })
+
+  test('update and Import keep both exports, with the parameters as parameters', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    for (const [file, spec] of [['Ref_Sender_SFTP_UserPw.zip', userPw], ['Ref_Sender_SFTP.zip', publicKey]]) {
+      const update = specFromParsed(await parse(readRef(file)), { packageId: 'PilotReference' })
+      expect(update.blockers).toEqual([])
+      expect(update.spec.trigger).toEqual(spec.trigger)
+      const imported = await importIflow(readRef(file), { fileName: file, packageId: 'PilotReference' })
+      expect(imported).toMatchObject({ valid: true, errors: [] })
+      expect(imported.spec.trigger).toEqual(spec.trigger)
+    }
+    expect((await importIflow(readRef('Ref_Sender_SFTP_UserPw.zip'), { fileName: 'x.zip', packageId: 'PilotReference' })).spec.parameters).toEqual(userPw.parameters)
+  })
+
+  test('authentication, post-processing or the scheduler as a parameter: Import falls back to HTTPS, the update is blocked', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const withParam = async (key, re, value) => {
+      const zip = await JSZip.loadAsync(readRef('Ref_Sender_SFTP_UserPw.zip'))
+      const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+      const before = await zip.file(file).async('string')
+      const after = before.replace(new RegExp(`(<key>${key}</key>\\s*)<value>${re}</value>`), `$1<value>${value}</value>`)
+      expect(after).not.toBe(before)
+      zip.file(file, after)
+      return zip.generateAsync({ type: 'nodebuffer' })
+    }
+    for (const [key, re, value, message] of [
+      ['authentication', 'user_password', '{{SFTP_Auth}}', /the authentication is the parameter \{\{SFTP_Auth\}\}/],
+      ['noop', 'move', '{{SFTP_PostProcessing}}', /the post-processing is the parameter \{\{SFTP_PostProcessing\}\}/],
+      ['scheduleKey', '[^<]*', '{{SFTP_Schedule}}', /the scheduler is a parameter/],
+      ['readLock', 'none', 'changed', /readLock is 'changed'/]
+    ]) {
+      const zip = await withParam(key, re, value)
+      expect(specFromParsed(await parse(zip), { packageId: 'PilotReference' }).blockers.join()).toMatch(message)
+      const fallback = await importIflow(zip, { fileName: 'x.zip', packageId: 'PilotReference' })
+      expect(fallback.spec.trigger.type).toBe('httpsSender')
+      expect(fallback.notes.join()).toMatch(/the SFTP sender \(.*\) was replaced by an HTTPS sender/)
+    }
+  })
+})

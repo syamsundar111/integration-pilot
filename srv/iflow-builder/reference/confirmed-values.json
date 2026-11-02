@@ -11,6 +11,31 @@
       "60": "Maximum Retry Interval 60 minutes, re-selected in Ref_Sender_JMS, 2026-11-02"
     }
   },
+  "SFTP Sender": {
+    "authentication": {
+      "public_key": "Public Key, re-selected in Ref_Sender_SFTP (named by the user in the phase 5 answers), 2026-11-02",
+      "user_password": "User Name/Password, re-selected in Ref_Sender_SFTP_UserPw, 2026-11-02"
+    },
+    "noop": {
+      "delete": "Post-Processing Delete File, re-selected in Ref_Sender_SFTP (phase 5 answers), 2026-11-02",
+      "move": "Post-Processing Move File, re-selected in Ref_Sender_SFTP_UserPw, 2026-11-02"
+    },
+    "proxyType": {
+      "none": "Proxy Type Internet, re-selected in Ref_Sender_SFTP and Ref_Sender_SFTP_UserPw, 2026-11-02"
+    },
+    "readLock": {
+      "none": "Read Lock Strategy None, re-selected in Ref_Sender_SFTP_UserPw, 2026-11-02"
+    },
+    "emptyFileHandling": {
+      "processFile": "Empty File Handling Process Empty Files, re-selected in Ref_Sender_SFTP_UserPw, 2026-11-02"
+    },
+    "every": {
+      "15": "Schedule to Recur Daily, every 15 minutes from 00:00 to 24:00, set by hand in Ref_Sender_SFTP_UserPw; polling re-selected in Ref_Sender_SFTP, 2026-11-02"
+    },
+    "timeZone": {
+      "Etc/GMT": "(UTC 0:00) Greenwich Mean Time (Etc/GMT), set by hand in Ref_Sender_SFTP_UserPw, 2026-11-02"
+    }
+  },
   "SOAP Sender": {
     "serviceDefinition": {
       "Manual": "re-selected in the Ref_Sender_SOAP re-export (switched to WSDL, URL cleared, back to Manual), 2026-11-02"

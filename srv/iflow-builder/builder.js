@@ -14,6 +14,7 @@ const receiverSettings = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
 const specSteps = require('./spec-steps')
 const placeholders = require('./placeholders')
+const senderSettings = require('./sender-settings')
 
 const TEMPLATE_DIR = path.join(__dirname, 'templates')
 
@@ -395,11 +396,16 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const adapters = []
 
   // a sender adapter: its template and the adapter type in the summary
-  const SENDERS = { httpsSender: ['iflw/messageflow-https-sender.xml', 'HTTPS'], soapSender: ['iflw/messageflow-soap-sender.xml', 'SOAP'], processDirectSender: ['iflw/messageflow-processdirect-sender.xml', 'ProcessDirect'], jmsSender: ['iflw/messageflow-jms-sender.xml', 'JMS'] }
+  const SENDERS = { httpsSender: ['iflw/messageflow-https-sender.xml', 'HTTPS'], soapSender: ['iflw/messageflow-soap-sender.xml', 'SOAP'], processDirectSender: ['iflw/messageflow-processdirect-sender.xml', 'ProcessDirect'], jmsSender: ['iflw/messageflow-jms-sender.xml', 'JMS'], sftpSender: ['iflw/messageflow-sftp-sender.xml', 'SFTP'] }
+  let sender = null // the sender participant, for the parameter references of its fields
   if (SENDERS[spec.trigger.type]) {
     const [template, type] = SENDERS[spec.trigger.type]
+    const t = spec.trigger
+    // the SFTP scheduler is the template's (every 15 minutes); the validator allows no other interval yet
+    if (type === 'SFTP' && t.minutes !== senderSettings.SFTP_MINUTES) throw new Error(`SFTP sender: the template polls every ${senderSettings.SFTP_MINUTES} minutes, not ${t.minutes}`)
     const p = { id: nextId('Participant'), kind: 'sender', name: 'Sender', x: L.SENDER_X, y: cy0 - L.PART_H / 2 }
     participants.push(p)
+    sender = p
     const id = nextId('MessageFlow')
     messageFlows.push({
       id,
@@ -409,14 +415,25 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
         TARGET: start.id,
         ADDRESS_VALUE: val(spec.trigger.address),
         QUEUE_VALUE: val(spec.trigger.queue),
-        SYSTEM_VALUE: val(p.name)
+        SYSTEM_VALUE: val(p.name),
+        // SFTP: the fields of the other authentication stay empty; with Delete the archive directory stays as in
+        // Ref_Sender_SFTP (.archive, not used)
+        HOST_VALUE: val(t.host),
+        DIRECTORY_VALUE: val(t.directory),
+        FILE_NAME_VALUE: val(t.fileName),
+        AUTHENTICATION_VALUE: val(senderSettings.SFTP_AUTHENTICATION[t.authentication]),
+        USERNAME_VALUE: val(t.authentication === 'publicKey' ? t.username : ''),
+        PRIVATE_KEY_ALIAS_VALUE: val(t.authentication === 'publicKey' ? t.privateKeyAlias : ''),
+        CREDENTIAL_NAME_VALUE: val(t.authentication === 'userPassword' ? t.credentialName : ''),
+        POST_PROCESSING_VALUE: val(senderSettings.SFTP_POST_PROCESSING[t.postProcessing]),
+        ARCHIVE_DIRECTORY_VALUE: val(t.postProcessing === 'move' ? t.archiveDirectory : '.archive')
       }),
       from: [p.x + L.PART_W / 2, cy0],
       to: [start.x + L.EVENT / 2, cy0],
       sourceShape: p.id,
       targetShape: start.id
     })
-    adapters.push({ type, direction: 'Sender', system: p.name, address: spec.trigger.address ?? spec.trigger.queue })
+    adapters.push({ type, direction: 'Sender', system: p.name, address: t.address ?? t.queue ?? t.host })
   }
 
   // parameter references (parameters.propdef) of the fields given as a whole {{Param}}: [attribute, value]
@@ -427,6 +444,10 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       const a = attributes[field]
       if (param) paramRefs.push({ category: system + a.categorySuffix, attributeId: a.attributeId, uilabel: a.uilabel, key: param })
     }
+  }
+  if (spec.trigger.type === 'sftpSender') {
+    const t = spec.trigger
+    addParamRefs(sender.name, [['sftpHost', t.host], ['sftpDirectory', t.directory], ['sftpFileName', t.fileName], ['sftpCredentialName', t.credentialName ?? ''], ['sftpArchiveDirectory', t.postProcessing === 'move' ? t.archiveDirectory : '']])
   }
   const addReceiver = (sourceNode, call, system, placement) => {
     const p = { id: nextId('Participant'), kind: 'receiver', name: system, ...placement }
@@ -634,7 +655,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     packageId: spec.packageId,
     trigger:
       SENDERS[spec.trigger.type]
-        ? { type: spec.trigger.type, ...(spec.trigger.address && { address: spec.trigger.address }), ...(spec.trigger.queue && { queue: spec.trigger.queue }) }
+        ? { type: spec.trigger.type, ...(spec.trigger.address && { address: spec.trigger.address }), ...(spec.trigger.queue && { queue: spec.trigger.queue }), ...(spec.trigger.host && { host: spec.trigger.host, directory: spec.trigger.directory }) }
         : { type: 'timer', mode: spec.trigger.mode, ...(spec.trigger.mode === 'every' && { minutes: spec.trigger.minutes }) },
     steps: nodes.filter((n) => ['step', 'router', 'multicast'].includes(n.kind)).map((n) => ({ id: n.id, type: n.step.type, name: n.name, ...(n.lane && { route: true }) })),
     end: spec.end.type === 'httpReceiver' ? { type: 'httpReceiver', system: names.endSystem, url: spec.end.url } : { type: 'none' },

@@ -1269,7 +1269,7 @@ describe('fewer and smaller model inputs', () => {
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', {})).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     const content = llm.chat.mock.calls.at(-1)[0].messages.at(-1).content
-    expect(content.length).toBeLessThan(5200) // ~4.9k: before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
+    expect(content.length).toBeLessThan(5300) // 5214 with the SFTP sender's topic summary: before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
     const result = JSON.parse(content)
     expect(Object.keys(result.format.steps)).toEqual(['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'writeVariables', 'requestReplyHttp'])
     expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast', 'senders'])
@@ -1318,6 +1318,19 @@ describe('fewer and smaller model inputs', () => {
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'Create an iFlow that reads orders from a JMS queue.' })
     expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toMatch(/## Senders/)
+  })
+
+  test('the Senders section for an SFTP sender, without the unsupported-steps section; an SFTP receiver still gets it', async () => {
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow with an SFTP sender that logs each file.' })
+    let system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+    expect(system).toMatch(/## Senders/)
+    expect(system).not.toMatch(/## Unsupported steps/)
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow that polls files from a server and writes them to SFTP.' })
+    system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+    expect(system).toMatch(/## Senders/)
+    expect(system).toMatch(/## Unsupported steps/)
   })
 
   test('the Senders section: also when the request names ProcessDirect', async () => {

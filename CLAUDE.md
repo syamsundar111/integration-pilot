@@ -54,7 +54,7 @@ configurations → optional deploy + runtime polling. It runs in-process in the 
 step is safe to re-run (`retry`). Updates keep a backup zip for `restore`. All writes go to the audit log (`srv/lib/audit.js`).
 Because turns and approvals live in the process, the backend must stay at **`instances: 1`** (enforced by `test/repo-hygiene.test.js`).
 
-**iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender | soapSender | processDirectSender | jmsSender |
+**iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender | soapSender | processDirectSender | jmsSender | sftpSender |
 timer once | timer every N minutes), steps (contentModifier, groovyScript, writeVariables, jsonToXml, xmlToJson,
 requestReplyHttp, requestReplySoap, sendMail, messageMapping, xsltMapping, router, splitter, gather, processCall, multicast) and an end (httpReceiver | none, with a Message/Escalation/Error
 End), plus optional `exceptionSubprocess` and `localProcesses`. Multicasts sit on the main line (the builder adds the Join, a gather follows, a branch holds steps, process calls, routers
@@ -62,7 +62,8 @@ with one continuing route and a closed split), splitters and gathers on the main
 the main line, a branch or a local process's line; a router's routes end or continue with the step after it; a splitter is flat
 (the steps after it run per item until a gather, with no router in between); a processCall runs a local process (`spec-steps.js` lists all steps with their paths, `mapSteps` changes them). Spec values
 that CPI stores differently are mapped in `cpi-values.js` (Content Modifier sources, Write Variables, timer schedules) and
-`receiver-settings.js` (HTTP receivers).
+`receiver-settings.js` (HTTP receivers); `sender-settings.js` holds what the builder writes fixed for each sender
+adapter, maps SFTP sender values and decides whether Import and update keep a sender.
 - `validator.js`: the schema plus rules. It returns human-readable errors meant for the LLM to fix.
 - `builder.js`: spec → CPI zip, using `templates/`. The templates are derived by `derive-templates.js` from the exported zips in
   `reference/`, which are the **source of truth**. Never hand-write or guess CPI XML; extend the reference exports and re-derive.

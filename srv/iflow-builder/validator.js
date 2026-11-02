@@ -9,6 +9,7 @@ const { AUTH_TYPES, PROXY_TYPES, checkAgainstReferences } = require('./receiver-
 const cpiValues = require('./cpi-values')
 const specSteps = require('./spec-steps')
 const placeholders = require('./placeholders')
+const senderSettings = require('./sender-settings')
 
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
@@ -23,7 +24,7 @@ const MAIN_LINE_ONLY = ['router', 'splitter', 'gather', 'multicast']
 const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail', 'messageMapping', 'xsltMapping']
 // Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
 const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
-const SUPPORTED_TRIGGERS = ['httpsSender', 'soapSender', 'processDirectSender', 'jmsSender', 'timer']
+const SUPPORTED_TRIGGERS = ['httpsSender', 'soapSender', 'processDirectSender', 'jmsSender', 'sftpSender', 'timer']
 const MAX_MAIN_STEPS = 50 // per process: the main flow and each local process, with its routers and the steps inside routes
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
 
@@ -33,7 +34,7 @@ const NOT_IN_V1 = /gateway|aggregat|filter/i
 const EXCEPTION_STEP = /exception|error|subprocess|catch/i
 // Start and end events are not steps: the trigger and the end are top-level fields
 const END_STEP = /^(none|end|endEvent|messageEnd|httpReceiver)$/i
-const TRIGGER_STEP = /^(start|startEvent|timer|httpsSender|soapSender|processDirectSender|jmsSender|sender)$/i
+const TRIGGER_STEP = /^(start|startEvent|timer|httpsSender|soapSender|processDirectSender|jmsSender|sftpSender|sender)$/i
 
 const DEFAULT_STEP_NAMES = {
   contentModifier: 'Content Modifier',
@@ -158,6 +159,15 @@ const PATTERN_HINTS = {
   cc: 'use mail addresses separated by commas',
   bcc: 'use mail addresses separated by commas'
 }
+const TRIGGER_HINTS = {
+  host: 'use host or host:port, e.g. sftp.example.com:22, or a whole parameter like {{SFTP_Address}}',
+  directory: 'use a path like /in (letters, digits, _ . ~ - /), or a whole parameter like {{SFTP_Directory}}',
+  fileName: 'use a file name or pattern like *.xml (letters, digits, _ . - * ?), or a whole parameter like {{SFTP_FileName}}',
+  username: 'use letters, digits, _ . @ -',
+  privateKeyAlias: 'use the alias of a key pair in the tenant keystore (letters, digits, _ . -)',
+  credentialName: 'use the name of the deployed User Credentials (letters, digits, _ . -), or a whole parameter like {{SFTP_Credential}}',
+  archiveDirectory: 'use a path like .archive or /archive (letters, digits, _ . ~ - /), or a whole parameter like {{SFTP_ArchiveDirectory}}'
+}
 
 /** Translates Ajv errors into plain sentences: [{ code, message }] */
 function schemaErrors(errors, skipPaths) {
@@ -188,7 +198,7 @@ function schemaErrors(errors, skipPaths) {
         push('BAD_VALUE', `${where}: must be '${e.params.allowedValue}'`)
         break
       case 'pattern':
-        push('BAD_FORMAT', `${where}: invalid value — ${PATTERN_HINTS[field] || `must match ${e.params.pattern}`}`)
+        push('BAD_FORMAT', `${where}: invalid value — ${(e.instancePath.startsWith('/trigger/') && TRIGGER_HINTS[field]) || PATTERN_HINTS[field] || `must match ${e.params.pattern}`}`)
         break
       case 'propertyNames':
         push('BAD_PARAM_NAME', `${where}: invalid parameter name '${e.params.propertyName}' — start with a letter, then letters, digits or underscore`)
@@ -209,11 +219,12 @@ function walkStrings(node, path, fn) {
 
 /**
  * Fields where {{Parameter}} references are allowed: an HTTP receiver's URL, credential name and location ID,
- * and the value of a constant header or property (an externalized value; the other sources name a header,
- * property, variable or XPath)
+ * an SFTP sender's host, directory, file name, credential name and archive directory (Ref_Sender_SFTP_UserPw), and the
+ * value of a constant header or property (an externalized value; the other sources name a header, property, variable or
+ * XPath)
  */
 const STEP_PATH = String.raw`(steps\[\d+\](\.branches\[\d+\]\.steps\[\d+\])?(\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\]|localProcesses\[\d+\]\.steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?)`
-const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId|server|to)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
+const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId|server|to)|trigger\.(host|directory|fileName|credentialName|archiveDirectory)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
 
 /**
  * @param {object} spec
@@ -307,7 +318,7 @@ function validate(spec, { attachments = [] } = {}) {
   }
   if (spec.trigger?.type && !SUPPORTED_TRIGGERS.includes(spec.trigger.type)) {
     skip.push('/trigger')
-    err('TRIGGER_UNSUPPORTED', `trigger: '${spec.trigger.type}' is not supported yet. Use httpsSender { address }, soapSender { address }, processDirectSender { address }, jmsSender { queue }, timer { mode: "once" } or timer { mode: "every", minutes }.`)
+    err('TRIGGER_UNSUPPORTED', `trigger: '${spec.trigger.type}' is not supported yet. Use httpsSender { address }, soapSender { address }, processDirectSender { address }, jmsSender { queue }, sftpSender { host, directory, fileName, authentication, postProcessing, minutes }, timer { mode: "once" } or timer { mode: "every", minutes }.`)
   }
   if (spec.end?.type && !SUPPORTED_ENDS.includes(spec.end.type)) {
     skip.push('/end')
@@ -600,6 +611,23 @@ function validate(spec, { attachments = [] } = {}) {
     if (spec.trigger.mode === 'once' && spec.trigger.minutes != null) err('UNKNOWN_FIELD', 'trigger.minutes: only used with mode every — remove it, or set mode "every"')
     if (['once', 'every'].includes(spec.trigger.mode) && (spec.trigger.mode === 'once' || Number.isInteger(spec.trigger.minutes))) valueCheck('Timer', cpiValues.timerValues(spec.trigger), 'trigger')
   }
+  // SFTP sender: the fields of the chosen authentication and post-processing, and the stored values from the references
+  if (spec.trigger?.type === 'sftpSender') {
+    const t = spec.trigger
+    const needs = { publicKey: ['username', 'privateKeyAlias'], userPassword: ['credentialName'] }
+    for (const [auth, fields] of Object.entries(needs)) {
+      if (t.authentication === auth) for (const f of fields.filter((f) => t[f] == null)) err('MISSING_FIELD', `trigger: missing required field '${f}' (authentication ${auth})`)
+      else if (t.authentication in needs) for (const f of fields.filter((f) => t[f] != null)) err('SFTP_FIELD_UNUSED', `trigger.${f}: only used with authentication ${auth} — remove it, or set authentication "${auth}"`)
+    }
+    if (t.postProcessing === 'move' && t.archiveDirectory == null) err('MISSING_FIELD', "trigger: missing required field 'archiveDirectory' (postProcessing move)")
+    if (t.postProcessing === 'delete' && t.archiveDirectory != null) err('SFTP_FIELD_UNUSED', 'trigger.archiveDirectory: only used with postProcessing move — remove it, or set postProcessing "move"')
+    if (t.authentication in needs && t.postProcessing in senderSettings.SFTP_POST_PROCESSING && Number.isInteger(t.minutes))
+      valueCheck('SFTP Sender', [
+        ['authentication', senderSettings.SFTP_AUTHENTICATION[t.authentication]],
+        ['noop', senderSettings.SFTP_POST_PROCESSING[t.postProcessing]],
+        ['every', String(t.minutes)]
+      ], 'trigger')
+  }
   for (const [s, where] of allSteps.filter(([x]) => isObj(x))) {
     if (s.type === 'contentModifier')
       for (const [table, rows] of [['headers', s.headers], ['properties', s.properties]])
@@ -677,7 +705,7 @@ function validate(spec, { attachments = [] } = {}) {
     const row = /\.(headers|properties)\[\d+\]\.value$/.test(path)
     const rowType = row && specSteps.valueAt(spec, path.replace(/\.value$/, ''))?.type
     if (!PARAM_FIELDS.test(path) || (row && rowType !== 'constant')) {
-      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, or as a constant value`)
+      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, or as a constant value`)
       return
     }
     if (!WHOLE_PARAM.test(value)) {

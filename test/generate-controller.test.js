@@ -414,6 +414,20 @@ describe('proposal panel for routers (phase 1b)', () => {
     })
   })
 
+  test('the SFTP sender card (phase 5): what it polls, the authentication, post-processing, known hosts, the keystore and the Message End note', () => {
+    const card = (trigger) => activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger }).stepCards[0]
+    const common = { type: 'sftpSender', host: 'sftp.example.com:22', directory: '/in', fileName: '*.xml', minutes: 15 }
+    expect(card({ ...common, authentication: 'publicKey', username: 'SFTP_USER', privateKeyAlias: 'SFTP_KEY', postProcessing: 'delete' })).toEqual({
+      title: 'Trigger',
+      type: 'SFTP sender',
+      lines:
+        "SFTP sender polling sftp.example.com:22, directory /in, files *.xml, every 15 minutes (UTC, all day). Authentication: public key (user SFTP_USER, key alias SFTP_KEY). After processing, each file is deleted.\nThe key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts.\nThe SFTP server's host key must be in the tenant's known hosts before deploying.\nWith a Message End in the exception subprocess, the file may count as processed and be deleted or moved."
+    })
+    expect(card({ ...common, authentication: 'userPassword', credentialName: 'SFTP_CREDENTIAL', postProcessing: 'move', archiveDirectory: '.archive' }).lines).toBe(
+      "SFTP sender polling sftp.example.com:22, directory /in, files *.xml, every 15 minutes (UTC, all day). Authentication: user name and password (credential SFTP_CREDENTIAL). After processing, each file is moved to .archive.\nThe SFTP server's host key must be in the tenant's known hosts before deploying.\nWith a Message End in the exception subprocess, the file may count as processed and be deleted or moved."
+    )
+  })
+
   test('the ProcessDirect sender card (phase 5): no role, headers rather than properties, a unique address', () => {
     const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'processDirectSender', address: '/orders/process' } })
     expect(active.stepCards[0]).toEqual({

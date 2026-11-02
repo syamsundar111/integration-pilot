@@ -33,5 +33,30 @@
     "attributeId": "ctype::AdapterVariant/cname::Mail/tp::SMTP/mp::None/direction::Receiver/version::1.13.0/attrId::user",
     "uilabel": "Credential Name",
     "categorySuffix": ""
+  },
+  "sftpHost": {
+    "attributeId": "/attrId::host",
+    "uilabel": "",
+    "categorySuffix": ""
+  },
+  "sftpDirectory": {
+    "attributeId": "/attrId::path",
+    "uilabel": "",
+    "categorySuffix": ""
+  },
+  "sftpFileName": {
+    "attributeId": "/attrId::fileName",
+    "uilabel": "",
+    "categorySuffix": ""
+  },
+  "sftpCredentialName": {
+    "attributeId": "/attrId::credential_name",
+    "uilabel": "",
+    "categorySuffix": ""
+  },
+  "sftpArchiveDirectory": {
+    "attributeId": "/attrId::file.move",
+    "uilabel": "",
+    "categorySuffix": ""
   }
 }

@@ -40,7 +40,7 @@ prompt and the tokens used reported per prompt.
 | 3 | SOAP 1.x and Mail receivers (format below) | Ref_Receivers | done |
 | 4 | Message Mapping: an existing artifact (a `PH_` placeholder if it does not exist) or a mapping inside the iFlow carried from Import; XSLT Mapping step (format below) | Ref_Mapping, MM_DummyOrderToNotif | done |
 | 9 | Multicast and Join (format below) | Ref_Multicast | done |
-| 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | in progress: error response, SOAP and ProcessDirect done; JMS waiting for the tenant check; then SFTP |
+| 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | in progress: error response, SOAP, ProcessDirect and JMS done; SFTP waiting for the tenant check |
 | 6 | Receivers 2: OData V2, RFC, IDoc, SFTP, JDBC, ProcessDirect | Ref_Receivers_2 | waits for the user's go |
 | 6b | Content Enricher and Poll Enrich (they need phase 6's OData and SFTP adapters; neither real iFlow uses them) | Ref_Multicast_Enrich, to be re-selected first | after phase 6 |
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS (check transaction handling first, see Later) | Ref_Persistence | waits for the user's go |
@@ -180,6 +180,15 @@ Phase 5 (format agreed 2026-11-02, one sender per task):
   (1 minute, exponential backoff, at most 60 minutes), dead-letter queue on. With an exception subprocess the AI ends
   it with an Error End, so a failed message is retried. The queue is created on the first deployment (SAP Help); the
   JMS receiver that fills it comes in phase 7. Transaction handling stays Not Required, as in every export.
+- **`sftpSender { host, directory, fileName, authentication, postProcessing, minutes }`:** from Ref_Sender_SFTP_UserPw
+  (Ref_Sender_SFTP has the public-key variant). `authentication` `publicKey` with `username` and `privateKeyAlias`, or
+  `userPassword` with `credentialName`; `postProcessing` `delete`, or `move` with `archiveDirectory`; `minutes` only as
+  in the references (15; the scheduler is UserPw's: daily, every 15 minutes, 00:00-24:00, Etc/GMT). Host, directory,
+  file name, credential name and archive directory can be a whole parameter, as the export has them; user name and
+  key alias are literal. Proxy Internet, read lock none, empty files processed, 20 files per poll, as exported. The AI
+  asks for host, directory, file name and authentication, and whenever it asks, also "delete or move?" (else delete,
+  said in one line); its summary always says what happens to the files, and ends an exception subprocess with an Error End. The panel says the host key must be
+  in the tenant's known hosts (and, for public key, that the key alias must be a key pair the server accepts).
 
 ## Later (no phase yet)
 
@@ -215,6 +224,9 @@ From the former reference export checklist; each needs a reference export first.
   ProcessDirect call is missing.
 - JMS queue names: the rule (letters, digits, `_ - .`, up to 80 characters, no parameters) is not confirmed against
   CPI; only `DUMMY_QUEUE_IN` is in an export.
+- SFTP sender values: the rules for host (`host` or `host:port`; CPI is expected to use 22 without a port), directory
+  (letters, digits, `_ . ~ - /`), file name (letters, digits, `_ . - * ?`), user name, key alias and credential name
+  are not confirmed against CPI; the exports have only `sftp.example.com:22`, `/dummy/in` and `*.xml`.
 - Transaction handling with a JMS sender: nothing for the JMS sender alone (every export says Not Required); check it
   again in phase 7, where a JMS receiver and a Data Store may need "Required for JMS" (Ref_Persistence also says Not
   Required).

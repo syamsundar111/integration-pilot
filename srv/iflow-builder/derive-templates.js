@@ -104,6 +104,17 @@ const VALUE_FIELDS = {
     variant: /cname::(?:sap:)?JMS\/tp::Not Applicable\/mp::Not Applicable\/direction::Sender\//,
     values: (p) => [['RetryInterval', p.RetryInterval], ['ExponentialBackoff', p.ExponentialBackoff], ['MaxRetryInterval', p.MaxRetryInterval]]
   },
+  // SFTP sender: authentication, post-processing, proxy, read lock, empty-file handling and the scheduler (schedule1
+  // "0+0/15+0-23+?+*+*+*&trigger.timeZone=Etc/GMT": every 15 minutes, all day)
+  'SFTP Sender': {
+    variant: /cname::(?:sap:)?SFTP\/tp::SFTP\/mp::File\/direction::Sender\//,
+    values: (p) => {
+      const schedule = unescape(Object.fromEntries(tableRows(p.scheduleKey).map((c) => [c[0]?.value, c[1]?.value])).schedule1)
+      const [cron, timeZone] = [schedule.split('&')[0], schedule.match(/trigger\.timeZone=([^&]*)/)?.[1]]
+      const every = cron.match(/^0\+0\/(\d+)\+0-23\+\?\+\*\+\*\+\*$/)?.[1] // every N minutes, all day
+      return [['authentication', p.authentication], ['noop', p.noop], ['proxyType', p.proxyType], ['readLock', p.readLock], ['emptyFileHandling', p.emptyFileHandling], ['every', every], ['timeZone', timeZone]]
+    }
+  },
   // SOAP 1.x receiver: authentication and proxy type
   'SOAP Receiver': {
     variant: /cname::(?:sap:)?SOAP\/tp::HTTP\/mp::SOAP 1\.x\/direction::Receiver\//,
@@ -242,6 +253,25 @@ async function main() {
   t['iflw/messageflow-jms-sender.xml'] = apply(block(jmsSender.iflw, 'id="MessageFlow_1"'), 'jms-sender', {
     attrs: { 'id="MessageFlow_1"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_1"': 'targetRef="{{TARGET}}"' },
     props: { QueueName_inbound: 'QUEUE_VALUE', system: 'SYSTEM_VALUE' }
+  })
+  // SFTP sender (Ref_Sender_SFTP_UserPw; Ref_Sender_SFTP has the public-key variant): host, directory, file name, the
+  // authentication with its fields, post-processing and archive directory; the scheduler (every 15 minutes, all day,
+  // Etc/GMT), proxy, read lock, empty-file handling and the rest stay as exported
+  const sftpSender = await readZip('Ref_Sender_SFTP_UserPw.zip')
+  t['iflw/messageflow-sftp-sender.xml'] = apply(block(sftpSender.iflw, 'id="MessageFlow_1"'), 'sftp-sender', {
+    attrs: { 'id="MessageFlow_1"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_1"': 'targetRef="{{TARGET}}"' },
+    props: {
+      host: 'HOST_VALUE',
+      path: 'DIRECTORY_VALUE',
+      fileName: 'FILE_NAME_VALUE',
+      authentication: 'AUTHENTICATION_VALUE',
+      username: 'USERNAME_VALUE',
+      privateKeyAlias: 'PRIVATE_KEY_ALIAS_VALUE',
+      credential_name: 'CREDENTIAL_NAME_VALUE',
+      noop: 'POST_PROCESSING_VALUE',
+      'file\\.move': 'ARCHIVE_DIRECTORY_VALUE',
+      system: 'SYSTEM_VALUE'
+    }
   })
   // ProcessDirect sender (Ref_Sender_ProcessDirect): only the address; no authentication, no dropdowns
   const pdSender = await readZip('Ref_Sender_ProcessDirect.zip')
@@ -504,6 +534,18 @@ async function main() {
     // the HTTP fields get the version of the template's adapter; SOAP and Mail templates come from this export
     return { attributeId: ownVersion ? r[2] : r[2].replace(/\/version::[^/]+\//, `/version::${version}/`), uilabel: r[3], categorySuffix: r[1].slice(system.length) }
   }
+  // the SFTP sender's fields (Ref_Sender_SFTP_UserPw), as the CPI editor wrote them there: category "Sender" (the
+  // sender's system name), attribute_id "/attrId::<key>" and an empty label
+  const sftpPropdef = sftpSender.files['src/main/resources/parameters.propdef']
+  const sftpSystem = block(sftpSender.iflw, 'id="MessageFlow_1"').match(/<key>system<\/key>\s*<value>([^<]*)<\/value>/)[1]
+  const sftpRefs = Object.fromEntries(
+    Object.entries({ sftpHost: 'host', sftpDirectory: 'path', sftpFileName: 'fileName', sftpCredentialName: 'credential_name', sftpArchiveDirectory: 'file.move' }).map(([field, attr]) => {
+      const r = sftpPropdef.match(new RegExp(`<reference attribute_category="([^"]+)" attribute_id="(/attrId::${attr.replace('.', '\\.')})" attribute_uilabel="([^"]*)" param_key="[^"]+"/>`))
+      if (!r) throw new Error(`Ref_Sender_SFTP_UserPw.zip: no parameter reference for ${attr}`)
+      if (!r[1].startsWith(sftpSystem)) throw new Error(`Ref_Sender_SFTP_UserPw.zip: category ${r[1]} does not start with the sender ${sftpSystem}`)
+      return [field, { attributeId: r[2], uilabel: r[3], categorySuffix: r[1].slice(sftpSystem.length) }]
+    })
+  )
   t['propdef-receiver-attributes.json'] =
     JSON.stringify(
       {
@@ -513,7 +555,8 @@ async function main() {
         soapAddress: refOf('address', { ownVersion: true }),
         mailServer: refOf('server', { ownVersion: true }),
         mailTo: refOf('to', { ownVersion: true }),
-        mailCredential: refOf('user', { ownVersion: true })
+        mailCredential: refOf('user', { ownVersion: true }),
+        ...sftpRefs
       },
       null,
       2
