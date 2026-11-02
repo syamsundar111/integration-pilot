@@ -818,3 +818,53 @@ describe('Ref_Sender_SOAP: the SOAP sender (phase 5)', () => {
     }
   })
 })
+
+describe('Ref_Sender_ProcessDirect: the ProcessDirect sender (phase 5)', () => {
+  // test/reference-prompts/Ref_Sender_ProcessDirect.txt, without iGlow's "Set log headers" and empty exception subprocess
+  const spec = {
+    id: 'Ref_Sender_ProcessDirect',
+    name: 'Ref_Sender_ProcessDirect',
+    packageId: 'PilotReference',
+    trigger: { type: 'processDirectSender', address: '/dummy/pd/orders' },
+    steps: [{ type: 'contentModifier', name: 'CM_Mark', properties: [{ name: 'iFlowName', type: 'constant', value: 'Ref_Sender_ProcessDirect', datatype: 'java.lang.String' }] }],
+    end: { type: 'none' }
+  }
+  const sender = (parsed) => {
+    const a = parsed.adapters.find((x) => x.direction === 'Sender')
+    return Object.fromEntries(Object.entries(a.settings).filter(([k]) => !IGNORED.test(k)))
+  }
+  let reference, built
+  beforeAll(async () => {
+    reference = await parse(readRef('Ref_Sender_ProcessDirect.zip'))
+    built = await parse(Buffer.from((await build(spec)).zipBase64, 'base64'))
+  })
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('every setting of the sender is as in the reference', () => {
+    expect(sender(built)).toEqual(sender(reference))
+    expect(sender(built)).toMatchObject({ ComponentType: 'ProcessDirect', address: '/dummy/pd/orders', direction: 'Sender' })
+  })
+
+  test('update and Import keep it; an address given as a parameter makes Import fall back to HTTPS and blocks the update', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const update = specFromParsed(reference, { packageId: 'PilotReference' })
+    expect(update.blockers).toEqual([])
+    expect(update.spec.trigger).toEqual(spec.trigger)
+    const imported = await importIflow(readRef('Ref_Sender_ProcessDirect.zip'), { fileName: 'Ref_Sender_ProcessDirect.zip', packageId: 'PilotReference' })
+    expect(imported).toMatchObject({ valid: true, errors: [] })
+    expect(imported.spec.trigger).toEqual(spec.trigger)
+    const zip = await JSZip.loadAsync(readRef('Ref_Sender_ProcessDirect.zip'))
+    const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+    zip.file(file, (await zip.file(file).async('string')).replace(/(<key>address<\/key>\s*)<value>[^<]*<\/value>/, '$1<value>{{PD_Address}}</value>'))
+    const withParam = await zip.generateAsync({ type: 'nodebuffer' })
+    expect(specFromParsed(await parse(withParam), { packageId: 'PilotReference' }).blockers.join()).toMatch(/the address is the parameter \{\{PD_Address\}\}/)
+    const fallback = await importIflow(withParam, { fileName: 'x.zip', packageId: 'PilotReference' })
+    expect(fallback.spec.trigger.type).toBe('httpsSender')
+    expect(fallback.notes.join()).toMatch(/the ProcessDirect sender \(the address is the parameter \{\{PD_Address\}\}\) was replaced by an HTTPS sender/)
+  })
+})

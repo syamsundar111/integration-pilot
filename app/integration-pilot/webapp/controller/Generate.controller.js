@@ -1046,13 +1046,15 @@ sap.ui.define(
           active.stepCards = [
             {
               title: 'Trigger',
-              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : spec.trigger.type === 'soapSender' ? 'SOAP sender' : 'Timer',
+              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : spec.trigger.type === 'soapSender' ? 'SOAP sender' : spec.trigger.type === 'processDirectSender' ? 'ProcessDirect sender' : 'Timer',
               lines:
                 spec.trigger.type === 'httpsSender'
                   ? `${spec.trigger.address}\n${CALLER_ROLE}`
                   : spec.trigger.type === 'soapSender'
                     ? `SOAP 1.x sender at ${spec.trigger.address}. Service definition Manual (no WSDL), Request-Reply: the message body at the end of the flow is the response. XML in and out.\n${CALLER_ROLE}`
-                    : spec.trigger.mode === 'every'
+                    : spec.trigger.type === 'processDirectSender'
+                      ? `ProcessDirect sender at ${spec.trigger.address}. Called by other iFlows on the same tenant with this address; no authentication, not reachable from outside the tenant. A caller that waits for the reply gets the message body at the end of the flow.\nHeaders and the body reach this iFlow, but exchange properties may not: the caller passes values as headers.\nThe address must be unique among the ProcessDirect senders on the tenant; a second iFlow with the same address may fail to deploy.`
+                      : spec.trigger.mode === 'every'
                     ? `Every ${spec.trigger.minutes} minutes, all day, UTC`
                     : 'Runs once after deployment'
             },

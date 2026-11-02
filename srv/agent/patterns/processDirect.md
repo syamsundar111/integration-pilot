@@ -1,9 +1,16 @@
 # Pattern: one iFlow calls another (ProcessDirect)
 
-v1 has no ProcessDirect sender or receiver. When the user asks for ProcessDirect, or for one iFlow
-that calls another on the same tenant:
-- Say plainly that v1 cannot build ProcessDirect, and offer this **workaround** (never call it an
-  equivalent): the called iFlow gets an HTTPS sender with the address (e.g. `/pilot/notify`), and the
+v1 builds the called iFlow with a `processDirectSender`; the call itself, a ProcessDirect receiver, is not
+supported yet. When the user asks for ProcessDirect, or for one iFlow that calls another on the same tenant:
+- **The called iFlow** gets `{ "type": "processDirectSender", "address": "/..." }` (see Senders). Headers and the
+  body reach it; exchange properties of the caller may not, so the caller passes values as headers.
+- **The caller**, when the user wants both iFlows now: where the call goes, a placeholder Content Modifier
+  `PH_<StepName>` with a description starting `REPLACE WITH` ("REPLACE WITH Request Reply to a ProcessDirect
+  receiver at address /...", exactly the called iFlow's address) and one constant property `REPLACE_WITH`. Tell the
+  user to replace it in the CPI editor with a Request Reply to a ProcessDirect receiver at exactly that address.
+  Say plainly that the call itself is not built yet; never present the placeholder as the call.
+- Only when the user asks for a call that needs no manual step in the editor, offer this **workaround** instead
+  (never call it an equivalent): the called iFlow gets an HTTPS sender with the address (e.g. `/pilot/notify`), and the
   caller calls that endpoint with `requestReplyHttp` (or the `httpReceiver` end). The difference
   matters: ProcessDirect stays inside the tenant and needs no authentication; an HTTPS endpoint is
   public and every call to it must be authenticated.

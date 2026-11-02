@@ -15,7 +15,7 @@ const fixed = (file) =>
       .filter((m) => !NOT_SETTINGS.includes(m[1]))
       .map((m) => [m[1], m[2] ?? ''])
   )
-const FIXED = { soapSender: fixed('messageflow-soap-sender.xml') }
+const FIXED = { soapSender: fixed('messageflow-soap-sender.xml'), processDirectSender: fixed('messageflow-processdirect-sender.xml') }
 const ADDRESS = new RegExp(require('./spec-schema.json').definitions.soapSender.properties.address.pattern)
 
 /**
@@ -25,6 +25,7 @@ const ADDRESS = new RegExp(require('./spec-schema.json').definitions.soapSender.
 function triggerOf(adapter) {
   if (adapter?.direction !== 'Sender') return null
   if (adapter.type === 'SOAP' && adapter.settings?.MessageProtocol === 'SOAP 1.x') return check('soapSender', adapter, { type: 'soapSender', address: adapter.address })
+  if (adapter.type === 'ProcessDirect') return check('processDirectSender', adapter, { type: 'processDirectSender', address: adapter.address })
   return null
 }
 

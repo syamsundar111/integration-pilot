@@ -45,6 +45,7 @@
           "enum": [
             "httpsSender",
             "soapSender",
+            "processDirectSender",
             "timer"
           ]
         }
@@ -72,6 +73,18 @@
           },
           "then": {
             "$ref": "#/definitions/soapSender"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "processDirectSender"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/processDirectSender"
           }
         },
         {
@@ -254,6 +267,25 @@
           "type": "string",
           "pattern": "^(/[A-Za-z0-9_.~-]+)+$",
           "description": "Endpoint path, e.g. /orders/create"
+        }
+      }
+    },
+    "processDirectSender": {
+      "type": "object",
+      "required": [
+        "type",
+        "address"
+      ],
+      "additionalProperties": false,
+      "description": "ProcessDirect sender: called by other iFlows on the same tenant with exactly this address; no authentication.",
+      "properties": {
+        "type": {
+          "const": "processDirectSender"
+        },
+        "address": {
+          "type": "string",
+          "pattern": "^(/[A-Za-z0-9_.~-]+)+$",
+          "description": "ProcessDirect address, e.g. /orders/process; unique among the ProcessDirect senders on the tenant"
         }
       }
     },

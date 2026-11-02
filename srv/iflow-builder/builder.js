@@ -393,7 +393,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const adapters = []
 
   // a sender adapter: its template and the adapter type in the summary
-  const SENDERS = { httpsSender: ['iflw/messageflow-https-sender.xml', 'HTTPS'], soapSender: ['iflw/messageflow-soap-sender.xml', 'SOAP'] }
+  const SENDERS = { httpsSender: ['iflw/messageflow-https-sender.xml', 'HTTPS'], soapSender: ['iflw/messageflow-soap-sender.xml', 'SOAP'], processDirectSender: ['iflw/messageflow-processdirect-sender.xml', 'ProcessDirect'] }
   if (SENDERS[spec.trigger.type]) {
     const [template, type] = SENDERS[spec.trigger.type]
     const p = { id: nextId('Participant'), kind: 'sender', name: 'Sender', x: L.SENDER_X, y: cy0 - L.PART_H / 2 }

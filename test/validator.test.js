@@ -636,7 +636,11 @@ describe('senders (phase 5)', () => {
     expect(validate(baseSpec({ trigger: { type: 'soapSender' } })).valid).toBe(false)
     expect(validate(baseSpec({ trigger: { type: 'soapSender', address: '/o', wsdl: 'x' } })).valid).toBe(false)
   })
+  test('a processDirectSender with a path is valid; a bad path is refused', () => {
+    expect(validate(baseSpec({ trigger: { type: 'processDirectSender', address: '/orders/process' } }))).toMatchObject({ valid: true, warnings: [] })
+    expect(validate(baseSpec({ trigger: { type: 'processDirectSender', address: 'orders' } })).valid).toBe(false)
+  })
   test('an unknown sender names the supported ones', () => {
-    expect(validate(baseSpec({ trigger: { type: 'jmsSender', queue: 'Q' } })).issues).toEqual([{ code: 'TRIGGER_UNSUPPORTED', message: expect.stringContaining('soapSender { address }') }])
+    expect(validate(baseSpec({ trigger: { type: 'jmsSender', queue: 'Q' } })).issues).toEqual([{ code: 'TRIGGER_UNSUPPORTED', message: expect.stringContaining('soapSender { address }, processDirectSender { address }') }])
   })
 })

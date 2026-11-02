@@ -83,8 +83,8 @@ describe('system prompt: calling another iFlow (manual test 16)', () => {
   const value = (key) => SENDER.match(new RegExp(`<key>${key}</key>\\s*<value>([^<]*)</value>`))?.[1]
 
   test('the HTTPS sender is a workaround for ProcessDirect, not an equivalent', () => {
-    expect(flat).toMatch(/v1 has no ProcessDirect sender or receiver/)
-    expect(flat).toMatch(/offer this \*\*workaround\*\* \(never call it an equivalent\)/)
+    expect(flat).toMatch(/v1 builds the called iFlow with a `processDirectSender`; the call itself, a ProcessDirect receiver, is not supported yet/)
+    expect(flat).toMatch(/Only when the user asks for a call that needs no manual step in the editor, offer this \*\*workaround\*\* instead \(never call it an equivalent\)/)
     expect(flat).toMatch(/ProcessDirect stays inside the tenant and needs no authentication; an HTTPS endpoint is public and every call to it must be authenticated/)
   })
 
@@ -168,8 +168,8 @@ describe('system prompt: patterns loaded on demand (review item 6)', () => {
   const read = (n) => fs.readFileSync(path.join(__dirname, `../srv/agent/patterns/${n}.md`), 'utf8')
 
   test('the prompt keeps a pointer to each pattern, the details are only in the pattern', () => {
-    expect(flat).toMatch(/When the user asks for ProcessDirect or one iFlow calling another, first call `getPattern` with `processDirect`/)
-    expect(flat).toMatch(/v1 cannot build ProcessDirect; the HTTPS workaround is public and needs authentication/)
+    expect(flat).toMatch(/is not supported yet: when the user asks for ProcessDirect or one iFlow calling another, first call `getPattern` with `processDirect`/)
+    expect(flat).toMatch(/The called iFlow can have a `processDirectSender` \(see Senders\)\. The caller side, a ProcessDirect receiver, is not supported yet/)
     expect(flat).toMatch(/To update, change, extend or fix an existing iFlow, first call `getPattern` with `updateIflow`/)
     expect(flat).toMatch(/Never call `proposeIflow` for an iFlow that already exists, and never list the changes yourself/)
     // phase 1b: routers on the main line, the default route last, spaces around Non-XML operators,
@@ -338,11 +338,25 @@ describe('system prompt: senders (phase 5)', () => {
   const senders = sectionFlat('senders')
   test('the core prompt names soapSender and points to the topic; the default trigger stays httpsSender', () => {
     expect(flat).toMatch(/unless the user names a timer, another sender or another path;/)
-    expect(flat).toMatch(/Other senders: `soapSender` \(a SOAP 1\.x sender\)\. Their rules are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with `topics: \["senders"\]` first\./)
+    expect(flat).toMatch(/Other senders: `soapSender` \(a SOAP 1\.x sender\) and `processDirectSender` \(called by other iFlows on the tenant\)\. Their rules are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with `topics: \["senders"\]` first\./)
   })
   test('the Senders section: soapSender is XML in and out, not the JSON default', () => {
     expect(senders).toMatch(/^## Senders/)
     expect(senders).toMatch(/the default trigger stays `httpsSender`/)
     expect(senders).toMatch(/\*\*SOAP is XML in and out:\*\* the message body is the content of the SOAP body \(XML, without the envelope\), and the body at the end of the flow is the response, so it must be XML that fits the response\. The "JSON in and out" default does not apply\./)
+  })
+})
+
+describe('system prompt: ProcessDirect (phase 5)', () => {
+  const senders = sectionFlat('senders')
+  const pattern = fs.readFileSync(path.join(__dirname, '../srv/agent/patterns/processDirect.md'), 'utf8').replace(/\s+/g, ' ')
+  test('the Senders section: the address, no authentication, headers rather than exchange properties, unique address', () => {
+    expect(senders).toMatch(/`processDirectSender`: `\{ "type": "processDirectSender", "address": "\/orders\/process" \}`, called by other iFlows on the same tenant with exactly this address/)
+    expect(senders).toMatch(/Headers and the body reach the called iFlow, but exchange properties may not, so values it needs should be passed as headers\. The address must be unique among the ProcessDirect senders on the tenant\./)
+  })
+  test('the pattern: both iFlows now means a processDirectSender and a PH_ placeholder where the call goes', () => {
+    expect(pattern).toMatch(/\*\*The caller\*\*, when the user wants both iFlows now: where the call goes, a placeholder Content Modifier `PH_<StepName>` with a description starting `REPLACE WITH`/)
+    expect(pattern).toMatch(/replace it in the CPI editor with a Request Reply to a ProcessDirect receiver at exactly that address/)
+    expect(pattern).toMatch(/never present the placeholder as the call/)
   })
 })

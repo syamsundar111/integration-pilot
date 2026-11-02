@@ -373,6 +373,16 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(activeFor(base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }])).stepCards[0].lines).toBe('Runs once after deployment')
   })
 
+  test('the ProcessDirect sender card (phase 5): no role, headers rather than properties, a unique address', () => {
+    const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'processDirectSender', address: '/orders/process' } })
+    expect(active.stepCards[0]).toEqual({
+      title: 'Trigger',
+      type: 'ProcessDirect sender',
+      lines:
+        'ProcessDirect sender at /orders/process. Called by other iFlows on the same tenant with this address; no authentication, not reachable from outside the tenant. A caller that waits for the reply gets the message body at the end of the flow.\nHeaders and the body reach this iFlow, but exchange properties may not: the caller passes values as headers.\nThe address must be unique among the ProcessDirect senders on the tenant; a second iFlow with the same address may fail to deploy.'
+    })
+  })
+
   test('SOAP and Mail cards (phase 3): no-WSDL warning in plain words, fixed mail settings shown, credentials in the note', () => {
     const soap = { type: 'requestReplySoap', name: 'RR', system: 'SysS', url: 'http://s4dummy/x', authType: 'Basic', credentialName: 'S_CRED', proxyType: 'On-Premise', locationId: 'LOC' }
     const mail = { type: 'sendMail', name: 'SND', system: 'SysM', server: 'smtp.example.com:587', credentialName: 'M_CRED', from: 'a@example.com', to: 'b@example.com', cc: 'c@example.com', subject: 'Hi' }

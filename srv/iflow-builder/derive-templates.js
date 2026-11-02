@@ -231,6 +231,12 @@ async function main() {
     attrs: { 'id="MessageFlow_1"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_1"': 'targetRef="{{TARGET}}"' },
     props: { address: 'ADDRESS_VALUE', system: 'SYSTEM_VALUE' }
   })
+  // ProcessDirect sender (Ref_Sender_ProcessDirect): only the address; no authentication, no dropdowns
+  const pdSender = await readZip('Ref_Sender_ProcessDirect.zip')
+  t['iflw/messageflow-processdirect-sender.xml'] = apply(block(pdSender.iflw, 'id="MessageFlow_1"'), 'processdirect-sender', {
+    attrs: { 'id="MessageFlow_1"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_1"': 'targetRef="{{TARGET}}"' },
+    props: { address: 'ADDRESS_VALUE', system: 'SYSTEM_VALUE' }
+  })
   t['iflw/messageflow-http-receiver.xml'] = apply(block(x, 'id="MessageFlow_22"'), 'http-receiver', {
     attrs: { 'id="MessageFlow_22"': 'id="{{ID}}"', 'sourceRef="ServiceTask_18"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_21"': 'targetRef="{{TARGET}}"' },
     props: {

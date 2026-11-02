@@ -54,7 +54,7 @@ configurations → optional deploy + runtime polling. It runs in-process in the 
 step is safe to re-run (`retry`). Updates keep a backup zip for `restore`. All writes go to the audit log (`srv/lib/audit.js`).
 Because turns and approvals live in the process, the backend must stay at **`instances: 1`** (enforced by `test/repo-hygiene.test.js`).
 
-**iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender | soapSender |
+**iFlow builder (`srv/iflow-builder/`).** The central data type is the *spec v1* (`spec-schema.json`): a trigger (httpsSender | soapSender | processDirectSender |
 timer once | timer every N minutes), steps (contentModifier, groovyScript, writeVariables, jsonToXml, xmlToJson,
 requestReplyHttp, requestReplySoap, sendMail, messageMapping, xsltMapping, router, splitter, gather, processCall, multicast) and an end (httpReceiver | none, with a Message/Escalation/Error
 End), plus optional `exceptionSubprocess` and `localProcesses`. Multicasts sit on the main line (the builder adds the Join, a gather follows, a branch holds steps, process calls, routers

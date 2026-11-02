@@ -40,7 +40,7 @@ prompt and the tokens used reported per prompt.
 | 3 | SOAP 1.x and Mail receivers (format below) | Ref_Receivers | done |
 | 4 | Message Mapping: an existing artifact (a `PH_` placeholder if it does not exist) or a mapping inside the iFlow carried from Import; XSLT Mapping step (format below) | Ref_Mapping, MM_DummyOrderToNotif | done |
 | 9 | Multicast and Join (format below) | Ref_Multicast | done |
-| 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | in progress: error response and SOAP done; then ProcessDirect, JMS, SFTP |
+| 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | in progress: error response, SOAP and ProcessDirect done; then JMS, SFTP |
 | 6 | Receivers 2: OData V2, RFC, IDoc, SFTP, JDBC, ProcessDirect | Ref_Receivers_2 | waits for the user's go |
 | 6b | Content Enricher and Poll Enrich (they need phase 6's OData and SFTP adapters; neither real iFlow uses them) | Ref_Multicast_Enrich, to be re-selected first | after phase 6 |
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS | Ref_Persistence | waits for the user's go |
@@ -173,6 +173,9 @@ Phase 5 (format agreed 2026-11-02, one sender per task):
 - **`soapSender { address }`:** SOAP 1.x, Manual (no WSDL; the URL cleared in the re-export), Request-Reply, User
   Role `ESBMessaging.send`. XML in and out: the body is the content of the SOAP body, and the body at the end is the
   response. The endpoint URL is not shown until the user has seen it after a deployment.
+- **`processDirectSender { address }`:** only the address, no authentication (Ref_Sender_ProcessDirect). The caller
+  side, a ProcessDirect receiver, comes in phase 6; until then, for "one iFlow calls another", the caller gets a
+  `PH_` placeholder where the call goes (the `processDirect` pattern), and the HTTPS workaround only on request.
 
 ## Later (no phase yet)
 
@@ -201,6 +204,9 @@ From the former reference export checklist; each needs a reference export first.
   HTTPS, with a note, and an update is blocked.
 - JMS and SFTP senders: confirm on a deployed run how JMS retry and SFTP file handling behave when the exception
   subprocess ends with a Message End, an Escalation End and an Error End (the panel says "may" until then).
+- ProcessDirect: confirm on a deployed run that headers and the body reach the called iFlow and exchange properties
+  do not (the panel says "may not"), and that a second iFlow with the same ProcessDirect address fails to deploy
+  (the panel says "may").
 - HTTP error response: an exception message with quotes or line breaks makes the JSON error body
   `{"error": "${exception.message}"}` invalid.
 - Multicast: a router before a splitter in a branch, its own tenant test. It is refused today, but CPI's message only

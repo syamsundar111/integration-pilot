@@ -125,7 +125,9 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           ? { kind: 'https', label: 'HTTPS', detail: spec.trigger.address }
           : spec.trigger.type === 'soapSender'
             ? { kind: 'https', label: 'SOAP', detail: spec.trigger.address }
-            : { kind: 'timer', label: 'Timer', detail: timerText(spec.trigger) },
+            : spec.trigger.type === 'processDirectSender'
+              ? { kind: 'other', label: 'ProcessDirect', detail: spec.trigger.address }
+              : { kind: 'timer', label: 'Timer', detail: timerText(spec.trigger) },
       steps: markPerItem(spec.steps.map((s) => {
         const name = nameOf(s)
         if (s.type === 'requestReplyHttp') return { type: s.type, name, detail: s.method, receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
