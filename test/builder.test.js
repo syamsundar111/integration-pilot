@@ -630,3 +630,32 @@ describe('Message Mapping and XSLT Mapping (phase 4)', () => {
     expect(props(stepElement(doc, 'T1'))).toMatchObject({ mappinguri: 'dir://mapping/xslt/src/main/resources/mapping/t.xsl', mappingname: 't', mappingHeaderNameKey: '', mappingSource: 'mappingSrcIflow', mappingoutputformat: 'Bytes' })
   })
 })
+
+describe('placeholders: the note reaches CPI as the REPLACE_WITH property', () => {
+  const cmProps = async (spec, name) => {
+    const { zipBase64 } = await build(spec)
+    const files = await unzip(Buffer.from(zipBase64, 'base64'))
+    const doc = parseXml(files[Object.keys(files).find((f) => f.endsWith('.iflw'))])
+    const step = all(doc, 'callActivity').find((e) => e.getAttribute('name') === name)
+    const table = props(step).propertyTable
+    return [...table.replace(/&lt;/g, '<').replace(/&gt;/g, '>').matchAll(/<row>(.*?)<\/row>/g)].map((r) => Object.fromEntries([...r[1].matchAll(/<cell id='(\w+)'>([^<]*)<\/cell>/g)].map((c) => [c[1], c[2]])))
+  }
+  test('the description wins over what the AI put there; added when missing, in place when present; {{Param}} as {Param}', async () => {
+    const steps = [
+      { type: 'contentModifier', name: 'PH_Call', description: 'REPLACE WITH Request Reply to a ProcessDirect receiver at address /orders', properties: [{ name: 'a', type: 'constant', value: '1' }, { name: 'REPLACE_WITH', type: 'constant', value: 'REPLACE_WITH' }, { name: 'b', type: 'constant', value: '2' }] },
+      { type: 'contentModifier', name: 'PH_Enrich', description: 'REPLACE WITH Content Enricher from {{Price_URL}}' }
+    ]
+    const spec = baseSpec({ steps })
+    expect((await cmProps(spec, 'PH_Call')).map((r) => [r.Name, r.Value])).toEqual([['a', '1'], ['REPLACE_WITH', 'Request Reply to a ProcessDirect receiver at address /orders'], ['b', '2']])
+    expect((await cmProps(spec, 'PH_Enrich')).map((r) => [r.Name, r.Value])).toEqual([['REPLACE_WITH', 'Content Enricher from {Price_URL}']])
+  })
+  test('also in a route, a local process and the exception subprocess', async () => {
+    const ph = (name) => ({ type: 'contentModifier', name, description: `REPLACE WITH ${name} step`, properties: [{ name: 'REPLACE_WITH', type: 'constant', value: 'REPLACE_WITH' }] })
+    const spec = baseSpec({
+      steps: [{ type: 'router', name: 'RT', expressionType: 'NonXML', routes: [{ name: 'R', condition: "${property.a} = '1'", steps: [ph('PH_Route')] }, { name: 'D', default: true }] }, { type: 'processCall', name: 'PC', process: 'L' }],
+      localProcesses: [{ name: 'L', steps: [ph('PH_Local')] }],
+      exceptionSubprocess: { steps: [ph('PH_Error')], end: { event: 'escalation' } }
+    })
+    for (const name of ['PH_Route', 'PH_Local', 'PH_Error']) expect((await cmProps(spec, name)).find((r) => r.Name === 'REPLACE_WITH').Value).toBe(`${name} step`)
+  })
+})

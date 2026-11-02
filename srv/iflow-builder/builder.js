@@ -13,6 +13,7 @@ const { validate, effectiveNames, RECEIVER_STEPS } = require('./validator')
 const receiverSettings = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
 const specSteps = require('./spec-steps')
+const placeholders = require('./placeholders')
 
 const TEMPLATE_DIR = path.join(__dirname, 'templates')
 
@@ -220,6 +221,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     Object.assign(err, { code: 'INVALID_SPEC', status: 400, errors })
     throw err
   }
+  spec = placeholders.withNotes(spec) // a placeholder's note reaches CPI only as its REPLACE_WITH property
 
   const names = effectiveNames(spec)
   let counter = 0

@@ -8,6 +8,7 @@ const schema = require('./spec-schema.json')
 const { AUTH_TYPES, PROXY_TYPES, checkAgainstReferences } = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
 const specSteps = require('./spec-steps')
+const placeholders = require('./placeholders')
 
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
@@ -526,6 +527,13 @@ function validate(spec, { attachments = [] } = {}) {
   }
   checkSplits(steps, 'steps', false)
   for (const [list, prefix] of branchLines) checkSplits(list, prefix, true)
+
+  // --- placeholders: CPI shows only the REPLACE_WITH property (the builder writes it from the description) -----
+  for (const [s, where] of allSteps) {
+    if (!placeholders.isPlaceholder(s) && !placeholders.hasReplaceWith(s)) continue
+    if (!placeholders.usable(placeholders.noteOf(s)))
+      err('PLACEHOLDER_NOTE', `${where}: the placeholder '${s.name || ''}' says nothing about what to add — start its description with "REPLACE WITH" followed by the step to add in the CPI editor (type, name, settings); the builder writes that text into its REPLACE_WITH property`)
+  }
 
   // --- process calls: a local process that exists; a looping one with a NonXML condition -------------------
   const processNames = new Set(locals.map((p) => p.name))

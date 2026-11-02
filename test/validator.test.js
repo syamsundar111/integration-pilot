@@ -644,3 +644,19 @@ describe('senders (phase 5)', () => {
     expect(validate(baseSpec({ trigger: { type: 'jmsSender', queue: 'Q' } })).issues).toEqual([{ code: 'TRIGGER_UNSUPPORTED', message: expect.stringContaining('soapSender { address }, processDirectSender { address }') }])
   })
 })
+
+describe('placeholders', () => {
+  const ph = (extra) => ({ type: 'contentModifier', name: 'PH_Call', ...extra })
+  const codes = (step) => validate(baseSpec({ steps: [step] })).issues.map((i) => i.code)
+  test('a placeholder with a note in its description is valid, whatever its REPLACE_WITH value (the builder writes the note)', () => {
+    expect(codes(ph({ description: 'REPLACE WITH Request Reply to a ProcessDirect receiver at /x', properties: [{ name: 'REPLACE_WITH', type: 'constant', value: 'REPLACE_WITH' }] }))).toEqual([])
+    expect(codes(ph({ description: 'REPLACE WITH Content Enricher', properties: [{ name: 'p', type: 'constant', value: 'x' }] }))).toEqual([])
+  })
+  test('a placeholder that says nothing is refused: an empty note, or REPLACE_WITH without a REPLACE WITH description', () => {
+    const issues = validate(baseSpec({ steps: [ph({ description: 'REPLACE WITH ', properties: [{ name: 'REPLACE_WITH', type: 'constant', value: 'x' }] })] })).issues
+    expect(issues).toEqual([{ code: 'PLACEHOLDER_NOTE', message: expect.stringMatching(/^steps\[0\]: the placeholder 'PH_Call' says nothing about what to add — start its description with "REPLACE WITH"/) }])
+    expect(codes(ph({ properties: [{ name: 'REPLACE_WITH', type: 'constant', value: 'REPLACE_WITH' }] }))).toEqual(['PLACEHOLDER_NOTE'])
+    expect(codes(ph({ properties: [{ name: 'REPLACE_WITH', type: 'constant', value: '' }] }))).toEqual(['PLACEHOLDER_NOTE'])
+    expect(codes(ph({ description: 'Calls the order service', properties: [{ name: 'REPLACE_WITH', type: 'constant', value: 'Request Reply to /x' }] }))).toEqual([])
+  })
+})
