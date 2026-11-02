@@ -572,7 +572,7 @@ const handlers = {
       example: schema.examples[0],
       notes: [
         'Flows run trigger -> steps in order -> end; a router step branches into routes that end or continue with the next step. Error handling goes into the optional top-level exceptionSubprocess (not into steps).',
-        'exceptionSubprocess runs when a step fails; its result is returned to the HTTPS sender. ${exception.message} holds the error text; set header CamelHttpResponseCode to return an HTTP error status.',
+        'exceptionSubprocess runs when a step fails; ${exception.message} holds the error text. An error response to an HTTPS sender only when the user asks for one (see the base prompt).',
         'To change an existing iFlow: getIflowSpec, change the spec, proposeIflowUpdate. Never use proposeIflow with an existing id.',
         'HTTP receivers: authType None, Basic or OAuth2 Client Credentials with credentialName (the name of deployed security material, never a password); proxyType Internet or On-Premise (locationId optional); timeout in ms.',
         'Externalized parameters ({{Name}}) are only supported as the whole url, credentialName or locationId of an HTTP receiver, or as a constant header/property value; define each in "parameters".',
