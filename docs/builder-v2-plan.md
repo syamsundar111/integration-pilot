@@ -185,6 +185,13 @@ From the former reference export checklist; each needs a reference export first.
   Ref_Structure); add End Loop as a choice when a real interface needs it.
 - Escalation and Error End in local processes (needs a reference export).
 - Multicast in a local process (needs a reference export).
+- SFTP sender: authentication, post-processing and the scheduler as externalized parameters (a real iFlow with an
+  SFTP sender has them so); needs an export that externalizes them. Until then Import keeps such a sender only as
+  HTTPS, with a note, and an update is blocked.
+- JMS and SFTP senders: confirm on a deployed run how JMS retry and SFTP file handling behave when the exception
+  subprocess ends with a Message End, an Escalation End and an Error End (the panel says "may" until then).
+- HTTP error response: an exception message with quotes or line breaks makes the JSON error body
+  `{"error": "${exception.message}"}` invalid.
 - Multicast: a router before a splitter in a branch, its own tenant test. It is refused today, but CPI's message only
   covers a router between a splitter and its gather.
 - Multicast: confirm on a deployed run whether exchange properties set in a branch reach the steps after the Join

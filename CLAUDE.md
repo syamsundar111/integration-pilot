@@ -86,7 +86,8 @@ in-memory SQLite via `mta-sqlite.yaml` (demo only).
 - `.env`, `.cdsrc-private.json`, `default-env.json` and `db.sqlite*` must stay git-ignored.
 - `test/system-prompt.test.js` and `test/prompt-guide.test.js` tie `srv/agent/system-prompt.md` and `docs/prompt-guide.md` to the
   builder. When you change a prompt rule, check that what it tells the model still validates and builds.
-- Measurements: `scripts/measure-all.js` (usage in its header) writes to `docs/measurements.md`.
+- Measurements: `scripts/measure-all.js` (usage in its header) writes to `docs/measurements.md`, which it creates
+  on its first run; none is committed yet.
 
 ## Builder v2 (branch builder-v2)
 
