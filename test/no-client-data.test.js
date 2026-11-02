@@ -85,6 +85,46 @@ run('no client data in the repository', () => {
     }
     expect(found).toEqual([])
   })
+
+  // A name in an intermediate commit stays in the history even when a later commit removes it, so the commits not on
+  // any remote are scanned before a push: messages, file names, changed lines, and the ZIPs they hold (git log shows
+  // those only as binary)
+  test('no commit that is not on a remote contains a forbidden name', async () => {
+    const names = forbiddenNames().map((n) => n.toLowerCase())
+    const git = (...args) => execFileSync('git', args, { cwd: ROOT, maxBuffer: 1 << 30 })
+    const RANGE = ['--branches', '--not', '--remotes']
+    const log = git('log', '-p', '--no-color', '--diff-merges=separate', '--format=%x01commit %H%n%B%x01', ...RANGE).toString('latin1')
+    const read = new Set()
+    const found = []
+    let commit, where, inMessage
+    for (const line of log.split('\n')) {
+      if (line.startsWith('\x01commit ')) {
+        read.add(line.slice(8))
+        commit = line.slice(8, 15)
+        where = 'message'
+        inMessage = true
+        continue
+      }
+      if (inMessage && line === '\x01') {
+        inMessage = false
+        continue
+      }
+      if (line.startsWith('diff --git ')) where = line.split(' b/').pop()
+      else if (!inMessage && (!/^[+-]/.test(line) || /^(\+\+\+|---) /.test(line))) continue
+      const l = line.toLowerCase()
+      for (const n of names) if (l.includes(n)) found.push(`${commit} ${where}: ${n}`)
+    }
+    // every commit was read: a broken command reads none; both 0 once everything is pushed
+    expect(read.size).toBe(Number(git('rev-list', '--count', ...RANGE).toString().trim()))
+    for (const [, sha, file] of git('rev-list', '--objects', ...RANGE).toString().matchAll(/^([0-9a-f]{40}) (.+\.zip)$/gim)) {
+      const zip = await JSZip.loadAsync(git('cat-file', 'blob', sha))
+      for (const entry of Object.values(zip.files).filter((e) => !e.dir)) {
+        const text = (entry.name + '\n' + Buffer.from(await entry.async('uint8array')).toString('latin1')).toLowerCase()
+        for (const n of names) if (text.includes(n)) found.push(`${sha.slice(0, 7)} ${file}:${entry.name}: ${n}`)
+      }
+    }
+    expect(found).toEqual([])
+  })
 })
 
 describe('reference exports contain dummy data only', () => {

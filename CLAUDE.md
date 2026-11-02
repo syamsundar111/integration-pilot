@@ -113,8 +113,9 @@ Extends the builder beyond the linear spec v1; phases, status and open items: [d
 
 - One task per commit. Run `npm test` on each commit on its own (git worktree) before reporting. A worktree has no
   git-ignored files, so its counts are lower than in the main tree: the suites in `test/local/` don't exist there, and
-  the 2 tests of `test/no-client-data.test.js` skip without `test/local/forbidden-names.txt`. So the client-data check
-  only runs in the main tree: run it there before committing.
+  the 3 tests of `test/no-client-data.test.js` skip without `test/local/forbidden-names.txt`. So the client-data check
+  only runs in the main tree: run it there before committing. One of them scans the commits not on a remote
+  (`--branches --not --remotes`), so a name in an intermediate commit is caught before a push.
 - Stop and report after each step. No commit without the user's OK. Never push.
 - Builder or template changes are committed only after the user has created a test iFlow on the tenant
   and opened it in the CPI editor without errors.
