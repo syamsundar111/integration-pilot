@@ -44,7 +44,8 @@ prompt and the tokens used reported per prompt.
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS | Ref_Persistence | waits for the user's go |
 | 8 | Transforms: XML Validator, Filter, CSV converters, encoders | Ref_Transform | waits for the user's go |
 
-Order from here (the user's decision, 2026-10-30): phase 4, then phase 9, then phases 5-8.
+Order from here (the user's decision, 2026-11-02): phases 5, 6, 6b, 7 and 8, then the **acceptance test**: the first
+full prompt from the start of the project, run through the app after the last phase.
 
 ## Prompt size (every phase)
 
