@@ -380,6 +380,31 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(activeFor(base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }])).placeholderText).toBe('')
   })
 
+  test('the panel and srv/iflow-builder/placeholders.js agree on which steps are placeholders', () => {
+    const { placeholderNames } = require('../srv/iflow-builder/placeholders')
+    const cm = (name, description, extra = {}) => ({ type: 'contentModifier', name, ...(description != null && { description }), properties: [{ name: 'p', type: 'constant', value: 'x' }], ...extra })
+    const examples = [
+      base([cm('PH_A', 'REPLACE WITH Request Reply to /a')]),
+      base([cm('A', 'replace with lower case')]), // not a placeholder: the prefix is upper case
+      base([cm('A', 'REPLACE WITHOUT a note')]), // not one: REPLACE WITH must be a whole word
+      base([cm('A', ' REPLACE WITH leading space')]), // not one: the description must start with it
+      base([cm('A', 'Calls REPLACE WITH later')]),
+      base([cm('A')]),
+      base([{ type: 'groovyScript', name: 'G', description: 'REPLACE WITH a script', fileName: 'g' }]), // only Content Modifiers
+      base([cm('PH_B', 'REPLACE WITH')]), // a placeholder without a note (the validator refuses it)
+      base([{ type: 'router', name: 'RT', expressionType: 'NonXML', routes: [{ name: 'R', condition: "${property.a} = '1'", steps: [cm('PH_Route', 'REPLACE WITH x')] }, { name: 'D', default: true }] }]),
+      base([{ type: 'multicast', name: 'MC', mode: 'parallel', branches: [{ steps: [cm('PH_Branch', 'REPLACE WITH x')] }, { steps: [cm('B')] }] }, { type: 'gather', name: 'GA' }]),
+      base([{ type: 'processCall', name: 'PC', process: 'L' }], { localProcesses: [{ name: 'L', steps: [cm('PH_Local', 'REPLACE WITH x')] }] }),
+      base([cm('A')], { exceptionSubprocess: { steps: [cm('PH_Error', 'REPLACE WITH x')], end: { event: 'escalation' } } })
+    ]
+    const panelNames = (spec) => {
+      const text = activeFor(spec).placeholderText
+      return text ? text.split(': ')[0].split(', ') : []
+    }
+    for (const spec of examples) expect(panelNames(spec)).toEqual(placeholderNames(spec))
+    expect(examples.map((spec) => placeholderNames(spec).length)).toEqual([1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+  })
+
   test('the ProcessDirect sender card (phase 5): no role, headers rather than properties, a unique address', () => {
     const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'processDirectSender', address: '/orders/process' } })
     expect(active.stepCards[0]).toEqual({
