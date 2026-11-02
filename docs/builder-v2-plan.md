@@ -55,7 +55,7 @@ A linear request must not pay for features it does not use. Each phase puts its 
 section (`srv/agent/prompt-sections/<topic>.md`, added by `agent.js` when the request's words or the
 draft need it, sticky per conversation) and its step formats under the same topic in `getSupportedSteps`
 (`tools.js` TOPICS; the model can also ask for a topic). The core prompt keeps one pointer line per
-topic. Topics so far: `routing` (1b), `splitting` (2), `soap` and `mail` (3), `mapping` (4), `multicast` (9). Measured on 2026-10-29 (scenario b, one live
+topic. Topics so far: `routing` (1b), `splitting` (2), `soap` and `mail` (3), `mapping` (4), `multicast` (9), `senders` (5). Measured on 2026-10-29 (scenario b, one live
 run): 30k input tokens before, 25k after; largest prompt 12k -> 9k. A request that needs both topics
 without their trigger words ("send every order separately; type A also goes to ...") fetched both
 through `getSupportedSteps` and proposed a valid splitter with a router (25.6k input tokens).

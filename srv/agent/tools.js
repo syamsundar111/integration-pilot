@@ -29,6 +29,19 @@ const GROOVY_IN_TEXT = /\bdef\s+Message\s+processData\s*\(|\bimport\s+com\.sap\.
 const DRAFT_FIELDS = ['id', 'name', 'description', 'packageId', 'trigger', 'end', 'parameters', 'resources', 'exceptionSubprocess']
 const { toPackageId, IMPORT_NO_PACKAGE } = require('../lib/package-id')
 
+// Topics: steps whose format and rules are sent only when a conversation needs them (srv/agent/prompt-sections/<topic>.md);
+// the getSupportedSteps tool lists them from here (enum and description), so a new topic cannot be missed there
+const TOPICS = {
+  routing: { steps: ['router'], label: 'router', summary: 'router: branch into routes by conditions (route ends, joins)' },
+  splitting: { steps: ['splitter', 'gather', 'processCall'], label: 'splitter, gather, process calls, local processes', summary: 'splitter / gather: steps per item; local processes run by a processCall (also looping)' },
+  soap: { steps: ['requestReplySoap'], label: 'SOAP 1.x call', summary: 'requestReplySoap: a SOAP 1.x call' },
+  mail: { steps: ['sendMail'], label: 'send a mail', summary: 'sendMail: send a mail, one-way' },
+  mapping: { steps: ['messageMapping', 'xsltMapping'], label: 'message mapping, XSLT', summary: 'messageMapping (an artifact) and xsltMapping (an attached file)' },
+  multicast: { steps: ['multicast'], label: 'multicast and join', summary: 'multicast: send the message down several branches, in parallel or in sequence; a gather combines them after the Join' },
+  senders: { steps: [], triggers: ['soapSender', 'processDirectSender'], label: 'SOAP and ProcessDirect senders', summary: 'senders: soapSender (SOAP 1.x, XML in and out), processDirectSender (called by other iFlows on the tenant)' }
+}
+for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
+
 const fn = (name, description, properties = {}, required = []) => ({
   type: 'function',
   function: { name, description, parameters: { type: 'object', properties, required, additionalProperties: false } }
@@ -47,8 +60,10 @@ const definitions = [
   }),
   fn(
     'getSupportedSteps',
-    'Spec format in short, with an example. Call once before proposing. topics: also the format and rules of routing (router), splitting (splitter, gather, process calls, local processes), soap (SOAP 1.x call), mail (send a mail) or mapping (message mapping, XSLT) when you need them. full: the JSON schema (rarely needed).',
-    { topics: { type: 'array', items: { type: 'string', enum: ['routing', 'splitting', 'soap', 'mail', 'mapping'] } }, full: { type: 'boolean' } }
+    `Spec format in short, with an example. Call once before proposing. topics: also the format and rules of ${Object.entries(TOPICS)
+      .map(([t, def]) => `${t} (${def.label})`)
+      .join(', ')} when you need them. full: the JSON schema (rarely needed).`,
+    { topics: { type: 'array', items: { type: 'string', enum: Object.keys(TOPICS) } }, full: { type: 'boolean' } }
   ),
   fn('validateSpec', 'Check a spec without proposing it; only after a failed proposal. Returns { valid } or errors "CODE path: message".', {
     spec: { type: 'object' },
@@ -166,17 +181,6 @@ async function checkMappingArtifacts(spec) {
 }
 const MAPPING_INSTRUCTION = 'Never invent a mapping: replace each such step with a placeholder Content Modifier PH_<StepName> (description starting REPLACE WITH, one constant property REPLACE_WITH), propose again and tell the user which artifact is missing.'
 
-// Topics: steps whose format and rules are sent only when a conversation needs them (srv/agent/prompt-sections/<topic>.md)
-const TOPICS = {
-  routing: { steps: ['router'], summary: 'router: branch into routes by conditions (route ends, joins)' },
-  splitting: { steps: ['splitter', 'gather', 'processCall'], summary: 'splitter / gather: steps per item; local processes run by a processCall (also looping)' },
-  soap: { steps: ['requestReplySoap'], summary: 'requestReplySoap: a SOAP 1.x call' },
-  mail: { steps: ['sendMail'], summary: 'sendMail: send a mail, one-way' },
-  mapping: { steps: ['messageMapping', 'xsltMapping'], summary: 'messageMapping (an artifact) and xsltMapping (an attached file)' },
-  multicast: { steps: ['multicast'], summary: 'multicast: send the message down several branches, in parallel or in sequence; a gather combines them after the Join' },
-  senders: { steps: [], triggers: ['soapSender', 'processDirectSender'], summary: 'senders: soapSender (SOAP 1.x, XML in and out), processDirectSender (called by other iFlows on the tenant)' }
-}
-for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
 
 /** The conditional prompt sections a conversation has (agent.js promptSections) */
 async function sessionSections(ctx) {
@@ -998,4 +1002,4 @@ async function execute(name, rawArgs, ctx) {
   return json
 }
 
-module.exports = { definitions, execute, nameSession, normalizeSpecArgs }
+module.exports = { definitions, execute, nameSession, normalizeSpecArgs, TOPICS }

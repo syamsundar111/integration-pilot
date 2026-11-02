@@ -1292,8 +1292,16 @@ describe('fewer and smaller model inputs', () => {
     expect(JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content).rules).toBeUndefined()
   })
 
+  test('the getSupportedSteps tool lists every topic, in its enum and its description (both from TOPICS)', () => {
+    const { definitions, TOPICS } = require('../srv/agent/tools')
+    const tool = definitions.find((d) => d.function.name === 'getSupportedSteps').function
+    expect(tool.parameters.properties.topics.items.enum).toEqual(Object.keys(TOPICS))
+    expect(Object.keys(TOPICS)).toEqual(expect.arrayContaining(['multicast', 'senders']))
+    for (const t of Object.keys(TOPICS)) expect(tool.description).toContain(`${t} (`)
+  })
+
   test('getSupportedSteps names every field of the schema (all topics)', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast', 'senders'] })).mockResolvedValueOnce(answer('ok'))
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: Object.keys(require('../srv/agent/tools').TOPICS) })).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     const content = llm.chat.mock.calls.at(-1)[0].messages.at(-1).content
     const { format } = JSON.parse(content)
