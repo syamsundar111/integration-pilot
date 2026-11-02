@@ -46,11 +46,6 @@
             <tnt:NavigationListItem key="activity" text="{i18n>navActivity}" icon="sap-icon://history" />
           </tnt:NavigationListGroup>
         </tnt:NavigationList>
-        <tnt:fixedItem>
-          <tnt:NavigationList>
-            <tnt:NavigationListItem text="v1 · linear flows" icon="sap-icon://hint" selectable="false" enabled="false" />
-          </tnt:NavigationList>
-        </tnt:fixedItem>
       </tnt:SideNavigation>
     </tnt:sideContent>
     <tnt:mainContents>

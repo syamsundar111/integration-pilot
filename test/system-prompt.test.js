@@ -83,7 +83,7 @@ describe('system prompt: calling another iFlow (manual test 16)', () => {
   const value = (key) => SENDER.match(new RegExp(`<key>${key}</key>\\s*<value>([^<]*)</value>`))?.[1]
 
   test('the HTTPS sender is a workaround for ProcessDirect, not an equivalent', () => {
-    expect(flat).toMatch(/v1 builds the called iFlow with a `processDirectSender`; the call itself, a ProcessDirect receiver, is not supported yet/)
+    expect(flat).toMatch(/The app builds the called iFlow with a `processDirectSender`; the call itself, a ProcessDirect receiver, is not supported yet/)
     expect(flat).toMatch(/Only when the user asks for a call that needs no manual step in the editor, offer this \*\*workaround\*\* instead \(never call it an equivalent\)/)
     expect(flat).toMatch(/ProcessDirect stays inside the tenant and needs no authentication; an HTTPS endpoint is public and every call to it must be authenticated/)
   })
@@ -367,5 +367,15 @@ describe('system prompt: placeholders are not deployed on approval', () => {
   test('the placeholder rules and the processDirect pattern say: approve without deploy, deploy after replacing', () => {
     expect(unsupported).toMatch(/Then tell the user which placeholders they must replace, and to approve \*\*without\*\* deploy: an iFlow with a placeholder is deployed only after its placeholders are replaced in the CPI editor\. Never tell the user to deploy it on approval\./)
     expect(pattern).toMatch(/Approve the caller without deploy and deploy it only after the placeholder is replaced; a timer would otherwise run with nothing to call\./)
+  })
+})
+
+describe('system prompt: no versions or phases towards the user', () => {
+  test('"What you can build", and "not supported yet" instead of versions or phases', () => {
+    expect(flat).toMatch(/## What you can build/)
+    expect(flat).toMatch(/For what cannot be built, say "not supported yet"; never mention versions or phases\./)
+    expect(flat).not.toMatch(/\bv1\b/)
+    for (const dir of ['prompt-sections', 'patterns'])
+      for (const f of fs.readdirSync(path.join(__dirname, `../srv/agent/${dir}`))) expect(fs.readFileSync(path.join(__dirname, `../srv/agent/${dir}`, f), 'utf8')).not.toMatch(/\bv1\b/)
   })
 })

@@ -1,6 +1,6 @@
 # Pattern: one iFlow calls another (ProcessDirect)
 
-v1 builds the called iFlow with a `processDirectSender`; the call itself, a ProcessDirect receiver, is not
+The app builds the called iFlow with a `processDirectSender`; the call itself, a ProcessDirect receiver, is not
 supported yet. When the user asks for ProcessDirect, or for one iFlow that calls another on the same tenant:
 - **The called iFlow** gets `{ "type": "processDirectSender", "address": "/..." }` (see Senders). Headers and the
   body reach it; exchange properties of the caller may not, so the caller passes values as headers.
@@ -20,12 +20,12 @@ supported yet. When the user asks for ProcessDirect, or for one iFlow that calls
   `authType: "OAuth2 Client Credentials"` and the `credentialName` the user gives (ask for it if they
   name none), and tell them it must be deployed from a service key of a **Process Integration
   Runtime** instance with plan **integration-flow** (it grants the role `ESBMessaging.send` that the
-  HTTPS sender built by v1 requires). Never write "if the target requires it".
+  HTTPS sender built by the app requires). Never write "if the target requires it".
 - **URL:** the endpoint is on the tenant's **runtime host** (the host name contains `-rt`), path
   `/http/<address>`, e.g. `https://<tenant>.it-cpi<nn>-rt.cfapps.<region>.hana.ondemand.com/http/pilot/notify`.
   The exact URL of a deployed iFlow is in *Monitor → Integrations and APIs → Manage Integration
   Content*. Externalize it as a parameter named after the target iFlow, e.g. `{{CommonNotifyURL}}`,
   never `ProcessDirectURL`.
-- **CSRF:** iFlows built by v1 create the HTTPS sender with *CSRF Protected* off, so the caller needs
+- **CSRF:** iFlows built by the app create the HTTPS sender with *CSRF Protected* off, so the caller needs
   no CSRF token. Tell the user this, and that if the target's HTTPS sender has *CSRF Protected* on
   (the default for senders created in the CPI web editor), a caller without a token gets HTTP 403.

@@ -194,7 +194,6 @@ From the former reference export checklist; each needs a reference export first.
   multi-mapping envelope), then make the note definite or remove it.
 - Proposal panel, diagram summary: show the Escalation End category on the route lines and the "On error"
   line, as the step cards do.
-- User-facing notes: phrase them without the builder version ("For a method v1 does not set…").
 - Looping Process Call: "Action when Max. Iterations Reached" is fixed to Throw Exception (as in
   Ref_Structure); add End Loop as a choice when a real interface needs it.
 - Escalation and Error End in local processes (needs a reference export).

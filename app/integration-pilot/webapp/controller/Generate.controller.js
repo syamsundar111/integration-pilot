@@ -216,7 +216,7 @@ sap.ui.define(
           ? `Before deploying, the credentials must exist as security material on the tenant: ${withAuth.map((c) => `${c.credentialName} (${c.authType}, ${label(c)})`).join(', ')}.`
           : '',
         without.length
-          ? `Without authentication: ${without.map(label).join(', ')}. For a method v1 does not set (e.g. client certificate), set it on the receiver adapter in the CPI web editor.`
+          ? `Without authentication: ${without.map(label).join(', ')}. For a method the app does not set yet (e.g. client certificate), set it on the receiver adapter in the CPI web editor.`
           : ''
       ]
         .filter(Boolean)

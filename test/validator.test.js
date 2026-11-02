@@ -42,7 +42,7 @@ describe('validator', () => {
     const errors = errorsOf(baseSpec({ steps: [{ type: 'magic' }], trigger: { type: 'sftp' }, end: { type: 'mail' } })).join('\n')
     expect(errors).toMatch(/steps\[0\]: unknown step type 'magic'/)
     expect(errors).toMatch(/trigger: 'sftp' is not supported yet/)
-    expect(errors).toMatch(/end: 'mail' is not supported in v1/)
+    expect(errors).toMatch(/end: 'mail' is not supported yet/)
   })
 
   test('rejects invalid ids and unknown fields', () => {

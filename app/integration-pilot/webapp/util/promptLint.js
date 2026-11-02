@@ -134,7 +134,7 @@ sap.ui.define([], () => {
     if (found.length) warn('unsupported', WARNINGS.unsupported(found), found)
 
     const steps = estimateSteps(message)
-    if (steps > MAX_STEPS) warn('steps', `About ${steps} steps — v1 allows at most ${MAX_STEPS} in the main flow. Merge Content Modifiers or move logic into one Groovy script.`)
+    if (steps > MAX_STEPS) warn('steps', `About ${steps} steps — at most ${MAX_STEPS} steps per process are allowed. Merge Content Modifiers or move logic into one Groovy script.`)
 
     // {{…}} is fine as a whole receiver URL (on a line about a URL, or right after "GET", "POST to",
     // "address") and as a credential name or location ID; never after user or password, and never as part

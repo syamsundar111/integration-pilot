@@ -47,7 +47,7 @@ const definitions = [
   }),
   fn(
     'getSupportedSteps',
-    'Spec v1 format in short, with an example. Call once before proposing. topics: also the format and rules of routing (router), splitting (splitter, gather, process calls, local processes), soap (SOAP 1.x call), mail (send a mail) or mapping (message mapping, XSLT) when you need them. full: the JSON schema (rarely needed).',
+    'Spec format in short, with an example. Call once before proposing. topics: also the format and rules of routing (router), splitting (splitter, gather, process calls, local processes), soap (SOAP 1.x call), mail (send a mail) or mapping (message mapping, XSLT) when you need them. full: the JSON schema (rarely needed).',
     { topics: { type: 'array', items: { type: 'string', enum: ['routing', 'splitting', 'soap', 'mail', 'mapping'] } }, full: { type: 'boolean' } }
   ),
   fn('validateSpec', 'Check a spec without proposing it; only after a failed proposal. Returns { valid } or errors "CODE path: message".', {

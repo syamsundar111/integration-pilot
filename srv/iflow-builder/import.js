@@ -255,7 +255,7 @@ async function importIflow(buffer, { fileName, packageId }) {
         attachments[`${fileName}.groovy`] = file.content
         const step = { type: 'groovyScript', ...(name && { name }), fileName }
         if (s.function && s.function !== 'processData')
-          step.description = `REPLACE WITH the entry function ${s.function}(): v1 calls processData(). Rename the function in ${fileName}.groovy or set it in the CPI web editor.`
+          step.description = `REPLACE WITH the entry function ${s.function}(): the app calls processData(). Rename the function in ${fileName}.groovy or set it in the CPI web editor.`
         return [step]
       }
       case 'jsonToXml':

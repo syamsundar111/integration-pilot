@@ -7,7 +7,7 @@ model. This guide shows how to write requests that work the first time, with thr
 examples against public test APIs: a small flow, a larger orchestration, and the rebuild of an
 existing iFlow with placeholders.
 
-## What v1 can build
+## What you can build
 
 The assistant can only propose what the builder can build. Anything else fails validation or
 turns into extra questions.
@@ -122,7 +122,7 @@ proposal says which:
   message shows as escalated in monitoring. Ask for an Error End, or for "return the error to the
   caller" (a Message End: the sender gets the response, but the message looks completed).
 - **Authentication**: none, unless the request names a method and credential name per receiver
-  ("Basic, credential ERP_BASIC_USER"). A method v1 does not set (e.g. client certificate) is set
+  ("Basic, credential ERP_BASIC_USER"). A method the app does not set yet (e.g. client certificate) is set
   in the CPI web editor after creation.
 
 ## Attach scripts instead of describing them
@@ -140,15 +140,15 @@ repeated whenever the spec is revised. If you have the script, attach it:
 2. In the request, refer to it by name: *Groovy Script "Map Users" using mapUsers.groovy*.
 
 The model sees only the file name and size, never the content. The builder puts the file into
-the iFlow. `.xsl` files can be attached too. They are added as `mapping/<file>`, ready for an
-XSLT Mapping step that you add in the CPI web editor (v1 has no XSLT step).
+the iFlow. `.xsl` files can be attached too. They are added as `mapping/<file>`, and an XSLT Mapping
+step runs one of them.
 
 ## Import an existing iFlow
 
 **Import iFlow** takes a `.zip` export or a `.iflw` file and turns it into the conversation's draft
 spec:
 
-- Steps v1 cannot build become placeholder Content Modifiers whose description says
+- Steps the app cannot build yet become placeholder Content Modifiers whose description says
   *REPLACE WITH …*, one per CPI component. Only if a process would exceed its limit (50 steps, 10 in the exception
   subprocess) are its consecutive placeholders merged.
 - Routers on the main line are kept with their routes, route steps and end events. A flow whose
@@ -274,7 +274,7 @@ What to expect: the assistant writes the 7 Groovy scripts with `writeScript`, th
 
 ## Worked example 3: rebuild an existing iFlow with placeholders (25 steps, 8 placeholders)
 
-An existing iFlow uses steps v1 cannot build: routers, a General Splitter, a Message Mapping, a SOAP
+An existing iFlow uses steps the app could not build when this example was written: routers, a General Splitter, a Message Mapping, a SOAP
 request-reply and Write Variables. This request rebuilds it step by step and keeps the interfaces
 unchanged. Each unsupported component becomes a placeholder Content Modifier (`PH_...`) whose
 description says exactly what to add in the CPI web editor; where two unsupported components follow

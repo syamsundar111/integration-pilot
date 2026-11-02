@@ -28,7 +28,7 @@
             change=".onImport"
             typeMissmatch=".onImportTypeMismatch"
             enabled="{= !${chat>/turn} &amp;&amp; !${chat>/importing} }"
-            tooltip="Import an iFlow (.zip export or .iflw) as a draft; steps v1 cannot build become placeholders"
+            tooltip="Import an iFlow (.zip export or .iflw) as a draft; steps the app cannot build yet become placeholders"
           />
           <SplitButton
             id="sessionButton"
@@ -196,7 +196,7 @@
               </VBox>
 
               <VBox class="ipPanelBody ipGapM" renderType="Bare">
-                <MessageStrip text="Validated against spec v1 — nothing is created until you approve." type="Success" showIcon="true" visible="{chat>/active/pending}" />
+                <MessageStrip text="Validated — nothing is created until you approve." type="Success" showIcon="true" visible="{chat>/active/pending}" />
                 <MessageStrip text="{chat>/active/scriptsText}" type="Information" showIcon="true" visible="{= !!${chat>/active/scriptsText} }" class="sapUiSmallMarginBottom" />
 
                 <!-- target package (pending iFlow proposals) -->

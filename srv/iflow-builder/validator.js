@@ -284,7 +284,7 @@ function validate(spec, { attachments = [] } = {}) {
     err(
       'EXCEPTION_STEP_UNSUPPORTED',
       type === 'requestReplyHttp'
-        ? `exceptionSubprocess.steps[${i}]: requestReplyHttp is not supported in the exception subprocess in v1. Supported: ${exceptionList}. The subprocess result is returned to the sender.`
+        ? `exceptionSubprocess.steps[${i}]: requestReplyHttp is not supported in the exception subprocess yet. Supported: ${exceptionList}. The subprocess result is returned to the sender.`
         : `exceptionSubprocess.steps[${i}]: '${type}' is not supported in the exception subprocess. Supported: ${exceptionList}.`
     )
   })
@@ -311,7 +311,7 @@ function validate(spec, { attachments = [] } = {}) {
   }
   if (spec.end?.type && !SUPPORTED_ENDS.includes(spec.end.type)) {
     skip.push('/end')
-    err('END_UNSUPPORTED', `end: '${spec.end.type}' is not supported in v1. Use httpReceiver { url, method, authType } or none.`)
+    err('END_UNSUPPORTED', `end: '${spec.end.type}' is not supported yet. Use httpReceiver { url, method, authType } or none.`)
   }
 
   // Receiver authentication, proxy and timeout: one actionable message per problem instead of schema noise
