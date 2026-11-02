@@ -1314,6 +1314,12 @@ describe('fewer and smaller model inputs', () => {
     }
   })
 
+  test('the Senders section: also when the request names a JMS queue', async () => {
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow that reads orders from a JMS queue.' })
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toMatch(/## Senders/)
+  })
+
   test('the Senders section: also when the request names ProcessDirect', async () => {
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'Create an iFlow that another iFlow calls via ProcessDirect.' })
@@ -1332,6 +1338,7 @@ describe('fewer and smaller model inputs', () => {
     const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
     expect(result.format.trigger.join()).toMatch(/"type": "soapSender"/)
     expect(result.format.trigger.join()).toMatch(/"type": "processDirectSender"/)
+    expect(result.format.trigger.join()).toMatch(/"type": "jmsSender"/)
     expect(result.rules.senders).toMatch(/^## Senders/)
   })
 })

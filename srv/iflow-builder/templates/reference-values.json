@@ -274,6 +274,32 @@
       }
     }
   },
+  "JMS Sender": {
+    "RetryInterval": {
+      "1": {
+        "references": [
+          "Ref_Sender_JMS"
+        ],
+        "confirmed": "Retry Interval 1 minute, re-selected in Ref_Sender_JMS, 2026-11-02"
+      }
+    },
+    "ExponentialBackoff": {
+      "1": {
+        "references": [
+          "Ref_Sender_JMS"
+        ],
+        "confirmed": "Exponential Backoff checked, re-selected in Ref_Sender_JMS, 2026-11-02"
+      }
+    },
+    "MaxRetryInterval": {
+      "60": {
+        "references": [
+          "Ref_Sender_JMS"
+        ],
+        "confirmed": "Maximum Retry Interval 60 minutes, re-selected in Ref_Sender_JMS, 2026-11-02"
+      }
+    }
+  },
   "SOAP Receiver": {
     "authentication": {
       "Basic": {

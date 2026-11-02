@@ -84,8 +84,8 @@ or deployed unless a tool result says so.
 - A main flow: one trigger, ordered steps, one end.
 - Triggers: `httpsSender { address }`, `timer { mode: "once" }` (run once after deployment), or
   `timer { mode: "every", minutes }` (every N minutes, all day, UTC; only intervals the references
-  contain, e.g. 15 — the validator says which). Other senders: `soapSender` (a SOAP 1.x sender) and
-  `processDirectSender` (called by other iFlows on the tenant). Their rules
+  contain, e.g. 15 — the validator says which). Other senders: `soapSender` (a SOAP 1.x sender),
+  `processDirectSender` (called by other iFlows on the tenant) and `jmsSender` (reads a queue). Their rules
   are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with
   `topics: ["senders"]` first.
 - Steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `requestReplyHttp`, `router`,

@@ -338,7 +338,7 @@ describe('system prompt: senders (phase 5)', () => {
   const senders = sectionFlat('senders')
   test('the core prompt names soapSender and points to the topic; the default trigger stays httpsSender', () => {
     expect(flat).toMatch(/unless the user names a timer, another sender or another path;/)
-    expect(flat).toMatch(/Other senders: `soapSender` \(a SOAP 1\.x sender\) and `processDirectSender` \(called by other iFlows on the tenant\)\. Their rules are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with `topics: \["senders"\]` first\./)
+    expect(flat).toMatch(/Other senders: `soapSender` \(a SOAP 1\.x sender\), `processDirectSender` \(called by other iFlows on the tenant\) and `jmsSender` \(reads a queue\)\. Their rules are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with `topics: \["senders"\]` first\./)
   })
   test('the Senders section: soapSender is XML in and out, not the JSON default', () => {
     expect(senders).toMatch(/^## Senders/)
@@ -377,5 +377,15 @@ describe('system prompt: no versions or phases towards the user', () => {
     expect(flat).not.toMatch(/\bv1\b/)
     for (const dir of ['prompt-sections', 'patterns'])
       for (const f of fs.readdirSync(path.join(__dirname, `../srv/agent/${dir}`))) expect(fs.readFileSync(path.join(__dirname, `../srv/agent/${dir}`, f), 'utf8')).not.toMatch(/\bv1\b/)
+  })
+})
+
+describe('system prompt: JMS sender (phase 5)', () => {
+  const senders = sectionFlat('senders')
+  test('the queue name is asked for, never invented; another iFlow fills the queue; an Error End by default', () => {
+    expect(senders).toMatch(/\*\*The queue name is a value only the user knows: ask for it, and never invent or derive one\.\*\*/)
+    expect(senders).toMatch(/The queue is created automatically when the iFlow is first deployed: never tell the user to create it or to make sure it exists\./)
+    expect(senders).toMatch(/Another iFlow fills the queue with a JMS receiver, which cannot be built yet; say so\./)
+    expect(senders).toMatch(/With an `exceptionSubprocess`, its end is `\{ "event": "error" \}` unless the user asks for another, so a failed message is retried; say so in one line\. A Message End, and possibly an Escalation End, may stop the retry\./)
   })
 })

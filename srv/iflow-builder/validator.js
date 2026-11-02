@@ -23,7 +23,7 @@ const MAIN_LINE_ONLY = ['router', 'splitter', 'gather', 'multicast']
 const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail', 'messageMapping', 'xsltMapping']
 // Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
 const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
-const SUPPORTED_TRIGGERS = ['httpsSender', 'soapSender', 'processDirectSender', 'timer']
+const SUPPORTED_TRIGGERS = ['httpsSender', 'soapSender', 'processDirectSender', 'jmsSender', 'timer']
 const MAX_MAIN_STEPS = 50 // per process: the main flow and each local process, with its routers and the steps inside routes
 const SUPPORTED_ENDS = ['httpReceiver', 'none']
 
@@ -33,7 +33,7 @@ const NOT_IN_V1 = /gateway|aggregat|filter/i
 const EXCEPTION_STEP = /exception|error|subprocess|catch/i
 // Start and end events are not steps: the trigger and the end are top-level fields
 const END_STEP = /^(none|end|endEvent|messageEnd|httpReceiver)$/i
-const TRIGGER_STEP = /^(start|startEvent|timer|httpsSender|soapSender|processDirectSender|sender)$/i
+const TRIGGER_STEP = /^(start|startEvent|timer|httpsSender|soapSender|processDirectSender|jmsSender|sender)$/i
 
 const DEFAULT_STEP_NAMES = {
   contentModifier: 'Content Modifier',
@@ -307,7 +307,7 @@ function validate(spec, { attachments = [] } = {}) {
   }
   if (spec.trigger?.type && !SUPPORTED_TRIGGERS.includes(spec.trigger.type)) {
     skip.push('/trigger')
-    err('TRIGGER_UNSUPPORTED', `trigger: '${spec.trigger.type}' is not supported yet. Use httpsSender { address }, soapSender { address }, processDirectSender { address }, timer { mode: "once" } or timer { mode: "every", minutes }.`)
+    err('TRIGGER_UNSUPPORTED', `trigger: '${spec.trigger.type}' is not supported yet. Use httpsSender { address }, soapSender { address }, processDirectSender { address }, jmsSender { queue }, timer { mode: "once" } or timer { mode: "every", minutes }.`)
   }
   if (spec.end?.type && !SUPPORTED_ENDS.includes(spec.end.type)) {
     skip.push('/end')

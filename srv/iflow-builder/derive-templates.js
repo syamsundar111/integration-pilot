@@ -99,6 +99,11 @@ const VALUE_FIELDS = {
     variant: /cname::(?:sap:)?SOAP\/tp::HTTP\/mp::SOAP 1\.x\/direction::Sender\//,
     values: (p) => [['serviceDefinition', p.serviceDefinition], ['messageExchangePattern', p.messageExchangePattern], ['senderAuthType', p.senderAuthType], ['userRole', p.userRole]]
   },
+  // JMS sender: the retry settings (re-selected in Ref_Sender_JMS)
+  'JMS Sender': {
+    variant: /cname::(?:sap:)?JMS\/tp::Not Applicable\/mp::Not Applicable\/direction::Sender\//,
+    values: (p) => [['RetryInterval', p.RetryInterval], ['ExponentialBackoff', p.ExponentialBackoff], ['MaxRetryInterval', p.MaxRetryInterval]]
+  },
   // SOAP 1.x receiver: authentication and proxy type
   'SOAP Receiver': {
     variant: /cname::(?:sap:)?SOAP\/tp::HTTP\/mp::SOAP 1\.x\/direction::Receiver\//,
@@ -230,6 +235,13 @@ async function main() {
   t['iflw/messageflow-soap-sender.xml'] = apply(block(soapSender.iflw, 'id="MessageFlow_1"'), 'soap-sender', {
     attrs: { 'id="MessageFlow_1"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_1"': 'targetRef="{{TARGET}}"' },
     props: { address: 'ADDRESS_VALUE', system: 'SYSTEM_VALUE' }
+  })
+  // JMS sender (Ref_Sender_JMS): the queue; retry (1 min, exponential backoff, at most 60 min), dead-letter queue,
+  // access type and concurrency stay as exported
+  const jmsSender = await readZip('Ref_Sender_JMS.zip')
+  t['iflw/messageflow-jms-sender.xml'] = apply(block(jmsSender.iflw, 'id="MessageFlow_1"'), 'jms-sender', {
+    attrs: { 'id="MessageFlow_1"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_1"': 'targetRef="{{TARGET}}"' },
+    props: { QueueName_inbound: 'QUEUE_VALUE', system: 'SYSTEM_VALUE' }
   })
   // ProcessDirect sender (Ref_Sender_ProcessDirect): only the address; no authentication, no dropdowns
   const pdSender = await readZip('Ref_Sender_ProcessDirect.zip')

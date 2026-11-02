@@ -40,10 +40,10 @@ prompt and the tokens used reported per prompt.
 | 3 | SOAP 1.x and Mail receivers (format below) | Ref_Receivers | done |
 | 4 | Message Mapping: an existing artifact (a `PH_` placeholder if it does not exist) or a mapping inside the iFlow carried from Import; XSLT Mapping step (format below) | Ref_Mapping, MM_DummyOrderToNotif | done |
 | 9 | Multicast and Join (format below) | Ref_Multicast | done |
-| 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | in progress: error response, SOAP and ProcessDirect done; then JMS, SFTP |
+| 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | in progress: error response, SOAP and ProcessDirect done; JMS waiting for the tenant check; then SFTP |
 | 6 | Receivers 2: OData V2, RFC, IDoc, SFTP, JDBC, ProcessDirect | Ref_Receivers_2 | waits for the user's go |
 | 6b | Content Enricher and Poll Enrich (they need phase 6's OData and SFTP adapters; neither real iFlow uses them) | Ref_Multicast_Enrich, to be re-selected first | after phase 6 |
-| 7 | Persistence: Data Store, Idempotent Process Call, JMS | Ref_Persistence | waits for the user's go |
+| 7 | Persistence: Data Store, Idempotent Process Call, JMS (check transaction handling first, see Later) | Ref_Persistence | waits for the user's go |
 | 8 | Transforms: XML Validator, Filter, CSV converters, encoders | Ref_Transform | waits for the user's go |
 
 Order from here (the user's decision, 2026-11-02): phases 5, 6, 6b, 7 and 8, then the **acceptance test**: the first
@@ -176,6 +176,10 @@ Phase 5 (format agreed 2026-11-02, one sender per task):
 - **`processDirectSender { address }`:** only the address, no authentication (Ref_Sender_ProcessDirect). The caller
   side, a ProcessDirect receiver, comes in phase 6; until then, for "one iFlow calls another", the caller gets a
   `PH_` placeholder where the call goes (the `processDirect` pattern), and the HTTPS workaround only on request.
+- **`jmsSender { queue }`:** the queue name the user gives (never invented); retry fixed as re-selected in Ref_Sender_JMS
+  (1 minute, exponential backoff, at most 60 minutes), dead-letter queue on. With an exception subprocess the AI ends
+  it with an Error End, so a failed message is retried. The queue is created on the first deployment (SAP Help); the
+  JMS receiver that fills it comes in phase 7. Transaction handling stays Not Required, as in every export.
 
 ## Later (no phase yet)
 
@@ -209,6 +213,11 @@ From the former reference export checklist; each needs a reference export first.
 - Import, at the latest with phase 6: recognise a `PH_` Content Modifier with a `REPLACE_WITH` property as a
   placeholder again (a step's description is not written into the iFlow), so an imported caller still shows that its
   ProcessDirect call is missing.
+- JMS queue names: the rule (letters, digits, `_ - .`, up to 80 characters, no parameters) is not confirmed against
+  CPI; only `DUMMY_QUEUE_IN` is in an export.
+- Transaction handling with a JMS sender: nothing for the JMS sender alone (every export says Not Required); check it
+  again in phase 7, where a JMS receiver and a Data Store may need "Required for JMS" (Ref_Persistence also says Not
+  Required).
 - HTTP error response: an exception message with quotes or line breaks makes the JSON error body
   `{"error": "${exception.message}"}` invalid.
 - Multicast: a router before a splitter in a branch, its own tenant test. It is refused today, but CPI's message only

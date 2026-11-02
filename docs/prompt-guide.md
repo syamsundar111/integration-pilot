@@ -14,7 +14,7 @@ turns into extra questions.
 
 | | Supported | Not supported |
 |---|---|---|
-| Trigger | HTTPS sender, SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out) or ProcessDirect sender, timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, JMS and other senders; the ProcessDirect call itself (a placeholder for now) |
+| Trigger | HTTPS sender, SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out) , ProcessDirect sender or JMS sender (a queue), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP and other senders; the ProcessDirect call itself (a placeholder for now) |
 | Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
 | Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
@@ -118,6 +118,10 @@ proposal says which:
   properties may not: pass values as headers. For "one iFlow calls another", the assistant builds the called iFlow
   and puts a placeholder `PH_` step where the caller's call goes; replace it in the CPI editor with a Request Reply
   to a ProcessDirect receiver at the same address.
+- A **JMS sender** ("JMS sender, queue ORDERS_IN") reads a queue that another iFlow fills with a JMS receiver (which
+  can't be built yet). Name the queue: the assistant asks for it and never invents one. A failed message is retried;
+  with error handling, the exception subprocess ends with an Error End so the retry still happens. Your tenant needs
+  message queues for JMS; the queue is created when the iFlow is first deployed.
 - **End of error handling**: an exception subprocess ends with an **Escalation End**, so a failed
   message shows as escalated in monitoring. Ask for an Error End, or for "return the error to the
   caller" (a Message End: the sender gets the response, but the message looks completed).

@@ -1046,7 +1046,7 @@ sap.ui.define(
           active.stepCards = [
             {
               title: 'Trigger',
-              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : spec.trigger.type === 'soapSender' ? 'SOAP sender' : spec.trigger.type === 'processDirectSender' ? 'ProcessDirect sender' : 'Timer',
+              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : spec.trigger.type === 'soapSender' ? 'SOAP sender' : spec.trigger.type === 'processDirectSender' ? 'ProcessDirect sender' : spec.trigger.type === 'jmsSender' ? 'JMS sender' : 'Timer',
               lines:
                 spec.trigger.type === 'httpsSender'
                   ? `${spec.trigger.address}\n${CALLER_ROLE}`
@@ -1054,7 +1054,9 @@ sap.ui.define(
                     ? `SOAP 1.x sender at ${spec.trigger.address}. Service definition Manual (no WSDL), Request-Reply: the message body at the end of the flow is the response. XML in and out.\n${CALLER_ROLE}`
                     : spec.trigger.type === 'processDirectSender'
                       ? `ProcessDirect sender at ${spec.trigger.address}. Called by other iFlows on the same tenant with this address; no authentication, not reachable from outside the tenant. A caller that waits for the reply gets the message body at the end of the flow.\nHeaders and the body reach this iFlow, but exchange properties may not: the caller passes values as headers.\nThe address must be unique among the ProcessDirect senders on the tenant; a second iFlow with the same address may fail to deploy.`
-                      : spec.trigger.mode === 'every'
+                      : spec.trigger.type === 'jmsSender'
+                        ? `JMS sender on queue ${spec.trigger.queue}. Another iFlow fills the queue with a JMS receiver, which the app cannot build yet. A failed message is retried after 1 minute, then at growing intervals up to every 60 minutes; dead-letter queue on.\nWith a Message End in the exception subprocess, the message may count as successful, so JMS may not retry it.\nThe tenant may need message queues (JMS capacity in Integration Suite) before this iFlow can be deployed; the queue is created on the first deployment.`
+                        : spec.trigger.mode === 'every'
                     ? `Every ${spec.trigger.minutes} minutes, all day, UTC`
                     : 'Runs once after deployment'
             },

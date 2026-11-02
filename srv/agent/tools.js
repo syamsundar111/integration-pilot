@@ -38,7 +38,7 @@ const TOPICS = {
   mail: { steps: ['sendMail'], label: 'send a mail', summary: 'sendMail: send a mail, one-way' },
   mapping: { steps: ['messageMapping', 'xsltMapping'], label: 'message mapping, XSLT', summary: 'messageMapping (an artifact) and xsltMapping (an attached file)' },
   multicast: { steps: ['multicast'], label: 'multicast and join', summary: 'multicast: send the message down several branches, in parallel or in sequence; a gather combines them after the Join' },
-  senders: { steps: [], triggers: ['soapSender', 'processDirectSender'], label: 'SOAP and ProcessDirect senders', summary: 'senders: soapSender (SOAP 1.x, XML in and out), processDirectSender (called by other iFlows on the tenant)' }
+  senders: { steps: [], triggers: ['soapSender', 'processDirectSender', 'jmsSender'], label: 'SOAP, ProcessDirect and JMS senders', summary: 'senders: soapSender (SOAP 1.x, XML in and out), processDirectSender (called by other iFlows on the tenant), jmsSender (reads a queue)' }
 }
 for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
 
@@ -127,7 +127,7 @@ At most ${MAX_STEPS_PER_EDIT} steps per call. Returns the outline and open error
  */
 const SPEC_FORMAT = {
   spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50 per process, counting route steps), end, exceptionSubprocess?, localProcesses?, parameters?, resources? }',
-  trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "soapSender", "address": "/path/segments" } (SOAP 1.x, XML in and out)', '{ "type": "processDirectSender", "address": "/path/segments" } (called by other iFlows on the tenant)', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
+  trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "soapSender", "address": "/path/segments" } (SOAP 1.x, XML in and out)', '{ "type": "processDirectSender", "address": "/path/segments" } (called by other iFlows on the tenant)', '{ "type": "jmsSender", "queue": "QUEUE_NAME" } (the queue name the user gives)', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
   steps: {
     contentModifier:
       '{ type, name?, description?, headers?: [entry], properties?: [entry], body?: string }; entry = { name, type: constant|expression|header|property|xpath|globalVariable|localVariable, value (a constant may be "{{Param}}"), datatype? (xpath: default java.lang.String), default? (the Default Value column, only when asked for explicitly) }',

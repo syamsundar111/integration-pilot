@@ -264,11 +264,11 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   if (sender?.trigger) trigger = sender.trigger
   else if (!trigger)
     blockers.push(
-      `trigger: ${t.type === 'timer' ? 'scheduled timer' : t.adapter ? `${t.adapter} sender` : t.type}${sender ? ` (${sender.differences.join('; ')})` : ''} (only HTTPS sender, SOAP or ProcessDirect sender as the builder writes it, run-once timer or every N minutes in UTC)`
+      `trigger: ${t.type === 'timer' ? 'scheduled timer' : t.adapter ? `${t.adapter} sender` : t.type}${sender ? ` (${sender.differences.join('; ')})` : ''} (only HTTPS sender, SOAP, ProcessDirect or JMS sender as the builder writes it, run-once timer or every N minutes in UTC)`
     )
 
   for (const a of parsed.adapters || [])
-    if (!(['HTTPS', 'SOAP', 'ProcessDirect'].includes(a.type) && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
+    if (!(['HTTPS', 'SOAP', 'ProcessDirect', 'JMS'].includes(a.type) && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
 
   const stepFrom = (s, where) =>
     SUPPORTED_STEPS.includes(s.type) && s.type !== 'router' && s.type !== 'multicast'

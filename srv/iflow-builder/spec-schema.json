@@ -46,6 +46,7 @@
             "httpsSender",
             "soapSender",
             "processDirectSender",
+            "jmsSender",
             "timer"
           ]
         }
@@ -85,6 +86,18 @@
           },
           "then": {
             "$ref": "#/definitions/processDirectSender"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "jmsSender"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/jmsSender"
           }
         },
         {
@@ -286,6 +299,25 @@
           "type": "string",
           "pattern": "^(/[A-Za-z0-9_.~-]+)+$",
           "description": "ProcessDirect address, e.g. /orders/process; unique among the ProcessDirect senders on the tenant"
+        }
+      }
+    },
+    "jmsSender": {
+      "type": "object",
+      "required": [
+        "type",
+        "queue"
+      ],
+      "additionalProperties": false,
+      "description": "JMS sender: reads from a queue that another iFlow fills; retry after 1 minute with exponential backoff, at most every 60 minutes; dead-letter queue on.",
+      "properties": {
+        "type": {
+          "const": "jmsSender"
+        },
+        "queue": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,80}$",
+          "description": "Queue name, given by the user (never invented): letters, digits, _ - . up to 80 characters"
         }
       }
     },

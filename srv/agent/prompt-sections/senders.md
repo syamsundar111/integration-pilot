@@ -13,3 +13,10 @@ trigger stays `httpsSender`.
   waits for the reply gets the body at the end of the flow. Headers and the body reach the called iFlow, but exchange
   properties may not, so values it needs should be passed as headers. The address must be unique among the
   ProcessDirect senders on the tenant. For the calling iFlow, follow the `processDirect` pattern.
+- `jmsSender`: `{ "type": "jmsSender", "queue": "ORDERS_IN" }`, reads the messages of a JMS queue (letters, digits,
+  `_ - .`, up to 80 characters). **The queue name is a value only the user knows: ask for it, and never invent or derive
+  one.** The queue is created automatically when the iFlow is first deployed: never tell the user to create it or to
+  make sure it exists. Another iFlow fills the queue with a JMS receiver, which cannot be built yet; say so. A failed message is
+  retried (after 1 minute, then at growing intervals up to every 60 minutes). With an `exceptionSubprocess`, its end
+  is `{ "event": "error" }` unless the user asks for another, so a failed message is retried; say so in one line. A
+  Message End, and possibly an Escalation End, may stop the retry.

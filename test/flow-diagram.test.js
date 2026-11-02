@@ -130,6 +130,9 @@ describe('flow diagram: senders (phase 5)', () => {
     const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Sender_SOAP.zip')))
     expect(flowDiagram.fromParsed(parsed).trigger).toMatchObject({ label: 'SOAP', detail: '/dummy/soap' })
   })
+  test('a JMS sender shows as JMS with its queue', async () => {
+    expect(flowDiagram.fromSpec({ trigger: { type: 'jmsSender', queue: 'ORDERS_IN' }, steps: [], end: { type: 'none' } }).trigger).toEqual({ kind: 'other', label: 'JMS', detail: 'ORDERS_IN' })
+  })
   test('a ProcessDirect sender shows as ProcessDirect with its address', async () => {
     expect(flowDiagram.fromSpec({ trigger: { type: 'processDirectSender', address: '/dummy/pd/orders' }, steps: [], end: { type: 'none' } }).trigger).toEqual({ kind: 'other', label: 'ProcessDirect', detail: '/dummy/pd/orders' })
     const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Sender_ProcessDirect.zip')))

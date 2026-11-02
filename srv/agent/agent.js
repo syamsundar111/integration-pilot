@@ -67,9 +67,9 @@ const SPLITTING_TEXT = /\b(split(s|ter|ters|ting)?|gather|for (each|every)|each 
 const SOAP_TEXT = /\b(soap|wsdl|web ?services?)\b/i
 const MAIL_TEXT = /\b(e-?mails?|mails?|smtp)\b/i
 const MAPPING_TEXT = /\b(mappings?|xslt?|mmap)\b/i
-const SENDERS_TEXT = /\b(senders?|process ?direct|soap (service|endpoint|interface|requests?|calls? (it|the iflow))|called (by|via) soap|expose[sd]? (it )?as (a )?soap)\b/i
+const SENDERS_TEXT = /\b(senders?|process ?direct|jms|(message )?queues?|soap (service|endpoint|interface|requests?|calls? (it|the iflow))|called (by|via) soap|expose[sd]? (it )?as (a )?soap)\b/i
 const MULTICAST_TEXT = /\b(multicasts?|parallel branch(es)?|fan[- ]?out|at the same time|in parallel|join step)\b/i
-const SENDER_TRIGGERS = ['soapSender', 'processDirectSender']
+const SENDER_TRIGGERS = ['soapSender', 'processDirectSender', 'jmsSender']
 const PROMPT_SECTIONS = [
   // the conversation has files (attached, written by the assistant, from an iFlow or an import)
   { name: 'attachedFiles', applies: ({ files }) => files.length > 0 },

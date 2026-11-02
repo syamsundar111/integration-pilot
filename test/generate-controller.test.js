@@ -405,6 +405,15 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(examples.map((spec) => placeholderNames(spec).length)).toEqual([1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
   })
 
+  test('the JMS sender card (phase 5): the queue, who fills it, retry, the Message End note, queues on the tenant', () => {
+    expect(activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'jmsSender', queue: 'ORDERS_IN' } }).stepCards[0]).toEqual({
+      title: 'Trigger',
+      type: 'JMS sender',
+      lines:
+        'JMS sender on queue ORDERS_IN. Another iFlow fills the queue with a JMS receiver, which the app cannot build yet. A failed message is retried after 1 minute, then at growing intervals up to every 60 minutes; dead-letter queue on.\nWith a Message End in the exception subprocess, the message may count as successful, so JMS may not retry it.\nThe tenant may need message queues (JMS capacity in Integration Suite) before this iFlow can be deployed; the queue is created on the first deployment.'
+    })
+  })
+
   test('the ProcessDirect sender card (phase 5): no role, headers rather than properties, a unique address', () => {
     const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'processDirectSender', address: '/orders/process' } })
     expect(active.stepCards[0]).toEqual({

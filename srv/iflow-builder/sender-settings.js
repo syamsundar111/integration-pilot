@@ -15,8 +15,10 @@ const fixed = (file) =>
       .filter((m) => !NOT_SETTINGS.includes(m[1]))
       .map((m) => [m[1], m[2] ?? ''])
   )
-const FIXED = { soapSender: fixed('messageflow-soap-sender.xml'), processDirectSender: fixed('messageflow-processdirect-sender.xml') }
-const ADDRESS = new RegExp(require('./spec-schema.json').definitions.soapSender.properties.address.pattern)
+const FIXED = { soapSender: fixed('messageflow-soap-sender.xml'), processDirectSender: fixed('messageflow-processdirect-sender.xml'), jmsSender: fixed('messageflow-jms-sender.xml') }
+const definitions = require('./spec-schema.json').definitions
+const ADDRESS = new RegExp(definitions.soapSender.properties.address.pattern)
+const QUEUE = new RegExp(definitions.jmsSender.properties.queue.pattern)
 
 /**
  * The spec trigger for an iFlow's sender adapter (parser: adapters, with settings).
@@ -26,6 +28,7 @@ function triggerOf(adapter) {
   if (adapter?.direction !== 'Sender') return null
   if (adapter.type === 'SOAP' && adapter.settings?.MessageProtocol === 'SOAP 1.x') return check('soapSender', adapter, { type: 'soapSender', address: adapter.address })
   if (adapter.type === 'ProcessDirect') return check('processDirectSender', adapter, { type: 'processDirectSender', address: adapter.address })
+  if (adapter.type === 'JMS') return check('jmsSender', adapter, { type: 'jmsSender', queue: adapter.settings?.QueueName_inbound })
   return null
 }
 
@@ -34,8 +37,10 @@ function check(kind, adapter, trigger) {
   const differences = Object.entries(FIXED[kind])
     .filter(([key, value]) => key in s && String(s[key] ?? '') !== value) // older adapter versions lack some keys
     .map(([key, value]) => `${key} is '${s[key]}' (the builder writes '${value || '(empty)'}')`)
-  if (/\{\{/.test(trigger.address || '')) differences.push(`the address is the parameter ${trigger.address}`)
-  else if (!ADDRESS.test(trigger.address || '')) differences.push(`the address '${trigger.address || ''}' is not a path of letters, digits and - _ . ~`)
+  // the field the spec holds: an address (a path), or a JMS queue name
+  const [field, value, pattern, rule] = 'queue' in trigger ? ['queue name', trigger.queue, QUEUE, 'letters, digits and _ - . up to 80 characters'] : ['address', trigger.address, ADDRESS, 'a path of letters, digits and - _ . ~']
+  if (/\{\{/.test(value || '')) differences.push(`the ${field} is the parameter ${value}`)
+  else if (!pattern.test(value || '')) differences.push(`the ${field} '${value || ''}' is not ${rule}`)
   return differences.length ? { differences } : { trigger }
 }
 

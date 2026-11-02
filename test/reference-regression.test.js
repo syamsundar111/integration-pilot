@@ -868,3 +868,53 @@ describe('Ref_Sender_ProcessDirect: the ProcessDirect sender (phase 5)', () => {
     expect(fallback.notes.join()).toMatch(/the ProcessDirect sender \(the address is the parameter \{\{PD_Address\}\}\) was replaced by an HTTPS sender/)
   })
 })
+
+describe('Ref_Sender_JMS: the JMS sender (phase 5)', () => {
+  // test/reference-prompts/Ref_Sender_JMS.txt, without iGlow's "Set log headers" and empty exception subprocess
+  const spec = {
+    id: 'Ref_Sender_JMS',
+    name: 'Ref_Sender_JMS',
+    packageId: 'PilotReference',
+    trigger: { type: 'jmsSender', queue: 'DUMMY_QUEUE_IN' },
+    steps: [{ type: 'contentModifier', name: 'CM_Mark', properties: [{ name: 'iFlowName', type: 'constant', value: 'Ref_Sender_JMS', datatype: 'java.lang.String' }] }],
+    end: { type: 'none' }
+  }
+  const sender = (parsed) => {
+    const a = parsed.adapters.find((x) => x.direction === 'Sender')
+    return Object.fromEntries(Object.entries(a.settings).filter(([k]) => !IGNORED.test(k)))
+  }
+  let reference, built
+  beforeAll(async () => {
+    reference = await parse(readRef('Ref_Sender_JMS.zip'))
+    built = await parse(Buffer.from((await build(spec)).zipBase64, 'base64'))
+  })
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('every setting of the sender is as in the reference: the queue, retry, dead-letter queue, access type', () => {
+    expect(sender(built)).toEqual(sender(reference))
+    expect(sender(built)).toMatchObject({ QueueName_inbound: 'DUMMY_QUEUE_IN', RetryInterval: '1', ExponentialBackoff: '1', MaxRetryInterval: '60', useDeadLetterQueue: '1', AccessType: 'Non-Exclusive', NumberConcurrentProcesses: '1' })
+  })
+
+  test('update and Import keep it; a queue given as a parameter makes Import fall back to HTTPS and blocks the update', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const update = specFromParsed(reference, { packageId: 'PilotReference' })
+    expect(update.blockers).toEqual([])
+    expect(update.spec.trigger).toEqual(spec.trigger)
+    const imported = await importIflow(readRef('Ref_Sender_JMS.zip'), { fileName: 'Ref_Sender_JMS.zip', packageId: 'PilotReference' })
+    expect(imported).toMatchObject({ valid: true, errors: [] })
+    expect(imported.spec.trigger).toEqual(spec.trigger)
+    const zip = await JSZip.loadAsync(readRef('Ref_Sender_JMS.zip'))
+    const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+    zip.file(file, (await zip.file(file).async('string')).replace(/(<key>QueueName_inbound<\/key>\s*)<value>[^<]*<\/value>/, '$1<value>{{Queue}}</value>'))
+    const withParam = await zip.generateAsync({ type: 'nodebuffer' })
+    expect(specFromParsed(await parse(withParam), { packageId: 'PilotReference' }).blockers.join()).toMatch(/the queue name is the parameter \{\{Queue\}\}/)
+    const fallback = await importIflow(withParam, { fileName: 'x.zip', packageId: 'PilotReference' })
+    expect(fallback.spec.trigger.type).toBe('httpsSender')
+    expect(fallback.notes.join()).toMatch(/the JMS sender \(the queue name is the parameter \{\{Queue\}\}\) was replaced by an HTTPS sender/)
+  })
+})

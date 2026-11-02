@@ -1,5 +1,16 @@
 {
   "_about": "Dropdown values the user re-selected in the CPI editor, per adapter and property, with where and when. npm run templates:derive merges them into templates/reference-values.json; a confirmed value seen in only one reference export gives no warning. Add a value only after re-selecting it in the editor.",
+  "JMS Sender": {
+    "RetryInterval": {
+      "1": "Retry Interval 1 minute, re-selected in Ref_Sender_JMS, 2026-11-02"
+    },
+    "ExponentialBackoff": {
+      "1": "Exponential Backoff checked, re-selected in Ref_Sender_JMS, 2026-11-02"
+    },
+    "MaxRetryInterval": {
+      "60": "Maximum Retry Interval 60 minutes, re-selected in Ref_Sender_JMS, 2026-11-02"
+    }
+  },
   "SOAP Sender": {
     "serviceDefinition": {
       "Manual": "re-selected in the Ref_Sender_SOAP re-export (switched to WSDL, URL cleared, back to Manual), 2026-11-02"

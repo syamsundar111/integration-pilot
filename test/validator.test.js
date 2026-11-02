@@ -640,8 +640,14 @@ describe('senders (phase 5)', () => {
     expect(validate(baseSpec({ trigger: { type: 'processDirectSender', address: '/orders/process' } }))).toMatchObject({ valid: true, warnings: [] })
     expect(validate(baseSpec({ trigger: { type: 'processDirectSender', address: 'orders' } })).valid).toBe(false)
   })
+  test('a jmsSender with a queue name is valid; a name with spaces, a parameter, too long, or none is refused', () => {
+    expect(validate(baseSpec({ trigger: { type: 'jmsSender', queue: 'ORDERS_IN.v2-a' } }))).toMatchObject({ valid: true, warnings: [] })
+    for (const queue of ['orders in', '{{Queue}}', 'Q'.repeat(81), ''])
+      expect(validate(baseSpec({ trigger: { type: 'jmsSender', queue } })).valid).toBe(false)
+    expect(validate(baseSpec({ trigger: { type: 'jmsSender' } })).valid).toBe(false)
+  })
   test('an unknown sender names the supported ones', () => {
-    expect(validate(baseSpec({ trigger: { type: 'jmsSender', queue: 'Q' } })).issues).toEqual([{ code: 'TRIGGER_UNSUPPORTED', message: expect.stringContaining('soapSender { address }, processDirectSender { address }') }])
+    expect(validate(baseSpec({ trigger: { type: 'ftpSender', host: 'h' } })).issues).toEqual([{ code: 'TRIGGER_UNSUPPORTED', message: expect.stringContaining('soapSender { address }, processDirectSender { address }, jmsSender { queue }') }])
   })
 })
 

@@ -395,7 +395,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const adapters = []
 
   // a sender adapter: its template and the adapter type in the summary
-  const SENDERS = { httpsSender: ['iflw/messageflow-https-sender.xml', 'HTTPS'], soapSender: ['iflw/messageflow-soap-sender.xml', 'SOAP'], processDirectSender: ['iflw/messageflow-processdirect-sender.xml', 'ProcessDirect'] }
+  const SENDERS = { httpsSender: ['iflw/messageflow-https-sender.xml', 'HTTPS'], soapSender: ['iflw/messageflow-soap-sender.xml', 'SOAP'], processDirectSender: ['iflw/messageflow-processdirect-sender.xml', 'ProcessDirect'], jmsSender: ['iflw/messageflow-jms-sender.xml', 'JMS'] }
   if (SENDERS[spec.trigger.type]) {
     const [template, type] = SENDERS[spec.trigger.type]
     const p = { id: nextId('Participant'), kind: 'sender', name: 'Sender', x: L.SENDER_X, y: cy0 - L.PART_H / 2 }
@@ -408,6 +408,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
         SOURCE: p.id,
         TARGET: start.id,
         ADDRESS_VALUE: val(spec.trigger.address),
+        QUEUE_VALUE: val(spec.trigger.queue),
         SYSTEM_VALUE: val(p.name)
       }),
       from: [p.x + L.PART_W / 2, cy0],
@@ -415,7 +416,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       sourceShape: p.id,
       targetShape: start.id
     })
-    adapters.push({ type, direction: 'Sender', system: p.name, address: spec.trigger.address })
+    adapters.push({ type, direction: 'Sender', system: p.name, address: spec.trigger.address ?? spec.trigger.queue })
   }
 
   // parameter references (parameters.propdef) of the fields given as a whole {{Param}}: [attribute, value]
@@ -633,7 +634,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     packageId: spec.packageId,
     trigger:
       SENDERS[spec.trigger.type]
-        ? { type: spec.trigger.type, address: spec.trigger.address }
+        ? { type: spec.trigger.type, ...(spec.trigger.address && { address: spec.trigger.address }), ...(spec.trigger.queue && { queue: spec.trigger.queue }) }
         : { type: 'timer', mode: spec.trigger.mode, ...(spec.trigger.mode === 'every' && { minutes: spec.trigger.minutes }) },
     steps: nodes.filter((n) => ['step', 'router', 'multicast'].includes(n.kind)).map((n) => ({ id: n.id, type: n.step.type, name: n.name, ...(n.lane && { route: true }) })),
     end: spec.end.type === 'httpReceiver' ? { type: 'httpReceiver', system: names.endSystem, url: spec.end.url } : { type: 'none' },
