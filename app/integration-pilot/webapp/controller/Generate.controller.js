@@ -1125,9 +1125,18 @@ sap.ui.define(
           active.params = Object.entries(spec.parameters || {}).map(([key, value]) => ({ key, value }))
           // same rule as srv/lib/proposals.js: a placeholder default is not configured on approval
           const placeholderParams = active.params.filter((x) => /^https?:\/\/\S*<[^<>\s/]+>/i.test(String(x.value))).map((x) => x.key)
-          active.placeholderText = placeholderParams.length
-            ? `${placeholderParams.join(', ')}: the default is a placeholder. It is not configured on approval — set the real value in the CPI web editor (Configure) before deploying. Approve without deploy.`
-            : ''
+          // placeholder steps: the same check as srv/iflow-builder/placeholders.js (a Content Modifier whose description starts with REPLACE WITH)
+          const placeholderSteps = everyStep(spec).filter((s) => s.type === 'contentModifier' && /^REPLACE WITH\b/.test(s.description || '')).map((s) => s.name)
+          active.placeholderText = [
+            placeholderParams.length
+              ? `${placeholderParams.join(', ')}: the default is a placeholder. It is not configured on approval — set the real value in the CPI web editor (Configure) before deploying. Approve without deploy.`
+              : '',
+            placeholderSteps.length
+              ? `${placeholderSteps.join(', ')}: ${placeholderSteps.length > 1 ? 'placeholder steps. Replace them' : 'a placeholder step. Replace it'} in the CPI editor before deploying. Approve without deploy.`
+              : ''
+          ]
+            .filter(Boolean)
+            .join('\n')
           const attached = p.attachments || {}
           active.scripts = everyStep(spec)
             .filter((s) => s.type === 'groovyScript')

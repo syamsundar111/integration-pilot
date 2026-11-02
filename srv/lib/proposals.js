@@ -12,6 +12,7 @@ const cds = require('@sap/cds')
 const cpi = require('./cpi-client')
 const { audit, audited } = require('./audit')
 const { build, splitParameters, receiverParams } = require('../iflow-builder/builder')
+const { placeholderNames } = require('../iflow-builder/placeholders')
 
 const LOG = cds.log('proposals')
 const POLL_INTERVAL_MS = Number(process.env.DEPLOY_POLL_INTERVAL_MS || 5_000)
@@ -238,9 +239,15 @@ async function execute(proposal, result, user) {
         return { status: 'warning', detail: `${params.length ? `Set ${params.map(([k]) => k).join(', ')}. ` : ''}${result.warning}` }
       })
 
-      if (result.deploy && placeholders.length) {
-        // deploying with a placeholder URL would only fail at runtime
-        await step('deploy', async () => ({ status: 'warning', detail: `Not deployed: ${placeholders.join(', ')} still has a placeholder. Set it, then deploy from the iFlows page.` }))
+      // placeholder steps (the same check as the builder's): the iFlow is deployed only after they are replaced
+      const placeholderSteps = placeholderNames(spec)
+      if (result.deploy && (placeholders.length || placeholderSteps.length)) {
+        // deploying with a placeholder URL would only fail at runtime; a placeholder step does nothing where a step belongs
+        const why = [
+          ...(placeholders.length ? [`${placeholders.join(', ')} still has a placeholder. Set it`] : []),
+          ...(placeholderSteps.length ? [`${placeholderSteps.join(', ')} ${placeholderSteps.length > 1 ? 'are placeholder steps. Replace them' : 'is a placeholder step. Replace it'} in the CPI editor`] : [])
+        ]
+        await step('deploy', async () => ({ status: 'warning', detail: `Not deployed: ${why.join('. ')}, then deploy from the iFlows page.` }))
         await step('runtime', async () => 'skipped')
       } else if (result.deploy) {
         let taskId

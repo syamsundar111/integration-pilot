@@ -1530,6 +1530,22 @@ describe('placeholder parameter defaults (system prompt review, item 4)', () => 
     expect(cpi.updateConfiguration).not.toHaveBeenCalled()
     expect(cpi.deployIflow).not.toHaveBeenCalled()
   })
+
+  test('an iFlow with a placeholder step is created, but not deployed', async () => {
+    const ph = { type: 'contentModifier', name: 'PH_CallOrders', description: 'REPLACE WITH Request Reply to a ProcessDirect receiver at address /orders', properties: [{ name: 'REPLACE_WITH', type: 'constant', value: 'x' }] }
+    const spec = { ...sample, id: 'Placeholder_Step_1', name: 'Placeholder Step 1', steps: [...sample.steps, ph] }
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec })).mockResolvedValueOnce(answer('ready'))
+    const turn = await chat({ message: 'propose Placeholder_Step_1' })
+    cpi.deployIflow.mockClear()
+    await POST(`/api/Proposals/${turn.proposals[0].ID}/approve`, { deploy: true })
+    const done = await waitFor(turn.proposals[0].ID)
+    expect(done.status).toBe('DONE')
+    const step = (key) => done.result.steps.find((s) => s.key === key)
+    expect(step('create')).toMatchObject({ status: 'done' })
+    expect(step('deploy')).toMatchObject({ status: 'warning', detail: 'Not deployed: PH_CallOrders is a placeholder step. Replace it in the CPI editor, then deploy from the iFlows page.' })
+    expect(step('runtime')).toMatchObject({ status: 'skipped' })
+    expect(cpi.deployIflow).not.toHaveBeenCalled()
+  })
 })
 
 describe('receiver URL with a query (Test 3)', () => {

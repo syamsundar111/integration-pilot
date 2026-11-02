@@ -373,6 +373,13 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(activeFor(base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }])).stepCards[0].lines).toBe('Runs once after deployment')
   })
 
+  test('a placeholder step: the panel says to replace it before deploying and to approve without deploy', () => {
+    const ph = (name) => ({ type: 'contentModifier', name, description: `REPLACE WITH ${name}`, properties: [{ name: 'REPLACE_WITH', type: 'constant', value: name }] })
+    expect(activeFor(base([ph('PH_CallOrders')])).placeholderText).toBe('PH_CallOrders: a placeholder step. Replace it in the CPI editor before deploying. Approve without deploy.')
+    expect(activeFor(base([ph('PH_A')], { exceptionSubprocess: { steps: [ph('PH_B')], end: { event: 'escalation' } } })).placeholderText).toBe('PH_A, PH_B: placeholder steps. Replace them in the CPI editor before deploying. Approve without deploy.')
+    expect(activeFor(base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }])).placeholderText).toBe('')
+  })
+
   test('the ProcessDirect sender card (phase 5): no role, headers rather than properties, a unique address', () => {
     const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'processDirectSender', address: '/orders/process' } })
     expect(active.stepCards[0]).toEqual({

@@ -17,4 +17,6 @@ placeholder Content Modifier where each unsupported step goes:
   (step type, name and settings), e.g. "REPLACE WITH Content Enricher 'Add Prices': from the price
   service, aggregation Combine";
 - set one property `REPLACE_WITH` (constant) with the same short text, so the step is valid.
-Then tell the user which placeholders they must replace before deploying.
+Then tell the user which placeholders they must replace, and to approve **without** deploy: an iFlow with a
+placeholder is deployed only after its placeholders are replaced in the CPI editor. Never tell the user to deploy it
+on approval.

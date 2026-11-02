@@ -360,3 +360,12 @@ describe('system prompt: ProcessDirect (phase 5)', () => {
     expect(pattern).toMatch(/never present the placeholder as the call/)
   })
 })
+
+describe('system prompt: placeholders are not deployed on approval', () => {
+  const unsupported = sectionFlat('unsupportedSteps')
+  const pattern = fs.readFileSync(path.join(__dirname, '../srv/agent/patterns/processDirect.md'), 'utf8').replace(/\s+/g, ' ')
+  test('the placeholder rules and the processDirect pattern say: approve without deploy, deploy after replacing', () => {
+    expect(unsupported).toMatch(/Then tell the user which placeholders they must replace, and to approve \*\*without\*\* deploy: an iFlow with a placeholder is deployed only after its placeholders are replaced in the CPI editor\. Never tell the user to deploy it on approval\./)
+    expect(pattern).toMatch(/Approve the caller without deploy and deploy it only after the placeholder is replaced; a timer would otherwise run with nothing to call\./)
+  })
+})

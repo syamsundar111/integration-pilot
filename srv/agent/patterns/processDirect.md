@@ -8,7 +8,9 @@ supported yet. When the user asks for ProcessDirect, or for one iFlow that calls
   `PH_<StepName>` with a description starting `REPLACE WITH` ("REPLACE WITH Request Reply to a ProcessDirect
   receiver at address /...", exactly the called iFlow's address) and one constant property `REPLACE_WITH`. Tell the
   user to replace it in the CPI editor with a Request Reply to a ProcessDirect receiver at exactly that address.
-  Say plainly that the call itself is not built yet; never present the placeholder as the call.
+  Say plainly that the call itself is not built yet; never present the placeholder as the call. Approve the caller
+  without deploy and deploy it only after the placeholder is replaced; a timer would otherwise run with nothing to
+  call.
 - Only when the user asks for a call that needs no manual step in the editor, offer this **workaround** instead
   (never call it an equivalent): the called iFlow gets an HTTPS sender with the address (e.g. `/pilot/notify`), and the
   caller calls that endpoint with `requestReplyHttp` (or the `httpReceiver` end). The difference
