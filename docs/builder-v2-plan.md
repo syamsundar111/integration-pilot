@@ -207,6 +207,9 @@ From the former reference export checklist; each needs a reference export first.
 - ProcessDirect: confirm on a deployed run that headers and the body reach the called iFlow and exchange properties
   do not (the panel says "may not"), and that a second iFlow with the same ProcessDirect address fails to deploy
   (the panel says "may").
+- Import, at the latest with phase 6: recognise a `PH_` Content Modifier with a `REPLACE_WITH` property as a
+  placeholder again (a step's description is not written into the iFlow), so an imported caller still shows that its
+  ProcessDirect call is missing.
 - HTTP error response: an exception message with quotes or line breaks makes the JSON error body
   `{"error": "${exception.message}"}` invalid.
 - Multicast: a router before a splitter in a branch, its own tenant test. It is refused today, but CPI's message only
