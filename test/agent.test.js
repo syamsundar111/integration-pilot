@@ -243,7 +243,7 @@ describe('async turns', () => {
   }
 
   test('POST returns at once; progress events show thinking, tools, validation and the proposal', async () => {
-    const spec = { ...sample, id: 'Turn_Test_1' }
+    const spec = { ...sample, id: 'Turn_Test_1', name: 'Turn_Test_1' }
     const gate = deferred()
     llm.chat
       .mockResolvedValueOnce(toolCall('listPackages', {}))
@@ -332,7 +332,7 @@ describe('async turns', () => {
 describe('package Name vs ID (manual test 10)', () => {
   const lastToolResult = () => JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
   async function propose(id, packageId, body = {}) {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id, packageId } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id, name: id, packageId } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: `propose ${id}`, ...body })
     return { data, toolResult: lastToolResult() }
   }
@@ -419,7 +419,7 @@ describe('proposal execution', () => {
   })
 
   test('deployment errors end FAILED with the CPI error text', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Test_2' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Test_2', name: 'Exec_Test_2' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'another' })
     cpi.getRuntimeArtifact.mockResolvedValue({ status: 'ERROR' })
     cpi.getRuntimeError.mockResolvedValue({ message: 'Receiver URL invalid' })
@@ -430,7 +430,7 @@ describe('proposal execution', () => {
   })
 
   test('slow deployment (task SUCCESS, runtime not visible yet) ends DONE with a warning, not FAILED', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Slow' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Slow', name: 'Exec_Slow' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'slow deploy' })
     cpi.getRuntimeArtifact.mockResolvedValue(null)
     cpi.getDeployStatus.mockResolvedValue('SUCCESS')
@@ -441,7 +441,7 @@ describe('proposal execution', () => {
   })
 
   test("an update of a failed iFlow: the previous deployment's ERROR does not fail the new one", async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_OldError' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_OldError', name: 'Exec_OldError' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'redeploy' })
     const hourAgo = new Date(Date.now() - 3600_000).toISOString()
     cpi.getRuntimeArtifact.mockResolvedValue({ status: 'ERROR', deployedOn: hourAgo }) // the old version
@@ -452,7 +452,7 @@ describe('proposal execution', () => {
   })
 
   test("an update of a running iFlow: the previous deployment's STARTED is not taken as success", async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_OldStarted' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_OldStarted', name: 'Exec_OldStarted' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'redeploy running' })
     cpi.getRuntimeArtifact.mockResolvedValue({ status: 'STARTED', deployedOn: new Date(Date.now() - 3600_000).toISOString() })
     cpi.getDeployStatus.mockResolvedValue('DEPLOYING')
@@ -463,7 +463,7 @@ describe('proposal execution', () => {
   })
 
   test('the new deployment (deployed after the start) counts', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_NewStarted' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_NewStarted', name: 'Exec_NewStarted' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'deploy new' })
     cpi.getRuntimeArtifact.mockImplementation(async () => ({ status: 'STARTED', deployedOn: new Date().toISOString() }))
     cpi.getDeployStatus.mockResolvedValue('DEPLOYING')
@@ -473,7 +473,7 @@ describe('proposal execution', () => {
   })
 
   test('a new-iFlow proposal does not overwrite an iFlow that appeared after it was proposed', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Taken' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Taken', name: 'Exec_Taken' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'create it' })
     cpi.getIflow.mockResolvedValueOnce({ id: 'Exec_Taken', packageId: 'PilotReference' }) // created meanwhile, e.g. by another proposal
     cpi.updateIflowContent.mockClear()
@@ -484,7 +484,7 @@ describe('proposal execution', () => {
   })
 
   test('a retry updates the iFlow its own earlier attempt created', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Mine' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Mine', name: 'Exec_Mine' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'create mine' })
     const id = data.proposals[0].ID
     cpi.updateConfiguration.mockRejectedValueOnce(new Error('configure failed')) // created, then failed
@@ -498,7 +498,7 @@ describe('proposal execution', () => {
   })
 
   test('deploy task FAIL ends FAILED', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_TaskFail' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_TaskFail', name: 'Exec_TaskFail' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'task fails' })
     cpi.getRuntimeArtifact.mockResolvedValue(null)
     cpi.getDeployStatus.mockResolvedValue('FAIL')
@@ -508,7 +508,7 @@ describe('proposal execution', () => {
   })
 
   test('reject stores the reason and the agent sees it next turn', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Test_3' } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Exec_Test_3', name: 'Exec_Test_3' } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: 'third' })
     const id = data.proposals[0].ID
     const { data: rejected } = await POST(`/api/Proposals/${id}/reject`, { reason: 'wrong receiver' })
@@ -524,7 +524,7 @@ describe('restart recovery and retry', () => {
   const { recoverInterrupted, INTERRUPTED } = require('../srv/lib/proposals')
 
   async function proposal(id) {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id, name: id } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: `propose ${id}` })
     return data.proposals[0].ID
   }
@@ -583,7 +583,7 @@ describe('restart recovery and retry', () => {
 
 describe('target package', () => {
   async function propose(id, packageId) {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id, packageId } })).mockResolvedValueOnce(answer('ready'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id, name: id, packageId } })).mockResolvedValueOnce(answer('ready'))
     const data = await chat({ message: `propose ${id}` })
     return { data, toolResult: JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content) }
   }
@@ -819,7 +819,7 @@ describe('attached files', () => {
 
   test('getIflowSpec attaches the scripts of an existing iFlow instead of returning them', async () => {
     const { build } = require('../srv/iflow-builder/builder')
-    const existing = { ...sample, id: 'Existing_Groovy', steps: [sample.steps[0], { ...sample.steps[1], code: script }] }
+    const existing = { ...sample, id: 'Existing_Groovy', name: 'Existing_Groovy', steps: [sample.steps[0], { ...sample.steps[1], code: script }] }
     const zip = Buffer.from((await build(existing)).zipBase64, 'base64')
     cpi.getIflow.mockImplementation(async (id) => {
       if (id === existing.id) return { id, name: existing.name, packageId: 'PilotReference' }
@@ -1086,7 +1086,7 @@ describe('writeScript', () => {
   const { GROOVY } = require('./helpers')
 
   test('scripts are written as plain code (not compiled here), stored, and referenced by the spec without code', async () => {
-    const spec = { ...sample, id: 'Agent_Script_1', steps: [sample.steps[0], { type: 'groovyScript', name: 'Map Users', fileName: 'mapUsers' }] }
+    const spec = { ...sample, id: 'Agent_Script_1', name: 'Agent_Script_1', steps: [sample.steps[0], { type: 'groovyScript', name: 'Map Users', fileName: 'mapUsers' }] }
     llm.chat
       .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mapUsers', code: 'println 1' }))
       .mockResolvedValueOnce(toolCall('writeScript', { fileName: 'mapUsers', code: GROOVY }))
@@ -1231,7 +1231,7 @@ describe('the same refused call again and again: not run again, the message stop
 describe('one call instead of parts', () => {
   test('a draft is proposed directly with useDraftSpec', async () => {
     llm.chat
-      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Draft_Direct', name: 'Draft Direct', packageId: 'PilotReference', trigger: { type: 'timer', mode: 'once' }, end: { type: 'none' } } }, { op: 'addSteps', steps: [{ type: 'jsonToXml', name: 'To XML' }] }] }))
+      .mockResolvedValueOnce(toolCall('editDraftSpec', { ops: [{ op: 'set', fields: { id: 'Agent_Draft_Direct', name: 'Agent Draft Direct', packageId: 'PilotReference', trigger: { type: 'timer', mode: 'once' }, end: { type: 'none' } } }, { op: 'addSteps', steps: [{ type: 'jsonToXml', name: 'To XML' }] }] }))
       .mockResolvedValueOnce(toolCall('proposeIflow', { useDraftSpec: true }))
       .mockResolvedValueOnce(answer('Ready.'))
     const turn = await chat({ message: 'Build it' })
@@ -1377,7 +1377,7 @@ describe('token budget per message', () => {
 
 describe('Groovy scripts are suggestions, not checked (the Groovy check was removed)', () => {
   test('a proposal with a script has no check step and no check status; approval needs no confirmation', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Agent_Script_Plain' } })).mockResolvedValueOnce(answer('ok'))
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Agent_Script_Plain', name: 'Agent_Script_Plain' } })).mockResolvedValueOnce(answer('ok'))
     const turn = await chat({ message: 'Build it' })
     const id = turn.proposals[0].ID
     const { data: pending } = await GET(`/api/Proposals/${id}`)
@@ -1513,6 +1513,41 @@ describe('header and property types (system prompt review, item 3)', () => {
     const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
     expect(result).toMatchObject({ valid: true, autoFixes: ['type expression -> constant (the value has no ${...}): Set Source: property Source'] })
     expect(turn.proposals[0].spec.steps[0].properties).toEqual([{ name: 'Source', type: 'constant', value: 'Shop' }])
+  })
+})
+
+describe('a new iFlow\'s id is made from its name', () => {
+  const lastResult = () => JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+  const jms = (id, name) => ({ ...sample, id, name, trigger: { type: 'jmsSender', queue: 'ORDERS_IN' } })
+
+  test('an id taken from the answer to another question (the queue name) is replaced, and the fix is reported', async () => {
+    llm.chat.mockResolvedValueOnce(answer('Which queue?'))
+    const first = await chat({ message: 'Create iFlow Orders Chat. It reads orders from a JMS queue.' })
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: jms('ORDERS_IN', 'Orders Chat') })).mockResolvedValueOnce(answer('ready'))
+    const turn = await chat({ sessionId: first.sessionId, message: 'ORDERS_IN' })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Orders_Chat' })])
+    expect(turn.proposals[0].spec.trigger).toEqual({ type: 'jmsSender', queue: 'ORDERS_IN' }) // the queue stays
+    expect(lastResult().autoFixes).toEqual(['id ORDERS_IN -> Orders_Chat (made from the name; the user gave no id)'])
+  })
+
+  test('an id the user gives explicitly is kept; one that breaks the character rule is fixed the same way', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'ORDERS_FLOW', name: 'Orders Chat' } })).mockResolvedValueOnce(answer('ready'))
+    let turn = await chat({ message: 'Create iFlow Orders Chat with id ORDERS_FLOW.' })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'ORDERS_FLOW' })])
+    expect(lastResult().autoFixes).toBeUndefined()
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'Orders-Flow-2', name: 'Orders Chat 2' } })).mockResolvedValueOnce(answer('ready'))
+    turn = await chat({ message: 'Create iFlow Orders Chat 2, iFlow ID: Orders-Flow-2' })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Orders_Flow_2' })])
+    expect(lastResult().autoFixes).toEqual(['id Orders-Flow-2 -> Orders_Flow_2 (the id the user gave, with only letters, digits and _)'])
+  })
+
+  test('a name with spaces gives the id with underscores; validateSpec applies the same rule', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('proposeIflow', { spec: { ...sample, id: 'OI2', name: 'Order Intake 2' } })).mockResolvedValueOnce(answer('ready'))
+    const turn = await chat({ message: 'Create iFlow Order Intake 2.' })
+    expect(turn.proposals).toEqual([expect.objectContaining({ iflowId: 'Order_Intake_2' })])
+    llm.chat.mockResolvedValueOnce(toolCall('validateSpec', { spec: { ...sample, id: 'X1', name: 'Order Check' } })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'check it' })
+    expect(lastResult()).toMatchObject({ valid: true, autoFixes: ['id X1 -> Order_Check (made from the name; the user gave no id)'] })
   })
 })
 
@@ -1666,7 +1701,7 @@ describe('package not named: the first package on the tenant, no question (the p
 
   test('an import without a package: nothing is proposed, the tenant packages are offered; the answer sets it', async () => {
     const { build } = require('../srv/iflow-builder/builder')
-    const zip = (await build({ ...sample, id: 'Import_No_Pkg' })).zipBase64
+    const zip = (await build({ ...sample, id: 'Import_No_Pkg', name: 'Import_No_Pkg' })).zipBase64
     const { data: imported } = await POST('/api/importIflow', { fileName: 'x.zip', contentBase64: zip })
     expect(imported.spec.packageId).toBe('ImportNoPackage')
     expect(imported.notes).toContain('Target package: none yet. Name one when you ask me to propose it; otherwise I will ask you for one.')
@@ -1768,7 +1803,7 @@ describe('conversations are private (full review #5)', () => {
     expect(await status(POST(`/api/ChatSessions/${a.sessionId}/remove`, {}, asB))).toBe(404)
     expect(await status(POST(`/api/Attachments/${att.ID}/remove`, {}, asB))).toBe(404)
     const { build } = require('../srv/iflow-builder/builder')
-    const zip = (await build({ ...sample, id: 'Private_Import' })).zipBase64
+    const zip = (await build({ ...sample, id: 'Private_Import', name: 'Private_Import' })).zipBase64
     expect(await status(POST('/api/importIflow', { sessionId: a.sessionId, fileName: 'x.zip', contentBase64: zip }, asB))).toBe(404)
 
     // a running turn of A cannot be cancelled by B

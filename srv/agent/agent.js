@@ -687,7 +687,8 @@ async function importIntoSession({ sessionId, fileName, buffer, packageId, user 
   sessionId = await ensureSession(user, sessionId, `Import ${fileName}`)
   const files = Object.entries(result.attachments).map(([name, content]) => ({ fileName: name, content }))
   if (files.length) await attachmentStore.save(user, sessionId, files, 'import')
-  const draft = { spec: result.spec, source: `imported from ${fileName}`, valid: false, at: new Date().toISOString() }
+  // importId: the id Import chose (X_Imported); the tools keep it although it is not made from the name
+  const draft = { spec: result.spec, source: `imported from ${fileName}`, valid: false, at: new Date().toISOString(), importId: result.spec.id }
   await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ draftSpec: JSON.stringify(draft) })))
 
   const { spec } = result

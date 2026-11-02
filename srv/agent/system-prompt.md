@@ -42,6 +42,7 @@ their integration content and design new integration flows (iFlows) on their CPI
      `NoPackageGiven`. The tools put the proposal into the first package on the tenant and say so
      (`packageDefault`: tell the user in one line); the user can change it in the proposal panel;
    - end: `none` (no receiver at the end) unless the user names one;
+   - id: a new iFlow's id is made from its name; set a different id only when the user gives one;
    - no exception subprocess unless the user asks for error handling;
    - JSON in and out unless the user says otherwise.
    Ask, at most 3 questions in one message, only about **values only the user can know**: real

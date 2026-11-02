@@ -389,3 +389,9 @@ describe('system prompt: JMS sender (phase 5)', () => {
     expect(senders).toMatch(/With an `exceptionSubprocess`, its end is `\{ "event": "error" \}` unless the user asks for another, so a failed message is retried; say so in one line\. A Message End, and possibly an Escalation End, may stop the retry\./)
   })
 })
+
+describe('system prompt: the id of a new iFlow', () => {
+  test('made from its name; another id only when the user gives one', () => {
+    expect(flat).toMatch(/- id: a new iFlow's id is made from its name; set a different id only when the user gives one;/)
+  })
+})

@@ -403,9 +403,45 @@ async function askForPackage(why) {
   }
 }
 
-/** Tool-result field for type fixes the assistant must mention */
-const autoFixes = (fixes) =>
-  fixes.length ? { autoFixes: [`type expression -> constant (the value has no \${...}): ${fixes.join(', ')}`], autoFixNote: 'Tell the user these fixes in one line.' } : {}
+/** Tool-result field for the fixes the assistant must mention: type fixes, and an iFlow id made from the name */
+const autoFixes = (fixes, other = []) => {
+  const all = [...(fixes.length ? [`type expression -> constant (the value has no \${...}): ${fixes.join(', ')}`] : []), ...other]
+  return all.length ? { autoFixes: all, autoFixNote: 'Tell the user these fixes in one line.' } : {}
+}
+
+/** An iFlow id from a name or a given id, as Import makes it: letters, digits and _ only, a letter first, at most 100 characters */
+function iflowIdOf(s) {
+  const id = String(s || '').replace(/[^A-Za-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')
+  return (/^[A-Za-z]/.test(id) ? id : `iFlow${id ? `_${id}` : ''}`).slice(0, 100)
+}
+
+/** The ids the user gave explicitly in the conversation: "id X", "iFlow ID: X", "iflow-id = X" */
+async function idsGivenByUser(ctx) {
+  const rows = ctx.sessionId
+    ? await cds.tx({ user: ctx.user }, (tx) => tx.run(SELECT.from('iflowpilot.ChatMessage').columns('content').where({ session_ID: ctx.sessionId, role: 'user' })))
+    : []
+  const text = [ctx.message || '', ...rows.map((m) => m.content || '')].join('\n')
+  return [...text.matchAll(/\b(?:iflow[ -]?)?id\b\s*(?:is\s*)?[:=]?\s*[`"']?([^\s`"',;]+)/gi)].map((m) => m[1].replace(/[.)]+$/, ''))
+}
+
+/**
+ * A new iFlow's id is made from its name, so the model cannot take it from another answer (e.g. a queue name).
+ * Kept: an id equal to the one made from the name, an id the user gave explicitly (through the same character rule),
+ * and the id Import gave the draft (X_Imported differs from the name on purpose).
+ * @returns {{ spec: object, fix?: string }}
+ */
+async function newIflowId(ctx, spec) {
+  if (!spec || typeof spec !== 'object' || (typeof spec.id !== 'string' && typeof spec.name !== 'string')) return { spec }
+  const fromName = iflowIdOf(spec.name || spec.id)
+  if (spec.id === fromName) return { spec }
+  const draft = await draftOf(ctx)
+  if (draft?.importId && spec.id === draft.importId) return { spec }
+  const given = (await idsGivenByUser(ctx)).find((g) => g === spec.id || iflowIdOf(g) === spec.id)
+  const id = given ? iflowIdOf(given) : fromName
+  if (id === spec.id) return { spec }
+  const why = given ? 'the id the user gave, with only letters, digits and _' : 'made from the name; the user gave no id'
+  return { spec: { ...spec, id }, fix: `id ${spec.id || '(none)'} -> ${id} (${why})` }
+}
 
 /** The conversation's draft spec { spec, source, at }, or null */
 async function draftOf(ctx) {
@@ -420,7 +456,8 @@ async function draftOf(ctx) {
  */
 async function saveDraft(ctx, spec, { source, valid = false }) {
   if (!ctx.sessionId || !spec || typeof spec !== 'object') return
-  const draft = { spec, source, valid, at: new Date().toISOString() }
+  const importId = (await draftOf(ctx))?.importId // the id Import chose stays known while the draft changes
+  const draft = { spec, source, valid, at: new Date().toISOString(), ...(importId && { importId }) }
   await cds.tx({ user: ctx.user }, (tx) => tx.run(UPDATE('iflowpilot.ChatSession', ctx.sessionId).set({ draftSpec: JSON.stringify(draft) })))
 }
 
@@ -599,7 +636,8 @@ const handlers = {
     const source = draft ? draft.source : 'your latest validateSpec'
     if (toPackageId(spec.packageId).id) spec = { ...spec, packageId: toPackageId(spec.packageId).id } // a Name -> its ID, as CPI does
     const typed = normalizeTypes(spec) // expression without ${...} -> constant
-    spec = typed.spec
+    const idFix = await newIflowId(ctx, typed.spec)
+    spec = idFix.spec
     const attachments = await attachmentsOf(ctx)
     const { valid, issues } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) {
@@ -614,7 +652,7 @@ const handlers = {
     }
     ctx.validatedSpec = spec
     await saveDraft(ctx, spec, { source, valid: true })
-    return { valid: true, ...autoFixes(typed.fixes), next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
+    return { valid: true, ...autoFixes(typed.fixes, idFix.fix ? [idFix.fix] : []), next: 'Propose it with { "useValidatedSpec": true }; do not send the spec again.' }
   },
 
   async writeScript({ fileName, code }, ctx) {
@@ -776,8 +814,9 @@ const handlers = {
       pkg = { id: chosen.packageId }
     }
     const typed = normalizeTypes(spec) // expression without ${...} -> constant
-    spec = typed.spec
-    if (args.spec || chosen) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
+    const idFix = await newIflowId(ctx, typed.spec)
+    spec = idFix.spec
+    if (args.spec || chosen || idFix.fix) await saveDraft(ctx, spec, { source: 'your latest proposeIflow' })
     const attachments = await attachmentsOf(ctx)
     const { valid, issues, warnings } = validate(spec, { attachments: Object.keys(attachments) })
     if (!valid) return compactInvalid(issues, 'Fix only what these errors name and propose again.')
@@ -804,7 +843,7 @@ const handlers = {
       status: 'PENDING',
       ...(pkg.note && { packageIdNote: `${pkg.note} Tell the user exactly this, in one line; do not ask about it.` }),
       ...(chosen && { packageDefault: chosen.note }),
-      ...autoFixes(typed.fixes),
+      ...autoFixes(typed.fixes, idFix.fix ? [idFix.fix] : []),
       // notes for the user: the proposal is stored as it is, a note is never a reason to change a value
       ...(specNotes?.length && {
         specNotes,
