@@ -1,0 +1,15 @@
+Create iFlow Ref_Sender_SFTP_UserPw.
+
+Sender: SFTP adapter, Proxy Type Internet, Authentication User Name/Password,
+Post-Processing Move File, Read Lock Strategy None, Empty File Handling Process Empty Files,
+polling every 15 minutes, all day (00:00-24:00), time zone (UTC 0:00) Greenwich Mean Time (Etc/GMT).
+Externalized, with dummy defaults:
+- Address {{SFTP_Address}} = sftp.example.com:22
+- Directory {{SFTP_Directory}} = /dummy/in
+- File Name {{SFTP_FileName}} = *.xml
+- Credential Name {{SFTP_Credential}} = DUMMY_SFTP_CREDENTIAL
+- Archive Directory {{SFTP_ArchiveDirectory}} = .archive
+
+Main integration process:
+1. Start - Message start event, connected to the SFTP sender.
+2. End - Message End.
