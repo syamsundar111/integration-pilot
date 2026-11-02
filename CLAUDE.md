@@ -94,16 +94,20 @@ Extends the builder beyond the linear spec v1; phases, status and open items: [d
 
 - Reference library: `srv/iflow-builder/reference/Ref_*.zip` plus `MM_DummyOrderToNotif.zip`, one prompt
   each in `test/reference-prompts/<name>.txt`. Dummy data only (example.com, s4dummy, DUMMY_*).
-- References are built with the iGlow extension in package `iglow`, then corrected and saved in the CPI
-  editor. Never trust AI-written dropdown values: they count only once re-selected in the editor (iGlow
-  wrote invalid source types, Write Variables types and proxy types).
+- `iglow` is the package on the tenant where the app and Claude create iFlows. iGlow is also a tool used at the
+  start, no longer in use: the first references were built with it, then corrected and saved in the CPI editor.
+  Never trust AI-written dropdown values: they count only once selected in the editor (iGlow wrote invalid source
+  types, Write Variables types and proxy types).
+- Values count as selected only when the user says so. For an export the user builds from scratch in the CPI
+  editor, that is every value. For a re-saved export (e.g. the Ref_Sender_SOAP re-export), only the values the
+  user names. Those go into `reference/confirmed-values.json`.
 - Allowed dropdown values come only from the references, per adapter and field (e.g. On-Premise =
   `sapcc`; Internet = `default` in HTTP/OData/SOAP but `none` in SFTP/Mail). A value seen in only one
-  reference is a warning, not an error, unless it is listed in `reference/confirmed-values.json` (re-selected
+  reference is a warning, not an error, unless it is listed in `reference/confirmed-values.json` (selected
   in the editor). `npm run templates:derive` merges both into `templates/reference-values.json` (a test fails
   when it is out of date); HTTP receiver settings map between spec and CPI in `receiver-settings.js`.
-- Ignore iGlow extras in references: empty exception subprocesses (Error Start -> Error End) and
-  "Set log headers" steps.
+- Ignore what the iGlow tool added to references: empty exception subprocesses (Error Start -> Error End) and
+  "Set log headers" steps. Derive nothing from them.
 - Each scheduler is the template for its own component (Timer start event != SFTP adapter scheduler).
 - Parser: the main process is the process without `processType=directCall` that no Process Call calls
   (older exports lack the property). More than one gives a warning, never a silent choice; the one with

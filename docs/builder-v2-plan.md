@@ -7,13 +7,15 @@ more adapters. Work happens on branch `builder-v2`. Rules for the work itself ar
 
 ## How a component gets supported
 
-1. A **reference export** in `srv/iflow-builder/reference/` contains it (built with iGlow, then
-   corrected and saved in the CPI editor, dummy data only), with its request in
+1. A **reference export** in `srv/iflow-builder/reference/` contains it (built in the CPI editor, dummy data only;
+   the first ones were built with the iGlow tool, then corrected and saved there), with its request in
    `test/reference-prompts/<name>.txt`.
 2. Its XML becomes a template (`npm run templates:derive`); its dropdown values become the allowed
-   values (`templates/reference-values.json`). When the phase starts, the values the user re-selected
+   values (`templates/reference-values.json`). When the phase starts, the values the user selected
    in the CPI editor for it go into `reference/confirmed-values.json` (then a value seen in only one
-   reference does not warn).
+   reference does not warn). Values count as selected only when the user says so: for an export built
+   from scratch in the CPI editor, every value; for a re-saved export (e.g. the Ref_Sender_SOAP
+   re-export), only the values the user names.
 3. Spec schema, validator, builder, parser, update (`to-spec.js`) and import support it; the AI
    instructions, the pre-send check and [prompt-guide.md](prompt-guide.md) say so.
 4. **Offline regression test:** a spec written from the reference's prompt is built, parsed and
