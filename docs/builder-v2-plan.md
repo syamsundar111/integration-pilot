@@ -40,7 +40,7 @@ prompt and the tokens used reported per prompt.
 | 3 | SOAP 1.x and Mail receivers (format below) | Ref_Receivers | done |
 | 4 | Message Mapping: an existing artifact (a `PH_` placeholder if it does not exist) or a mapping inside the iFlow carried from Import; XSLT Mapping step (format below) | Ref_Mapping, MM_DummyOrderToNotif | done |
 | 9 | Multicast and Join (format below) | Ref_Multicast | done |
-| 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern | Ref_Sender_* | waits for the user's go |
+| 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | in progress: error response and SOAP done; then ProcessDirect, JMS, SFTP |
 | 6 | Receivers 2: OData V2, RFC, IDoc, SFTP, JDBC, ProcessDirect | Ref_Receivers_2 | waits for the user's go |
 | 6b | Content Enricher and Poll Enrich (they need phase 6's OData and SFTP adapters; neither real iFlow uses them) | Ref_Multicast_Enrich, to be re-selected first | after phase 6 |
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS | Ref_Persistence | waits for the user's go |
@@ -162,6 +162,17 @@ Phase 9 (format agreed 2026-10-30, branch contents decided by the tenant experim
   branches above. A line down can still cross the lanes of later branches, or an exception subprocess in that column.
 - **Ref_Multicast's `RT_Item` is kept as exported:** the reference shows the shapes and values; its own branch is a
   shape the spec refuses, so an update of it is blocked and Import makes the splitter and the gather placeholders.
+
+Phase 5 (format agreed 2026-11-02, one sender per task):
+
+- **Error response to an HTTPS sender**, only when the user asks for one: a Message End, and a Content Modifier with
+  `CamelHttpResponseCode` and a `Content-Type` that matches the body (Ref_Sender_HTTPS). Default: Escalation End.
+- **Senders in `trigger`**, like `httpsSender`; the default stays `httpsSender`. Their AI rules are in the topic
+  section `senders`. Import and update keep a sender only when the spec holds it exactly, including which fields
+  are parameters (`sender-settings.js`); else Import makes it HTTPS with a note, and an update is blocked.
+- **`soapSender { address }`:** SOAP 1.x, Manual (no WSDL; the URL cleared in the re-export), Request-Reply, User
+  Role `ESBMessaging.send`. XML in and out: the body is the content of the SOAP body, and the body at the end is the
+  response. The endpoint URL is not shown until the user has seen it after a deployment.
 
 ## Later (no phase yet)
 

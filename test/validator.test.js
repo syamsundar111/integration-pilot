@@ -629,3 +629,14 @@ describe('multicast (phase 9)', () => {
   })
 })
 
+describe('senders (phase 5)', () => {
+  test('a soapSender with a path is valid; a bad path, a missing address or another field is refused', () => {
+    expect(validate(baseSpec({ trigger: { type: 'soapSender', address: '/orders/soap' } }))).toMatchObject({ valid: true, warnings: [] })
+    expect(validate(baseSpec({ trigger: { type: 'soapSender', address: 'orders soap' } })).valid).toBe(false)
+    expect(validate(baseSpec({ trigger: { type: 'soapSender' } })).valid).toBe(false)
+    expect(validate(baseSpec({ trigger: { type: 'soapSender', address: '/o', wsdl: 'x' } })).valid).toBe(false)
+  })
+  test('an unknown sender names the supported ones', () => {
+    expect(validate(baseSpec({ trigger: { type: 'jmsSender', queue: 'Q' } })).issues).toEqual([{ code: 'TRIGGER_UNSUPPORTED', message: expect.stringContaining('soapSender { address }') }])
+  })
+})

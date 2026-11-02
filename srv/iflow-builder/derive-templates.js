@@ -94,6 +94,11 @@ const VALUE_FIELDS = {
     variant: /cname::Variables\//,
     values: (p) => tableRows(p.variable).flatMap((c) => [['type', c[2]?.value], ['scope', c[4]?.value], ...(c[1]?.value ? [['datatype', c[1].value]] : [])])
   },
+  // SOAP 1.x sender: service definition, message exchange pattern, authorization and user role
+  'SOAP Sender': {
+    variant: /cname::(?:sap:)?SOAP\/tp::HTTP\/mp::SOAP 1\.x\/direction::Sender\//,
+    values: (p) => [['serviceDefinition', p.serviceDefinition], ['messageExchangePattern', p.messageExchangePattern], ['senderAuthType', p.senderAuthType], ['userRole', p.userRole]]
+  },
   // SOAP 1.x receiver: authentication and proxy type
   'SOAP Receiver': {
     variant: /cname::(?:sap:)?SOAP\/tp::HTTP\/mp::SOAP 1\.x\/direction::Receiver\//,
@@ -218,6 +223,13 @@ async function main() {
   t['iflw/messageflow-https-sender.xml'] = apply(block(x, 'id="MessageFlow_4"'), 'https-sender', {
     attrs: { 'id="MessageFlow_4"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_2"': 'targetRef="{{TARGET}}"' },
     props: { urlPath: 'ADDRESS_VALUE', system: 'SYSTEM_VALUE' }
+  })
+  // SOAP 1.x sender (Ref_Sender_SOAP, re-saved with the WSDL URL cleared): Manual, Request-Reply, User Role; what
+  // the spec does not hold stays as exported
+  const soapSender = await readZip('Ref_Sender_SOAP.zip')
+  t['iflw/messageflow-soap-sender.xml'] = apply(block(soapSender.iflw, 'id="MessageFlow_1"'), 'soap-sender', {
+    attrs: { 'id="MessageFlow_1"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_1"': 'targetRef="{{TARGET}}"' },
+    props: { address: 'ADDRESS_VALUE', system: 'SYSTEM_VALUE' }
   })
   t['iflw/messageflow-http-receiver.xml'] = apply(block(x, 'id="MessageFlow_22"'), 'http-receiver', {
     attrs: { 'id="MessageFlow_22"': 'id="{{ID}}"', 'sourceRef="ServiceTask_18"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_21"': 'targetRef="{{TARGET}}"' },

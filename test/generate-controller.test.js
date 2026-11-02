@@ -356,6 +356,15 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(combine.combineText).toMatch(/^After GC \(Combine\), CPI may wrap the combined items in a multi-mapping envelope \(multimap:Messages \/ multimap:Message1\) instead of the original root\. An XPath like \/orders\/order may then find nothing; \/\/order works/)
   })
 
+  test('the SOAP sender card (phase 5): address, Manual, Request-Reply, XML in and out, the role for callers', () => {
+    const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'soapSender', address: '/orders/soap' } })
+    expect(active.stepCards[0]).toEqual({
+      title: 'Trigger',
+      type: 'SOAP sender',
+      lines: 'SOAP 1.x sender at /orders/soap. Service definition Manual (no WSDL), Request-Reply: the message body at the end of the flow is the response. XML in and out. Callers need the role ESBMessaging.send.'
+    })
+  })
+
   test('SOAP and Mail cards (phase 3): no-WSDL warning in plain words, fixed mail settings shown, credentials in the note', () => {
     const soap = { type: 'requestReplySoap', name: 'RR', system: 'SysS', url: 'http://s4dummy/x', authType: 'Basic', credentialName: 'S_CRED', proxyType: 'On-Premise', locationId: 'LOC' }
     const mail = { type: 'sendMail', name: 'SND', system: 'SysM', server: 'smtp.example.com:587', credentialName: 'M_CRED', from: 'a@example.com', to: 'b@example.com', cc: 'c@example.com', subject: 'Hi' }

@@ -1,5 +1,19 @@
 {
   "_about": "Dropdown values the user re-selected in the CPI editor, per adapter and property, with where and when. npm run templates:derive merges them into templates/reference-values.json; a confirmed value seen in only one reference export gives no warning. Add a value only after re-selecting it in the editor.",
+  "SOAP Sender": {
+    "serviceDefinition": {
+      "Manual": "re-selected in the Ref_Sender_SOAP re-export (switched to WSDL, URL cleared, back to Manual), 2026-11-02"
+    },
+    "messageExchangePattern": {
+      "RequestReply": "Request-Reply, re-selected in the Ref_Sender_SOAP re-export, 2026-11-02"
+    },
+    "senderAuthType": {
+      "RoleBased": "Authorization User Role, re-selected in the Ref_Sender_SOAP re-export, 2026-11-02"
+    },
+    "userRole": {
+      "ESBMessaging.send": "re-selected in the Ref_Sender_SOAP re-export, 2026-11-02"
+    }
+  },
   "HTTP Receiver": {
     "authenticationMethod": {
       "OAuth2 Client Credentials": "re-selected in Ref_Receivers (RR_OAuth), 2026-10-29"

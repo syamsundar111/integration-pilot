@@ -10,6 +10,7 @@ const path = require('path')
 const { validate, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, SUPPORTED_LOCAL_STEPS } = require('./validator')
 const { AUTH_TYPES } = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
+const senderSettings = require('./sender-settings')
 const schema = require('./spec-schema.json')
 const ESCALATION_CATEGORIES = schema.definitions.endEvent.properties.category.enum
 
@@ -259,10 +260,15 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   if (t.type === 'httpsSender') trigger = { type: 'httpsSender', address: t.address }
   else if (t.type === 'timer' && t.mode === 'once') trigger = { type: 'timer', mode: 'once' }
   else if (t.type === 'timer' && t.mode === 'every') trigger = { type: 'timer', mode: 'every', minutes: t.minutes }
-  else blockers.push(`trigger: ${t.type === 'timer' ? 'scheduled timer' : t.adapter || t.type} (only HTTPS sender, run-once timer or every N minutes in UTC)`)
+  const sender = t.type === 'sender' ? senderSettings.triggerOf((parsed.adapters || []).find((a) => a.direction === 'Sender')) : null
+  if (sender?.trigger) trigger = sender.trigger
+  else if (!trigger)
+    blockers.push(
+      `trigger: ${t.type === 'timer' ? 'scheduled timer' : t.adapter ? `${t.adapter} sender` : t.type}${sender ? ` (${sender.differences.join('; ')})` : ''} (only HTTPS sender, SOAP sender as the builder writes it, run-once timer or every N minutes in UTC)`
+    )
 
   for (const a of parsed.adapters || [])
-    if (!(a.type === 'HTTPS' && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
+    if (!(['HTTPS', 'SOAP'].includes(a.type) && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
 
   const stepFrom = (s, where) =>
     SUPPORTED_STEPS.includes(s.type) && s.type !== 'router' && s.type !== 'multicast'

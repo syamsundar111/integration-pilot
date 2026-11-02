@@ -67,7 +67,9 @@ const SPLITTING_TEXT = /\b(split(s|ter|ters|ting)?|gather|for (each|every)|each 
 const SOAP_TEXT = /\b(soap|wsdl|web ?services?)\b/i
 const MAIL_TEXT = /\b(e-?mails?|mails?|smtp)\b/i
 const MAPPING_TEXT = /\b(mappings?|xslt?|mmap)\b/i
+const SENDERS_TEXT = /\b(senders?|soap (service|endpoint|interface|requests?|calls? (it|the iflow))|called (by|via) soap|expose[sd]? (it )?as (a )?soap)\b/i
 const MULTICAST_TEXT = /\b(multicasts?|parallel branch(es)?|fan[- ]?out|at the same time|in parallel|join step)\b/i
+const SENDER_TRIGGERS = ['soapSender']
 const PROMPT_SECTIONS = [
   // the conversation has files (attached, written by the assistant, from an iFlow or an import)
   { name: 'attachedFiles', applies: ({ files }) => files.length > 0 },
@@ -80,7 +82,9 @@ const PROMPT_SECTIONS = [
   { name: 'soap', applies: ({ userText, draftTypes }) => draftTypes.has('requestReplySoap') || SOAP_TEXT.test(userText) },
   { name: 'mail', applies: ({ userText, draftTypes }) => draftTypes.has('sendMail') || MAIL_TEXT.test(userText) },
   { name: 'mapping', applies: ({ userText, draftTypes }) => draftTypes.has('messageMapping') || draftTypes.has('xsltMapping') || MAPPING_TEXT.test(userText) },
-  { name: 'multicast', applies: ({ userText, draftTypes }) => draftTypes.has('multicast') || MULTICAST_TEXT.test(userText) }
+  { name: 'multicast', applies: ({ userText, draftTypes }) => draftTypes.has('multicast') || MULTICAST_TEXT.test(userText) },
+  // a sender other than HTTPS: the request names one, or the draft's trigger is one
+  { name: 'senders', applies: ({ userText, draftTrigger }) => SENDER_TRIGGERS.includes(draftTrigger) || SENDERS_TEXT.test(userText) }
 ].map((s) => ({ ...s, text: fs.readFileSync(path.join(__dirname, 'prompt-sections', `${s.name}.md`), 'utf8').trim() }))
 
 const db = (user, fn) => cds.tx({ user }, fn)
@@ -228,11 +232,12 @@ async function promptSections(user, sessionId, session, { files, message }) {
   const draft = session?.draftSpec ? JSON.parse(session.draftSpec).spec : null
   const placeholders = allSteps(draft).filter((x) => /^REPLACE WITH /.test(x.step?.description || '')).length
   const draftTypes = new Set(allSteps(draft).map((x) => x.step?.type))
+  const draftTrigger = draft?.trigger?.type
   const { ChatMessage } = E()
   const past = await db(user, (tx) => tx.run(SELECT.from(ChatMessage).columns('content').where({ session_ID: sessionId, role: 'user' })))
   const userText = [...past.map((m) => m.content || ''), message].join('\n')
   const before = used.size
-  for (const s of PROMPT_SECTIONS) if (!used.has(s.name) && s.applies({ files, userText, placeholders, draftTypes })) used.add(s.name)
+  for (const s of PROMPT_SECTIONS) if (!used.has(s.name) && s.applies({ files, userText, placeholders, draftTypes, draftTrigger })) used.add(s.name)
   if (used.size !== before) {
     const { ChatSession } = E()
     await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ promptSections: JSON.stringify(PROMPT_SECTIONS.map((s) => s.name).filter((n) => used.has(n))) })))

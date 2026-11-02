@@ -14,7 +14,7 @@ turns into extra questions.
 
 | | Supported | Not supported |
 |---|---|---|
-| Trigger | HTTPS sender (with a path), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, SOAP, other senders |
+| Trigger | HTTPS sender or SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules, SFTP, ProcessDirect, JMS and other senders |
 | Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
 | Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
@@ -109,7 +109,10 @@ proposal says which:
   An imported iFlow is the exception: the assistant asks which package to use before proposing it.
   A package that doesn't exist yet is only created if you named it as a package.
 - **Trigger**: an HTTPS sender with a path made from the iFlow name ("Order Intake" ->
-  `/order-intake`). Write "timer, run once" or another path to change it.
+  `/order-intake`). Write "timer, run once", another sender or another path to change it.
+- A **SOAP sender** ("SOAP sender at /orders/soap") is SOAP 1.x without a WSDL (Manual), Request-Reply: the
+  message is the XML in the SOAP body, and the body at the end of the flow is the XML response. Its callers, like
+  an HTTPS sender's, need the role ESBMessaging.send.
 - **End of error handling**: an exception subprocess ends with an **Escalation End**, so a failed
   message shows as escalated in monitoring. Ask for an Error End, or for "return the error to the
   caller" (a Message End: the sender gets the response, but the message looks completed).

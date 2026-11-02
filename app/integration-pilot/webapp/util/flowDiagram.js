@@ -120,7 +120,12 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     // a branch's steps with the steps inside its routes, in flow order as the builder counts them
     const branchNames = (list) => list.flatMap((s) => [nameOf(s), ...(s.type === 'router' ? (s.routes || []).flatMap((r) => (r.steps || []).map(nameOf)) : [])])
     return {
-      trigger: spec.trigger.type === 'httpsSender' ? { kind: 'https', label: 'HTTPS', detail: spec.trigger.address } : { kind: 'timer', label: 'Timer', detail: timerText(spec.trigger) },
+      trigger:
+        spec.trigger.type === 'httpsSender'
+          ? { kind: 'https', label: 'HTTPS', detail: spec.trigger.address }
+          : spec.trigger.type === 'soapSender'
+            ? { kind: 'https', label: 'SOAP', detail: spec.trigger.address }
+            : { kind: 'timer', label: 'Timer', detail: timerText(spec.trigger) },
       steps: markPerItem(spec.steps.map((s) => {
         const name = nameOf(s)
         if (s.type === 'requestReplyHttp') return { type: s.type, name, detail: s.method, receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }

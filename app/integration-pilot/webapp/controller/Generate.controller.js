@@ -1044,11 +1044,13 @@ sap.ui.define(
           active.stepCards = [
             {
               title: 'Trigger',
-              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : 'Timer',
+              type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : spec.trigger.type === 'soapSender' ? 'SOAP sender' : 'Timer',
               lines:
                 spec.trigger.type === 'httpsSender'
                   ? spec.trigger.address
-                  : spec.trigger.mode === 'every'
+                  : spec.trigger.type === 'soapSender'
+                    ? `SOAP 1.x sender at ${spec.trigger.address}. Service definition Manual (no WSDL), Request-Reply: the message body at the end of the flow is the response. XML in and out. Callers need the role ESBMessaging.send.`
+                    : spec.trigger.mode === 'every'
                     ? `Every ${spec.trigger.minutes} minutes, all day, UTC`
                     : 'Runs once after deployment'
             },

@@ -122,3 +122,12 @@ describe('flow diagram: mappings (phase 4)', () => {
     ])
   })
 })
+
+describe('flow diagram: senders (phase 5)', () => {
+  test('a SOAP sender shows as SOAP with its address, from a spec and from the parsed reference', async () => {
+    const model = flowDiagram.fromSpec({ trigger: { type: 'soapSender', address: '/dummy/soap' }, steps: [], end: { type: 'none' } })
+    expect(model.trigger).toEqual({ kind: 'https', label: 'SOAP', detail: '/dummy/soap' })
+    const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Sender_SOAP.zip')))
+    expect(flowDiagram.fromParsed(parsed).trigger).toMatchObject({ label: 'SOAP', detail: '/dummy/soap' })
+  })
+})

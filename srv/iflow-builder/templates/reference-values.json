@@ -240,6 +240,40 @@
       }
     }
   },
+  "SOAP Sender": {
+    "serviceDefinition": {
+      "Manual": {
+        "references": [
+          "Ref_Sender_SOAP"
+        ],
+        "confirmed": "re-selected in the Ref_Sender_SOAP re-export (switched to WSDL, URL cleared, back to Manual), 2026-11-02"
+      }
+    },
+    "messageExchangePattern": {
+      "RequestReply": {
+        "references": [
+          "Ref_Sender_SOAP"
+        ],
+        "confirmed": "Request-Reply, re-selected in the Ref_Sender_SOAP re-export, 2026-11-02"
+      }
+    },
+    "senderAuthType": {
+      "RoleBased": {
+        "references": [
+          "Ref_Sender_SOAP"
+        ],
+        "confirmed": "Authorization User Role, re-selected in the Ref_Sender_SOAP re-export, 2026-11-02"
+      }
+    },
+    "userRole": {
+      "ESBMessaging.send": {
+        "references": [
+          "Ref_Sender_SOAP"
+        ],
+        "confirmed": "re-selected in the Ref_Sender_SOAP re-export, 2026-11-02"
+      }
+    }
+  },
   "SOAP Receiver": {
     "authentication": {
       "Basic": {

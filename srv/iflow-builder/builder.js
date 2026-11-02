@@ -392,13 +392,16 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const paramRefs = []
   const adapters = []
 
-  if (spec.trigger.type === 'httpsSender') {
+  // a sender adapter: its template and the adapter type in the summary
+  const SENDERS = { httpsSender: ['iflw/messageflow-https-sender.xml', 'HTTPS'], soapSender: ['iflw/messageflow-soap-sender.xml', 'SOAP'] }
+  if (SENDERS[spec.trigger.type]) {
+    const [template, type] = SENDERS[spec.trigger.type]
     const p = { id: nextId('Participant'), kind: 'sender', name: 'Sender', x: L.SENDER_X, y: cy0 - L.PART_H / 2 }
     participants.push(p)
     const id = nextId('MessageFlow')
     messageFlows.push({
       id,
-      xml: fill('iflw/messageflow-https-sender.xml', {
+      xml: fill(template, {
         ID: id,
         SOURCE: p.id,
         TARGET: start.id,
@@ -410,7 +413,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       sourceShape: p.id,
       targetShape: start.id
     })
-    adapters.push({ type: 'HTTPS', direction: 'Sender', system: p.name, address: spec.trigger.address })
+    adapters.push({ type, direction: 'Sender', system: p.name, address: spec.trigger.address })
   }
 
   // parameter references (parameters.propdef) of the fields given as a whole {{Param}}: [attribute, value]
@@ -627,8 +630,8 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     name: spec.name,
     packageId: spec.packageId,
     trigger:
-      spec.trigger.type === 'httpsSender'
-        ? { type: 'httpsSender', address: spec.trigger.address }
+      SENDERS[spec.trigger.type]
+        ? { type: spec.trigger.type, address: spec.trigger.address }
         : { type: 'timer', mode: spec.trigger.mode, ...(spec.trigger.mode === 'every' && { minutes: spec.trigger.minutes }) },
     steps: nodes.filter((n) => ['step', 'router', 'multicast'].includes(n.kind)).map((n) => ({ id: n.id, type: n.step.type, name: n.name, ...(n.lane && { route: true }) })),
     end: spec.end.type === 'httpReceiver' ? { type: 'httpReceiver', system: names.endSystem, url: spec.end.url } : { type: 'none' },

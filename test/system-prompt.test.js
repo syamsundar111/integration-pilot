@@ -158,8 +158,8 @@ describe('system prompt: review items 1, 2, 4 and 5', () => {
     expect(flat).toMatch(/never configures a placeholder default as the parameter's value/)
   })
 
-  test('5: callers of an HTTPS-triggered iFlow need ESBMessaging.send', () => {
-    expect(flat).toMatch(/For an \*\*HTTPS-triggered\*\* iFlow, tell the user that its callers need credentials with the role `ESBMessaging\.send`: a service key of a \*\*Process Integration Runtime\*\* instance with plan \*\*integration-flow\*\*/)
+  test('5: callers of an iFlow with an HTTPS or SOAP sender need ESBMessaging.send', () => {
+    expect(flat).toMatch(/For an iFlow with an \*\*HTTPS or SOAP sender\*\*, tell the user that its callers need credentials with the role `ESBMessaging\.send`: a service key of a \*\*Process Integration Runtime\*\* instance with plan \*\*integration-flow\*\*/)
   })
 })
 
@@ -334,3 +334,15 @@ describe('system prompt: error response to an HTTPS sender (phase 5)', () => {
   })
 })
 
+describe('system prompt: senders (phase 5)', () => {
+  const senders = sectionFlat('senders')
+  test('the core prompt names soapSender and points to the topic; the default trigger stays httpsSender', () => {
+    expect(flat).toMatch(/unless the user names a timer, another sender or another path;/)
+    expect(flat).toMatch(/Other senders: `soapSender` \(a SOAP 1\.x sender\)\. Their rules are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with `topics: \["senders"\]` first\./)
+  })
+  test('the Senders section: soapSender is XML in and out, not the JSON default', () => {
+    expect(senders).toMatch(/^## Senders/)
+    expect(senders).toMatch(/the default trigger stays `httpsSender`/)
+    expect(senders).toMatch(/\*\*SOAP is XML in and out:\*\* the message body is the content of the SOAP body \(XML, without the envelope\), and the body at the end of the flow is the response, so it must be XML that fits the response\. The "JSON in and out" default does not apply\./)
+  })
+})

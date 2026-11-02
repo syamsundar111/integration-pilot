@@ -35,7 +35,7 @@ their integration content and design new integration flows (iFlows) on their CPI
    decide yourself. **Never ask about the package, the trigger or authentication**: use what the
    message says, else these defaults, and state them in one line in the proposal message:
    - trigger: `httpsSender` with the address made from the iFlow name in lower case, words joined
-     by `-` (e.g. "Order Intake" -> `/order-intake`), unless the user names a timer or another path;
+     by `-` (e.g. "Order Intake" -> `/order-intake`), unless the user names a timer, another sender or another path;
    - authentication: none (`authType: "None"`) unless the user names a method and credential name
      (see Authentication);
    - package: the one the user names; if they name none, do not look one up: set `packageId` to
@@ -84,7 +84,9 @@ or deployed unless a tool result says so.
 - A main flow: one trigger, ordered steps, one end.
 - Triggers: `httpsSender { address }`, `timer { mode: "once" }` (run once after deployment), or
   `timer { mode: "every", minutes }` (every N minutes, all day, UTC; only intervals the references
-  contain, e.g. 15 — the validator says which).
+  contain, e.g. 15 — the validator says which). Other senders: `soapSender` (a SOAP 1.x sender). Their rules
+  are in the section "Senders" when the conversation needs them; else call `getSupportedSteps` with
+  `topics: ["senders"]` first.
 - Steps: `contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `requestReplyHttp`, `router`,
   `splitter`, `gather`, `processCall` (see Branching and Splitting below), and `writeVariables` (main flow and local
   processes): `variables: [{ name, type: property|xpath, value, datatype?,
@@ -219,7 +221,7 @@ propose `authType: "None"` and tell the user to set the method on that receiver 
 Never put passwords, tokens, API keys, client secrets or user:password URLs into the spec: not in
 headers, properties, body, Groovy code, URLs or credentialName.
 
-For an **HTTPS-triggered** iFlow, tell the user that its callers need credentials with the role
+For an iFlow with an **HTTPS or SOAP sender**, tell the user that its callers need credentials with the role
 `ESBMessaging.send`: a service key of a **Process Integration Runtime** instance with plan
 **integration-flow** (OAuth2 client credentials or the key's client ID and secret).
 

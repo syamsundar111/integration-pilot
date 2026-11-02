@@ -1272,7 +1272,8 @@ describe('fewer and smaller model inputs', () => {
     expect(content.length).toBeLessThan(5200) // ~4.9k: before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
     const result = JSON.parse(content)
     expect(Object.keys(result.format.steps)).toEqual(['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'writeVariables', 'requestReplyHttp'])
-    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast'])
+    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast', 'senders'])
+    expect(result.format.trigger.join()).not.toMatch(/soapSender/) // a sender's format comes with its topic
     expect(result.rules).toBeUndefined()
   })
 
@@ -1283,7 +1284,7 @@ describe('fewer and smaller model inputs', () => {
     expect(Object.keys(result.format.steps)).toEqual(expect.arrayContaining(['splitter', 'gather', 'processCall']))
     expect(result.format.steps.router).toBeUndefined()
     expect(result.rules.splitting).toMatch(/^## Splitters and local processes/)
-    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'soap', 'mail', 'mapping', 'multicast'])
+    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'soap', 'mail', 'mapping', 'multicast', 'senders'])
     // the next message has the section in the prompt, and the tool sends no rules twice
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['splitting'] })).mockResolvedValueOnce(answer('ok'))
     await chat({ sessionId: first.sessionId, message: 'ok' })
@@ -1292,18 +1293,32 @@ describe('fewer and smaller model inputs', () => {
   })
 
   test('getSupportedSteps names every field of the schema (all topics)', async () => {
-    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast'] })).mockResolvedValueOnce(answer('ok'))
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast', 'senders'] })).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     const content = llm.chat.mock.calls.at(-1)[0].messages.at(-1).content
     const { format } = JSON.parse(content)
     const schema = require('../srv/iflow-builder/spec-schema.json')
     for (const field of Object.keys(schema.properties)) expect(format.spec).toContain(field)
+    for (const type of schema.properties.trigger.properties.type.enum) expect(format.trigger.join()).toContain(`"type": "${type}"`)
     for (const type of schema.definitions.step.properties.type.enum) {
       const def = schema.definitions[type === 'jsonToXml' || type === 'xmlToJson' ? 'converter' : type]
       for (const field of Object.keys(def.properties).filter((f) => f !== 'code')) expect(format.steps[type]).toContain(field)
     }
   })
 
+  test('the Senders section: when the request names a SOAP sender, or the draft has one', async () => {
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow that is exposed as a SOAP service and logs the order.' })
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toMatch(/## Senders/)
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow that logs the order.' })
+    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).not.toMatch(/## Senders/)
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['senders'] })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'what can you build?' })
+    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result.format.trigger.join()).toMatch(/"type": "soapSender"/)
+    expect(result.rules.senders).toMatch(/^## Senders/)
+  })
 })
 
 describe('token budget per message', () => {

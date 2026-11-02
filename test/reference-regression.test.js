@@ -753,3 +753,68 @@ describe('Ref_Sender_HTTPS: the HTTP error response (phase 5)', () => {
     expect(await endKind(ref, 'Error End')).toBe('messageEventDefinition')
   })
 })
+
+describe('Ref_Sender_SOAP: the SOAP sender (phase 5)', () => {
+  // test/reference-prompts/Ref_Sender_SOAP.txt, without iGlow's "Set log headers" and empty exception subprocess
+  const spec = {
+    id: 'Ref_Sender_SOAP',
+    name: 'Ref_Sender_SOAP',
+    packageId: 'PilotReference',
+    trigger: { type: 'soapSender', address: '/dummy/soap' },
+    steps: [{ type: 'contentModifier', name: 'CM_Mark', properties: [{ name: 'iFlowName', type: 'constant', value: 'Ref_Sender_SOAP', datatype: 'java.lang.String' }] }],
+    end: { type: 'none' }
+  }
+  const sender = (parsed) => {
+    const a = parsed.adapters.find((x) => x.direction === 'Sender')
+    return Object.fromEntries(Object.entries(a.settings).filter(([k]) => !IGNORED.test(k)))
+  }
+  /** The reference with one sender setting changed (the old export had a WSDL URL) */
+  const withSetting = async (key, value) => {
+    const zip = await JSZip.loadAsync(readRef('Ref_Sender_SOAP.zip'))
+    const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+    const iflw = (await zip.file(file).async('string')).replace(new RegExp(`(<key>${key}</key>\\s*)<value(?:/>|>[^<]*</value>)`), `$1<value>${value}</value>`)
+    zip.file(file, iflw)
+    return zip.generateAsync({ type: 'nodebuffer' })
+  }
+  let reference, built
+  beforeAll(async () => {
+    reference = await parse(readRef('Ref_Sender_SOAP.zip'))
+    built = await parse(Buffer.from((await build(spec)).zipBase64, 'base64'))
+  })
+
+  test('the spec is valid without warnings', () => {
+    const { valid, errors, warnings } = require('../srv/iflow-builder/validator').validate(spec)
+    expect({ valid, errors, warnings }).toEqual({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('every setting of the sender is as in the reference, the WSDL URL empty', () => {
+    expect(sender(built)).toEqual(sender(reference))
+    expect(sender(built)).toMatchObject({ serviceDefinition: 'Manual', messageExchangePattern: 'RequestReply', senderAuthType: 'RoleBased', userRole: 'ESBMessaging.send', soapWsdlURL: '', address: '/dummy/soap' })
+  })
+
+  test('update and Import keep the SOAP sender', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const update = specFromParsed(reference, { packageId: 'PilotReference' })
+    expect(update.blockers).toEqual([])
+    expect(update.spec.trigger).toEqual(spec.trigger)
+    const imported = await importIflow(readRef('Ref_Sender_SOAP.zip'), { fileName: 'Ref_Sender_SOAP.zip', packageId: 'PilotReference' })
+    expect(imported).toMatchObject({ valid: true, errors: [] })
+    expect(imported.spec.trigger).toEqual(spec.trigger)
+  })
+
+  test('a SOAP sender the builder would change: Import makes it HTTPS with a note, an update is blocked', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    for (const [key, value, text] of [
+      ['soapWsdlURL', 'https://dummy.example.com/service?wsdl', /soapWsdlURL is 'https:\/\/dummy\.example\.com\/service\?wsdl' \(the builder writes '\(empty\)'\)/],
+      ['address', '{{SOAP_Address}}', /the address is the parameter \{\{SOAP_Address\}\}/]
+    ]) {
+      const zip = await withSetting(key, value)
+      expect(specFromParsed(await parse(zip), { packageId: 'PilotReference' }).blockers.join()).toMatch(text)
+      const imported = await importIflow(zip, { fileName: 'Ref_Sender_SOAP.zip', packageId: 'PilotReference' })
+      expect(imported.spec.trigger.type).toBe('httpsSender')
+      expect(imported.notes.join()).toMatch(text)
+    }
+  })
+})

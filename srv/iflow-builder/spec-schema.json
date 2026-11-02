@@ -44,6 +44,7 @@
         "type": {
           "enum": [
             "httpsSender",
+            "soapSender",
             "timer"
           ]
         }
@@ -59,6 +60,18 @@
           },
           "then": {
             "$ref": "#/definitions/httpsSender"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "soapSender"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/soapSender"
           }
         },
         {
@@ -217,6 +230,25 @@
       "properties": {
         "type": {
           "const": "httpsSender"
+        },
+        "address": {
+          "type": "string",
+          "pattern": "^(/[A-Za-z0-9_.~-]+)+$",
+          "description": "Endpoint path, e.g. /orders/create"
+        }
+      }
+    },
+    "soapSender": {
+      "type": "object",
+      "required": [
+        "type",
+        "address"
+      ],
+      "additionalProperties": false,
+      "description": "SOAP 1.x sender: service definition Manual (no WSDL), Request-Reply, User Role ESBMessaging.send. The message body is the content of the SOAP body (XML).",
+      "properties": {
+        "type": {
+          "const": "soapSender"
         },
         "address": {
           "type": "string",

@@ -15,6 +15,7 @@
 const JSZip = require('jszip')
 const { parse } = require('./parser')
 const cpiValues = require('./cpi-values')
+const senderSettings = require('./sender-settings')
 const { validate } = require('./validator')
 const { IMPORT_NO_PACKAGE } = require('../lib/package-id')
 
@@ -442,8 +443,15 @@ async function importIflow(buffer, { fileName, packageId }) {
     trigger = { type: 'httpsSender', address: address === '/' ? fallbackAddress : address }
     if (trigger.address !== t.address) notes.push(`Trigger: HTTPS address ${t.address || '(none)'} became ${trigger.address}`)
   } else {
-    trigger = { type: 'httpsSender', address: fallbackAddress }
-    notes.push(`Trigger: ${t.type === 'sender' ? `the ${t.adapter} sender` : 'the start event'} was replaced by an HTTPS sender at ${fallbackAddress}; set up the original sender in the CPI web editor`)
+    // a sender the spec holds exactly (its settings as the builder writes them, no parameters): kept; else HTTPS
+    const sender = t.type === 'sender' ? senderSettings.triggerOf((parsed.adapters || []).find((a) => a.direction === 'Sender')) : null
+    if (sender?.trigger) trigger = sender.trigger
+    else {
+      trigger = { type: 'httpsSender', address: fallbackAddress }
+      notes.push(
+        `Trigger: ${t.type === 'sender' ? `the ${t.adapter} sender` : 'the start event'}${sender ? ` (${sender.differences.join('; ')})` : ''} was replaced by an HTTPS sender at ${fallbackAddress}; set up the original sender in the CPI web editor`
+      )
+    }
   }
 
   // --- steps -----------------------------------------------------------------------------

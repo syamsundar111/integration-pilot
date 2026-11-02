@@ -112,7 +112,7 @@ At most ${MAX_STEPS_PER_EDIT} steps per call. Returns the outline and open error
  */
 const SPEC_FORMAT = {
   spec: '{ id, name, description?, packageId, trigger, steps: [step] (max 50 per process, counting route steps), end, exceptionSubprocess?, localProcesses?, parameters?, resources? }',
-  trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
+  trigger: ['{ "type": "httpsSender", "address": "/path/segments" }', '{ "type": "soapSender", "address": "/path/segments" } (SOAP 1.x, XML in and out)', '{ "type": "timer", "mode": "once" }', '{ "type": "timer", "mode": "every", "minutes": 15 } (UTC, all day)'],
   steps: {
     contentModifier:
       '{ type, name?, description?, headers?: [entry], properties?: [entry], body?: string }; entry = { name, type: constant|expression|header|property|xpath|globalVariable|localVariable, value (a constant may be "{{Param}}"), datatype? (xpath: default java.lang.String), default? (the Default Value column, only when asked for explicitly) }',
@@ -173,7 +173,8 @@ const TOPICS = {
   soap: { steps: ['requestReplySoap'], summary: 'requestReplySoap: a SOAP 1.x call' },
   mail: { steps: ['sendMail'], summary: 'sendMail: send a mail, one-way' },
   mapping: { steps: ['messageMapping', 'xsltMapping'], summary: 'messageMapping (an artifact) and xsltMapping (an attached file)' },
-  multicast: { steps: ['multicast'], summary: 'multicast: send the message down several branches, in parallel or in sequence; a gather combines them after the Join' }
+  multicast: { steps: ['multicast'], summary: 'multicast: send the message down several branches, in parallel or in sequence; a gather combines them after the Join' },
+  senders: { steps: [], triggers: ['soapSender'], summary: 'senders: soapSender, a SOAP 1.x sender (XML in and out)' }
 }
 for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
 
@@ -559,8 +560,10 @@ const handlers = {
     if (wanted.length) await addSessionSections(ctx, wanted) // sticky, as if the conversation had asked for it
     const active = Object.keys(TOPICS).filter((t) => inPrompt.includes(t) || wanted.includes(t))
     const hidden = new Set(Object.entries(TOPICS).flatMap(([t, def]) => (active.includes(t) ? [] : def.steps)))
+    const hiddenTriggers = Object.entries(TOPICS).flatMap(([t, def]) => (active.includes(t) ? [] : def.triggers || []))
     const format = {
       ...SPEC_FORMAT,
+      trigger: SPEC_FORMAT.trigger.filter((f) => !hiddenTriggers.some((type) => f.includes(`"type": "${type}"`))),
       steps: Object.fromEntries(Object.entries(SPEC_FORMAT.steps).filter(([type]) => !hidden.has(type))),
       ...(!active.includes('splitting') && { localProcesses: undefined })
     }
