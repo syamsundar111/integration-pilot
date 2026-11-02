@@ -127,6 +127,8 @@ sap.ui.define(
 
     // end events as the CPI editor names them, an Escalation End with its category
     const END_EVENTS = { message: 'Message End', escalation: 'Escalation End', error: 'Error End' }
+    // what callers of an HTTPS or SOAP sender need: on the trigger card, so it does not depend on the AI's message
+    const CALLER_ROLE = 'Callers need the role ESBMessaging.send, for example through a service key of a Process Integration Runtime instance with plan integration-flow.'
     const CATEGORIES = { Others: 'Others - not further qualified', RoutingConditionNotMet: 'Routing condition not met' }
     const endText = (end) => {
       const event = (end && end.event) || 'message'
@@ -1047,9 +1049,9 @@ sap.ui.define(
               type: spec.trigger.type === 'httpsSender' ? 'HTTPS sender' : spec.trigger.type === 'soapSender' ? 'SOAP sender' : 'Timer',
               lines:
                 spec.trigger.type === 'httpsSender'
-                  ? spec.trigger.address
+                  ? `${spec.trigger.address}\n${CALLER_ROLE}`
                   : spec.trigger.type === 'soapSender'
-                    ? `SOAP 1.x sender at ${spec.trigger.address}. Service definition Manual (no WSDL), Request-Reply: the message body at the end of the flow is the response. XML in and out. Callers need the role ESBMessaging.send.`
+                    ? `SOAP 1.x sender at ${spec.trigger.address}. Service definition Manual (no WSDL), Request-Reply: the message body at the end of the flow is the response. XML in and out.\n${CALLER_ROLE}`
                     : spec.trigger.mode === 'every'
                     ? `Every ${spec.trigger.minutes} minutes, all day, UTC`
                     : 'Runs once after deployment'

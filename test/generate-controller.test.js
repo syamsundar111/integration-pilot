@@ -361,8 +361,16 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(active.stepCards[0]).toEqual({
       title: 'Trigger',
       type: 'SOAP sender',
-      lines: 'SOAP 1.x sender at /orders/soap. Service definition Manual (no WSDL), Request-Reply: the message body at the end of the flow is the response. XML in and out. Callers need the role ESBMessaging.send.'
+      lines:
+        'SOAP 1.x sender at /orders/soap. Service definition Manual (no WSDL), Request-Reply: the message body at the end of the flow is the response. XML in and out.\nCallers need the role ESBMessaging.send, for example through a service key of a Process Integration Runtime instance with plan integration-flow.'
     })
+    // the HTTPS sender card carries the same note; a timer has none
+    expect(activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'httpsSender', address: '/orders' } }).stepCards[0]).toEqual({
+      title: 'Trigger',
+      type: 'HTTPS sender',
+      lines: '/orders\nCallers need the role ESBMessaging.send, for example through a service key of a Process Integration Runtime instance with plan integration-flow.'
+    })
+    expect(activeFor(base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }])).stepCards[0].lines).toBe('Runs once after deployment')
   })
 
   test('SOAP and Mail cards (phase 3): no-WSDL warning in plain words, fixed mail settings shown, credentials in the note', () => {
