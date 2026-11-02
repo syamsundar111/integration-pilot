@@ -12,6 +12,11 @@ export default [
     languageOptions: { globals: { browser: 'readonly', $: 'readonly', $$: 'readonly', expect: 'readonly', sap: 'readonly', driver: 'readonly' } }
   },
   {
+    // the UI5 app runs in the browser: FileReader reads the files users pick (the other browser globals come with cds)
+    files: ['app/integration-pilot/webapp/**'],
+    languageOptions: { globals: { FileReader: 'readonly' } }
+  },
+  {
     // command-line tools report on the console
     files: ['scripts/**', 'srv/iflow-builder/derive-templates.js', 'test/ui/fake-backend.cjs'],
     rules: { 'no-console': 'off' }

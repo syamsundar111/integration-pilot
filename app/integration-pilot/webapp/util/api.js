@@ -59,7 +59,7 @@ sap.ui.define([], () => {
     }
     if (res.status === 204) return null
     const text = await res.text()
-    let body = null
+    let body
     try {
       body = text ? JSON.parse(text) : null
     } catch (e) {
