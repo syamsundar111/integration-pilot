@@ -122,7 +122,9 @@ Extends the builder beyond the linear spec v1; phases, status and open items: [d
   the 3 tests of `test/no-client-data.test.js` skip without `test/local/forbidden-names.txt`. So the client-data check
   only runs in the main tree: run it there before committing. One of them scans the commits not on a remote
   (`--branches --not --remotes`), so a name in an intermediate commit is caught before a push.
-- Stop and report after each step. No commit without the user's OK. Never push.
+- Stop and report after each step. No commit without the user's OK.
+- Push only when the user asks; before pushing, run the client-data scan over every unpushed commit, including zip
+  versions, and never force-push.
 - Builder or template changes are committed only after the user has created a test iFlow on the tenant
   and opened it in the CPI editor without errors.
 - Update this file in the same commit when a change makes a section outdated, e.g. when a phase extends
