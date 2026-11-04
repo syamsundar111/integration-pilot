@@ -440,6 +440,28 @@ describe('proposal panel for routers (phase 1b)', () => {
     })
   })
 
+  test('the SFTP receiver cards (phase 6): file, authentication, overwrite, tenant needs; a credential in the receivers note', () => {
+    const key = { type: 'sendSftp', name: 'SND_Key', system: 'SysK', host: 'sftp.example.com:22', directory: '/out', fileName: 'order_${date:now:yyyyMMddHHmmss}.xml', authentication: 'publicKey', username: 'SFTP_USER', privateKeyAlias: 'SFTP_KEY' }
+    const pw = { type: 'sendSftp', name: 'SND_Pw', system: 'SysP', host: 'sftp.example.com', directory: '/out', fileName: '${header.CamelFileName}', authentication: 'userPassword', credentialName: 'SFTP_CRED' }
+    const active = activeFor(base([key, pw]))
+    const card = (title) => active.stepCards.find((c) => c.title === title)
+    expect(card('1. SND_Key')).toMatchObject({
+      title: '1. SND_Key',
+      type: 'Send (SFTP)',
+      lines:
+        "SFTP sftp.example.com:22, directory /out, file order_${date:now:yyyyMMddHHmmss}.xml\nAuthentication: public key (user SFTP_USER, key alias SFTP_KEY)\nA file of the same name is overwritten; missing directories are created\nThe key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts.\nThe SFTP server's host key must be in the tenant's known hosts before deploying.\nOne-way: the flow continues after it"
+    })
+    expect(card('2. SND_Pw').lines).toBe(
+      "SFTP sftp.example.com, directory /out, file ${header.CamelFileName}\nAuthentication: user name and password (credential SFTP_CRED)\nA file of the same name is overwritten; missing directories are created\nThe SFTP server's host key must be in the tenant's known hosts before deploying.\nOne-way: the flow continues after it"
+    )
+    // a file name without a ${...} part: the card suggests a date part
+    const fixed = activeFor(base([{ ...pw, fileName: 'order.xml' }])).stepCards.find((c) => c.title === '1. SND_Pw')
+    expect(fixed.lines).toMatch(/\nA file of the same name is overwritten; missing directories are created\nTo keep each file, add a date part, e\.g\. order_\$\{date:now:yyyyMMddHHmmss\}\.xml\.\n/)
+    expect(card('1. SND_Key').lines).not.toMatch(/To keep each file/)
+    // only the user name/password receiver needs a credential on the tenant
+    expect(active.receiversText).toBe('Before deploying, the credentials must exist as security material on the tenant: SFTP_CRED (User Name/Password, SysP).')
+  })
+
   test('the ProcessDirect sender card (phase 5): no role, headers rather than properties, a unique address', () => {
     const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'processDirectSender', address: '/orders/process' } })
     expect(active.stepCards[0]).toEqual({

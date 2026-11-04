@@ -115,6 +115,11 @@ const VALUE_FIELDS = {
       return [['authentication', p.authentication], ['noop', p.noop], ['proxyType', p.proxyType], ['readLock', p.readLock], ['emptyFileHandling', p.emptyFileHandling], ['every', every], ['timeZone', timeZone]]
     }
   },
+  // SFTP receiver: authentication, proxy and the handling of existing files
+  'SFTP Receiver': {
+    variant: /cname::(?:sap:)?SFTP\/tp::SFTP\/mp::File\/direction::Receiver\//,
+    values: (p) => [['authentication', p.authentication], ['proxyType', p.proxyType], ['fileExist', p.fileExist]]
+  },
   // SOAP 1.x receiver: authentication and proxy type
   'SOAP Receiver': {
     variant: /cname::(?:sap:)?SOAP\/tp::HTTP\/mp::SOAP 1\.x\/direction::Receiver\//,
@@ -285,6 +290,23 @@ async function main() {
   t['iflw/messageflow-processdirect-receiver.xml'] = apply(block(pdReceiver.iflw, 'id="MessageFlow_12"'), 'processdirect-receiver', {
     attrs: { 'id="MessageFlow_12"': 'id="{{ID}}"', 'sourceRef="ServiceTask_7"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_2"': 'targetRef="{{TARGET}}"' },
     props: { address: 'ADDRESS_VALUE', system: 'SYSTEM_VALUE' }
+  })
+  // SFTP receiver of a Send step (Ref_Receiver_SFTP, built in the CPI editor; SND_SftpPw, SND_SftpKey has the public-key
+  // variant): host, directory, file name and the authentication with its fields; proxy, existing-file handling and the
+  // rest stay as exported
+  const sftpReceiver = await readZip('Ref_Receiver_SFTP.zip')
+  t['iflw/messageflow-sftp-receiver.xml'] = apply(block(sftpReceiver.iflw, 'id="MessageFlow_14"'), 'sftp-receiver', {
+    attrs: { 'id="MessageFlow_14"': 'id="{{ID}}"', 'sourceRef="ServiceTask_7"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_12"': 'targetRef="{{TARGET}}"' },
+    props: {
+      host: 'HOST_VALUE',
+      path: 'DIRECTORY_VALUE',
+      fileName: 'FILE_NAME_VALUE',
+      authentication: 'AUTHENTICATION_VALUE',
+      username: 'USERNAME_VALUE',
+      privateKeyAlias: 'PRIVATE_KEY_ALIAS_VALUE',
+      credential_name: 'CREDENTIAL_NAME_VALUE',
+      system: 'SYSTEM_VALUE'
+    }
   })
   t['iflw/messageflow-http-receiver.xml'] = apply(block(x, 'id="MessageFlow_22"'), 'http-receiver', {
     attrs: { 'id="MessageFlow_22"': 'id="{{ID}}"', 'sourceRef="ServiceTask_18"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_21"': 'targetRef="{{TARGET}}"' },
@@ -560,6 +582,17 @@ async function main() {
   if (!pdMatch) throw new Error('Ref_Receiver_ProcessDirect.zip: no parameter reference for the address')
   if (pdMatch[1] !== 'RCV_PD_Notify') throw new Error(`Ref_Receiver_ProcessDirect.zip: category ${pdMatch[1]} is not the receiver RCV_PD_Notify`)
   const pdRef = { attributeId: pdMatch[2], uilabel: pdMatch[3], categorySuffix: '' }
+  // the SFTP receiver's fields (Ref_Receiver_SFTP: on RCV_SFTP_Pw), as the CPI editor wrote them: category = the
+  // receiver's system name, attribute_id of the adapter variant with version 1.14.0
+  const sftpRcvPropdef = sftpReceiver.files['src/main/resources/parameters.propdef']
+  const sftpRcvRefs = Object.fromEntries(
+    Object.entries({ sftpRcvHost: 'host', sftpRcvDirectory: 'path', sftpRcvFileName: 'fileName', sftpRcvCredentialName: 'credential_name' }).map(([field, attr]) => {
+      const r = sftpRcvPropdef.match(new RegExp(`<reference attribute_category="([^"]+)" attribute_id="([^"]+/attrId::${attr})" attribute_uilabel="([^"]*)" param_key="[^"]+"/>`))
+      if (!r) throw new Error(`Ref_Receiver_SFTP.zip: no parameter reference for ${attr}`)
+      if (r[1] !== 'RCV_SFTP_Pw') throw new Error(`Ref_Receiver_SFTP.zip: category ${r[1]} is not the receiver RCV_SFTP_Pw`)
+      return [field, { attributeId: r[2], uilabel: r[3], categorySuffix: '' }]
+    })
+  )
   t['propdef-receiver-attributes.json'] =
     JSON.stringify(
       {
@@ -571,7 +604,8 @@ async function main() {
         mailTo: refOf('to', { ownVersion: true }),
         mailCredential: refOf('user', { ownVersion: true }),
         ...sftpRefs,
-        pdAddress: pdRef
+        pdAddress: pdRef,
+        ...sftpRcvRefs
       },
       null,
       2

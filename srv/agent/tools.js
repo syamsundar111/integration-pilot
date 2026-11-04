@@ -39,11 +39,16 @@ const TOPICS = {
   mapping: { steps: ['messageMapping', 'xsltMapping'], label: 'message mapping, XSLT', summary: 'messageMapping (an artifact) and xsltMapping (an attached file)' },
   multicast: { steps: ['multicast'], label: 'multicast and join', summary: 'multicast: send the message down several branches, in parallel or in sequence; a gather combines them after the Join' },
   senders: {
-    steps: ['requestReplyProcessDirect'],
+    steps: [],
     triggers: ['soapSender', 'processDirectSender', 'jmsSender', 'sftpSender'],
+    label: 'SOAP, ProcessDirect, JMS and SFTP senders',
+    summary: 'senders: soapSender (SOAP 1.x, XML in and out), processDirectSender (called by other iFlows on the tenant), jmsSender (reads a queue), sftpSender (polls files on an SFTP server)'
+  },
+  receivers: {
+    steps: ['sendSftp', 'requestReplyProcessDirect'],
     ends: ['processDirectReceiver'],
-    label: 'SOAP, ProcessDirect, JMS and SFTP senders; ProcessDirect calls',
-    summary: 'senders: soapSender (SOAP 1.x, XML in and out), processDirectSender (called by other iFlows on the tenant), jmsSender (reads a queue), sftpSender (polls files on an SFTP server); requestReplyProcessDirect calls another iFlow'
+    label: 'SFTP receiver; ProcessDirect calls',
+    summary: 'receivers: sendSftp (writes a file to SFTP, one-way); ProcessDirect calls to another iFlow'
   }
 }
 for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
@@ -155,10 +160,11 @@ const SPEC_FORMAT = {
     messageMapping: '{ type, name?, description?, mapping (artifact id) } — or file (.mmap) and schemas from an imported or existing iFlow, never written by you',
     xsltMapping: '{ type, name?, description?, file (an attached .xsl) }',
     requestReplyProcessDirect: '{ type, name?, description?, system?, address (the called iFlow\'s ProcessDirect address, or "{{Param}}") } — calls another iFlow on the tenant and continues with its reply; not in exceptionSubprocess',
-    sendMail: '{ type, name?, description?, system?, server (host:port), credentialName, from, to (comma-separated), cc?, bcc?, subject, body? (default ${in.body}) } — one-way; server, credentialName, to may be "{{Param}}"; also in exceptionSubprocess'
+    sendMail: '{ type, name?, description?, system?, server (host:port), credentialName, from, to (comma-separated), cc?, bcc?, subject, body? (default ${in.body}) } — one-way; server, credentialName, to may be "{{Param}}"; also in exceptionSubprocess',
+    sendSftp: '{ type, name?, description?, system?, host (host or host:port), directory, fileName (may contain ${date:now:<format>}, ${header.<name>}, ${property.<name>}), authentication: publicKey (username, privateKeyAlias) | userPassword (credentialName) } — one-way, overwrites a file of the same name; host, directory, fileName, credentialName may be "{{Param}}"; also in exceptionSubprocess'
   },
   end: ['{ "type": "none", event?: message|escalation|error, category? (escalation: Others|RoutingConditionNotMet) }', '{ "type": "httpReceiver", system?, url, method, authType, credentialName?, proxyType?, locationId?, timeout? } (as requestReplyHttp)', '{ "type": "processDirectReceiver", system?, address (the called iFlow\'s ProcessDirect address, or "{{Param}}") } (a Message End that hands the message to another iFlow)'],
-  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson | processCall | sendMail, end?: { event: message|escalation|error, name?, category? } (new iFlows: escalation or error) }',
+  exceptionSubprocess: '{ name?, steps: 1-10 of contentModifier | groovyScript | jsonToXml | xmlToJson | processCall | sendMail | sendSftp, end?: { event: message|escalation|error, name?, category? } (new iFlows: escalation or error) }',
   localProcesses: '[{ name, description?, steps: [step] (routers as on the main line, route ends only { event: message }, which returns to the caller; no splitter, gather, processCall) }]',
   parameters: '{ "Name": "default value" } — used only as a whole receiver url, credentialName or locationId, a mail server or to, or a constant header/property value "{{Name}}"',
   resources: '[ "file.xsl" ] — attached XSLT files no step uses, added as mapping/<file>',

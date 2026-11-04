@@ -405,14 +405,42 @@ describe('system prompt: SFTP sender (phase 5)', () => {
     expect(senders).toMatch(/With an `exceptionSubprocess`, its end is `\{ "event": "error" \}` unless the user asks for another, so a failed file may stay in the directory instead of being deleted or moved; say so in one line\./)
     expect(senders).toMatch(/the SFTP server's host key must be in the tenant's known hosts before deploying, and with `publicKey` that the key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts\./)
   })
-  test('the five SFTP sender fields may be parameters: in the hard limits and under Externalized parameters', () => {
-    expect(flat).toMatch(/`archiveDirectory` of `sftpSender`;/)
-    expect(flat).toMatch(/An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and `archiveDirectory` can be parameters the same way \(`\{\{SFTP_Address\}\}` with the host as its default\), and so can a ProcessDirect receiver's `address` \(`\{\{Orders_Address\}\}` with the address as its default\)\. Parameters are supported nowhere else: use literal values there\./)
+  test('the five SFTP sender fields and the four SFTP receiver fields may be parameters: in the hard limits and under Externalized parameters', () => {
+    expect(flat).toMatch(/`archiveDirectory` of `sftpSender`; `host`, `directory`, `fileName`, `credentialName` of `sendSftp`;/)
+    expect(flat).toMatch(/An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and `archiveDirectory`, and a `sendSftp` step's `host`, `directory`, `fileName` and `credentialName`, can be parameters the same way \(`\{\{SFTP_Address\}\}` with the host as its default\), and so can a ProcessDirect receiver's `address` \(`\{\{Orders_Address\}\}` with the address as its default\)\. Parameters are supported nowhere else: use literal values there\./)
   })
   test('the example of the Senders section is a valid trigger', () => {
     const { validate } = require('../srv/iflow-builder/validator')
     const trigger = JSON.parse(senders.match(/`(\{ "type": "sftpSender"[^`]*\})`/)[1])
     expect(validate({ id: 'A', name: 'A', packageId: 'P', trigger, steps: [], end: { type: 'none' } })).toMatchObject({ valid: true, warnings: [] })
+  })
+})
+
+describe('system prompt: receivers (phase 6)', () => {
+  const receivers = sectionFlat('receivers')
+  const senders = sectionFlat('senders')
+  test('the core prompt points to the Receivers topic for sendSftp and ProcessDirect calls; sendSftp in the exception subprocess', () => {
+    expect(flat).toMatch(/- `sendSftp` \(writes a file to an SFTP server, one-way, also from the exception subprocess\) and ProcessDirect calls: their rules are in the section "Receivers" when the conversation needs them; else call `getSupportedSteps` with `topics: \["receivers"\]` first\./)
+    expect(flat).toMatch(/Its steps \(`contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`, `sendMail`, `sendSftp`\) run in order/)
+  })
+  test('sendSftp: values only the user knows, file name parts, overwrite, tenant needs', () => {
+    expect(receivers).toMatch(/^## Receivers/)
+    expect(receivers).toMatch(/\*\*Host, directory, file name and the authentication with its names are values only the user knows: ask for the missing ones in one message, and never invent them\.\*\*/)
+    expect(receivers).toMatch(/can contain `\$\{date:now:<format>\}`, `\$\{header\.<name>\}` or `\$\{property\.<name>\}` parts, e\.g\. `\$\{header\.CamelFileName\}` for the name of the file an SFTP sender read\./)
+    expect(receivers).toMatch(/A file of the same name is overwritten: when the file name has no `\$\{\.\.\.\}` part, say so in one line and suggest a date part\./)
+    expect(receivers).toMatch(/the SFTP server's host key must be in the tenant's known hosts before deploying, and with `publicKey` that the key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts\./)
+  })
+  test('the ProcessDirect call moved from Senders to Receivers, word for word', () => {
+    expect(receivers).toMatch(/- A ProcessDirect call, in the calling iFlow: a `requestReplyProcessDirect` step `\{ "type": "requestReplyProcessDirect", "name": "RR_CallOrders", "address": "\/orders\/process" \}` waits for the called iFlow and continues with its reply; the end `\{ "type": "processDirectReceiver", "address": "\/orders\/process" \}` hands the message on at the end\. The address is exactly the called iFlow's `processDirectSender` address\. Follow the `processDirect` pattern\./)
+    expect(senders).not.toMatch(/requestReplyProcessDirect|processDirectReceiver/)
+  })
+  test('the example of the Receivers section is a valid step that builds', async () => {
+    const { validate } = require('../srv/iflow-builder/validator')
+    const { build } = require('../srv/iflow-builder/builder')
+    const step = JSON.parse(receivers.match(/`(\{ "type": "sendSftp"[^`]*\})`/)[1])
+    const spec = { id: 'A', name: 'A', packageId: 'P', trigger: { type: 'timer', mode: 'once' }, steps: [step], end: { type: 'none' } }
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+    await expect(build(spec)).resolves.toMatchObject({ zipBase64: expect.any(String) })
   })
 })
 
@@ -447,6 +475,8 @@ describe('system prompt: the Hard limits list exactly the fields the validator a
     ['sendMail', (v) => ({ ...base, steps: [{ type: 'sendMail', name: 'S', server: 'smtp.example.com:587', credentialName: 'C', from: 'a@example.com', to: 'b@example.com', cc: 'c@example.com', bcc: 'd@example.com', subject: 'S', ...v }] })],
     ['sftpSender', (v) => ({ ...base, trigger: { ...SFTP, authentication: 'userPassword', credentialName: 'C', postProcessing: 'move', archiveDirectory: '.archive', ...v } })],
     ['sftpSender', (v) => ({ ...base, trigger: { ...SFTP, authentication: 'publicKey', username: 'U', privateKeyAlias: 'K', postProcessing: 'delete', ...v } })],
+    ['sendSftp', (v) => ({ ...base, steps: [{ type: 'sendSftp', name: 'S', host: 'h.example.com', directory: '/out', fileName: 'a.xml', authentication: 'userPassword', credentialName: 'C', ...v }] })],
+    ['sendSftp', (v) => ({ ...base, steps: [{ type: 'sendSftp', name: 'S', host: 'h.example.com', directory: '/out', fileName: 'a.xml', authentication: 'publicKey', username: 'U', privateKeyAlias: 'K', ...v }] })],
     ['requestReplyProcessDirect', (v) => ({ ...base, steps: [{ type: 'requestReplyProcessDirect', name: 'S', address: '/a', ...v }] })],
     ['processDirectReceiver', (v) => ({ ...base, end: { type: 'processDirectReceiver', address: '/a', ...v } })],
     ['httpsSender', (v) => ({ ...base, trigger: { type: 'httpsSender', address: '/a', ...v } })],

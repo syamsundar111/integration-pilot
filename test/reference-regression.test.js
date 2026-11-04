@@ -1079,6 +1079,86 @@ describe('Ref_Receiver_ProcessDirect: the ProcessDirect receiver (phase 6)', () 
   })
 })
 
+describe('Ref_Receiver_SFTP: the SFTP receiver of a Send step (phase 6)', () => {
+  // test/reference-prompts/Ref_Receiver_SFTP.txt (Run Once: Simple Schedule, Repeat None)
+  const spec = {
+    id: 'Ref_Receiver_SFTP',
+    name: 'Ref_Receiver_SFTP',
+    packageId: 'iglowpackage',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [
+      { type: 'contentModifier', name: 'CM_Prepare', body: '<Order><id>1</id></Order>' },
+      { type: 'sendSftp', name: 'SND_SftpKey', system: 'RCV_SFTP_Key', host: 'sftp.example.com:22', directory: '/dummy/out', fileName: 'order_${date:now:yyyyMMddHHmmss}.xml', authentication: 'publicKey', username: 'DUMMY_USER', privateKeyAlias: 'DUMMY_KEY' },
+      { type: 'sendSftp', name: 'SND_SftpPw', system: 'RCV_SFTP_Pw', host: '{{SFTP_Out_Address}}', directory: '{{SFTP_Out_Directory}}', fileName: '{{SFTP_Out_FileName}}', authentication: 'userPassword', credentialName: '{{SFTP_Out_Credential}}' }
+    ],
+    end: { type: 'none' },
+    parameters: { SFTP_Out_Address: 'sftp.example.com:22', SFTP_Out_Credential: 'DUMMY_SFTP_CREDENTIAL', SFTP_Out_Directory: '/dummy/out', SFTP_Out_FileName: 'order.xml' }
+  }
+  const zipOf = async (s) => Buffer.from((await build(s)).zipBase64, 'base64')
+  const flows = async (buf) => {
+    const zip = await JSZip.loadAsync(buf)
+    const iflw = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+    return iflw.match(/<bpmn2:messageFlow[\s\S]*?<\/bpmn2:messageFlow>/g).map((m) => m.replace(/ (id|sourceRef|targetRef)="[^"]*"/g, '')).sort()
+  }
+  const refs = async (buf) => {
+    const zip = await JSZip.loadAsync(buf)
+    const propdef = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('parameters.propdef'))).async('string')
+    return [...propdef.matchAll(/<reference [^>]*\/>/g)].map((m) => m[0]).sort()
+  }
+  /** the export with one text of its iFlow replaced */
+  const changedExport = async (from, to) => {
+    const zip = await JSZip.loadAsync(readRef('Ref_Receiver_SFTP.zip'))
+    const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+    const before = await zip.file(file).async('string')
+    const after = before.replace(from, to)
+    expect(after).not.toBe(before)
+    zip.file(file, after)
+    return zip.generateAsync({ type: 'nodebuffer' })
+  }
+
+  test('the spec is valid without warnings', () => {
+    expect(require('../srv/iflow-builder/validator').validate(spec)).toMatchObject({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('both receivers (public key, and user name/password with four parameters) and the parameter references are as in the export', async () => {
+    const built = await zipOf(spec)
+    expect(await flows(built)).toEqual(await flows(readRef('Ref_Receiver_SFTP.zip')))
+    expect(await refs(built)).toEqual(await refs(readRef('Ref_Receiver_SFTP.zip')))
+  })
+
+  test('update and Import keep both steps and the parameters', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const update = specFromParsed(await parse(readRef('Ref_Receiver_SFTP.zip')), { packageId: 'iglowpackage' })
+    expect(update.blockers).toEqual([])
+    expect(update.spec).toEqual(spec)
+    const imported = await importIflow(readRef('Ref_Receiver_SFTP.zip'), { fileName: 'Ref_Receiver_SFTP.zip', packageId: 'iglowpackage' })
+    expect(imported).toMatchObject({ valid: true, errors: [], placeholders: 0 })
+    expect({ steps: imported.spec.steps, end: imported.spec.end, parameters: imported.spec.parameters }).toEqual({ steps: spec.steps, end: spec.end, parameters: spec.parameters })
+  })
+
+  test('a setting the builder does not write: the update is blocked, Import puts a placeholder where the step was', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    // Handling for Existing Files Append on the first receiver (both receivers store Override)
+    const changed = await changedExport('<key>fileExist</key>\n                    <value>Override</value>', '<key>fileExist</key>\n                    <value>Append</value>')
+    expect(specFromParsed(await parse(changed), { packageId: 'iglowpackage' }).blockers.join()).toMatch(/receiver RCV_SFTP_(Key|Pw): fileExist is 'Append' \(the builder writes 'Override'\)/)
+    const imported = await importIflow(changed, { fileName: 'x.zip', packageId: 'iglowpackage' })
+    expect(imported.placeholders).toBe(1)
+    expect(imported.spec.steps.find((s) => s.description?.startsWith('REPLACE WITH'))).toMatchObject({ description: expect.stringMatching(/^REPLACE WITH SFTP Send .*fileExist is 'Append'/) })
+  })
+
+  test('a parameter where the spec holds none (the authentication): blocked, and a placeholder on Import', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const changed = await changedExport('<value>user_password</value>', '<value>{{SFTP_Auth}}</value>')
+    expect(specFromParsed(await parse(changed), { packageId: 'iglowpackage' }).blockers.join()).toMatch(/receiver RCV_SFTP_Pw: the authentication is the parameter \{\{SFTP_Auth\}\}/)
+    const imported = await importIflow(changed, { fileName: 'x.zip', packageId: 'iglowpackage' })
+    expect(imported.placeholders).toBe(1)
+    expect(imported.spec.steps[2]).toMatchObject({ name: 'SND_SftpPw', description: expect.stringMatching(/^REPLACE WITH SFTP Send/) })
+  })
+})
+
 describe('placeholders survive the iFlow: Import and update recognise a REPLACE_WITH step (phase 6)', () => {
   const spec = {
     id: 'Placeholder_Again',

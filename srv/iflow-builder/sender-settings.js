@@ -1,8 +1,9 @@
 /**
- * Sender adapters the spec holds besides HTTPS (phase 5) and the ProcessDirect receiver (phase 6), and the settings the
+ * Sender adapters the spec holds besides HTTPS (phase 5), the ProcessDirect and SFTP receivers (phase 6), and the settings the
  * builder writes fixed from their templates. Import and update keep an iFlow's sender only when the spec can hold it exactly: every fixed setting as
  * the template has it, and a parameter only where the spec holds one (SFTP: host, directory, file name, credential
- * name, archive directory); else Import makes it an HTTPS sender with a note, and an update is blocked.
+ * name, archive directory); else Import makes it an HTTPS sender with a note, and an update is blocked. The receivers
+ * the same way: else Import makes a placeholder step.
  */
 const fs = require('fs')
 const path = require('path')
@@ -22,7 +23,9 @@ const FIXED = {
   // the scheduler is compared by its schedule1 (the other rows are the editor's state)
   sftpSender: Object.fromEntries(Object.entries(fixed('messageflow-sftp-sender.xml')).filter(([key]) => key !== 'scheduleKey')),
   // the ProcessDirect receiver (Ref_Receiver_ProcessDirect), the other end of a ProcessDirect sender
-  processDirectReceiver: fixed('messageflow-processdirect-receiver.xml')
+  processDirectReceiver: fixed('messageflow-processdirect-receiver.xml'),
+  // the SFTP receiver of a Send step (Ref_Receiver_SFTP): proxy, existing-file handling, reconnects and the rest
+  sftpReceiver: fixed('messageflow-sftp-receiver.xml')
 }
 const definitions = require('./spec-schema.json').definitions
 const ADDRESS = new RegExp(definitions.soapSender.properties.address.pattern)
@@ -97,6 +100,35 @@ function sftp(adapter) {
 }
 
 /**
+ * An SFTP receiver (a Send step's) as the spec holds it: its fixed settings, and the fields of its authentication (a
+ * whole {{Param}} only where the spec allows one)
+ * @returns {{ call: object } | { differences: string[] }} call: the sendSftp fields besides type, name and system
+ */
+function sftpReceiverOf(adapter) {
+  const s = adapter?.settings || {}
+  const differences = fixedDifferences('sftpReceiver', s)
+  const authentication = Object.keys(SFTP_AUTHENTICATION).find((k) => SFTP_AUTHENTICATION[k] === s.authentication)
+  if (!authentication)
+    differences.push(/\{\{/.test(s.authentication || '') ? `the authentication is the parameter ${s.authentication}` : `the authentication is '${s.authentication || ''}' (the builder writes ${Object.values(SFTP_AUTHENTICATION).join(' or ')})`)
+  // the fields of the variant only: hidden fields of the other variant are not used by CPI
+  const fields = [
+    ['host', 'host', 'host'],
+    ['directory', 'path', 'directory'],
+    ['fileName', 'fileName', 'file name'],
+    ...(authentication === 'publicKey' ? [['username', 'username', 'user name'], ['privateKeyAlias', 'privateKeyAlias', 'private key alias']] : []),
+    ...(authentication === 'userPassword' ? [['credentialName', 'credential_name', 'credential name']] : [])
+  ]
+  const call = { host: '', directory: '', fileName: '', authentication }
+  for (const [field, key, label] of fields) {
+    const value = String(s[key] ?? '')
+    if (!new RegExp(definitions.sendSftp.properties[field].pattern).test(value))
+      differences.push(/\{\{/.test(value) ? `the ${label} is ${value}, which the spec cannot hold as a parameter` : `the ${label} '${value}' is not a value the spec allows`)
+    call[field] = value
+  }
+  return differences.length ? { differences } : { call }
+}
+
+/**
  * A ProcessDirect receiver (a Request Reply's or the Message End's) as the spec holds it: its address, a path or a
  * whole {{Param}}
  * @returns {{ address: string } | { differences: string[] }}
@@ -123,4 +155,4 @@ function check(kind, adapter, trigger) {
   return differences.length ? { differences } : { trigger }
 }
 
-module.exports = { triggerOf, processDirectReceiverOf, FIXED, SFTP_AUTHENTICATION, SFTP_POST_PROCESSING, SFTP_MINUTES }
+module.exports = { triggerOf, processDirectReceiverOf, sftpReceiverOf, FIXED, SFTP_AUTHENTICATION, SFTP_POST_PROCESSING, SFTP_MINUTES }

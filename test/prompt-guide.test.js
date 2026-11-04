@@ -68,7 +68,7 @@ describe('the pre-send check passes every example request (a warning on our own 
     expect(flagged('Create an iFlow: POST https://x.example.com/api, credential {{ErpCredential}}, proxy On-Premise, location ID {{ErpLocation}}')).toEqual([])
     expect(flagged('Create an iFlow: GET {{Orders}}, Basic, credential name: {{ErpCredential}}')).toEqual([])
     expect(lint('Create an iFlow: GET {{Orders}}, header Source = {{Source}}').map((w) => w.message)).toEqual([
-      '{{Source}}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, the URL of a SOAP receiver, the server, credential name or recipients of a mail, the host, directory, file name, credential name or archive directory of an SFTP sender, or as a constant value. Use literal values elsewhere.'
+      '{{Source}}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, the URL of a SOAP receiver, the server, credential name or recipients of a mail, the host, directory, file name, credential name or archive directory of an SFTP sender, the host, directory, file name or credential name of an SFTP receiver, or as a constant value. Use literal values elsewhere.'
     ])
   })
 })

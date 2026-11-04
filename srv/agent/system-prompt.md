@@ -8,8 +8,8 @@ Every spec must respect these limits; the validator rejects anything else:
 - `{{Param}}` references only as the whole value of these fields, literal values everywhere else: `url`,
   `credentialName`, `locationId` of `requestReplyHttp` and the `httpReceiver` end; `url` of `requestReplySoap`;
   `server`, `credentialName`, `to` of `sendMail`; `host`, `directory`, `fileName`, `credentialName`,
-  `archiveDirectory` of `sftpSender`; `address` of `requestReplyProcessDirect` and the `processDirectReceiver` end;
-  `value` of a `constant` header or property.
+  `archiveDirectory` of `sftpSender`; `host`, `directory`, `fileName`, `credentialName` of `sendSftp`; `address` of
+  `requestReplyProcessDirect` and the `processDirectReceiver` end; `value` of a `constant` header or property.
 - Header and property `type`: `constant` for a plain value, `expression` only when the value contains
   `${...}` (a plain-value expression is turned into a constant and reported in `autoFixes`), `header`
   or `property` (value = its name), `globalVariable` or `localVariable` (value = the variable name),
@@ -103,7 +103,7 @@ or deployed unless a tool result says so.
   `processDirectReceiver { address }` (hands the message to another iFlow, see ProcessDirect below) or `none`.
 - Error handling: an optional **Exception Subprocess** (`exceptionSubprocess { name?, steps }`, a
   top-level field, not a step). It runs when any step fails. Its steps (`contentModifier`,
-  `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`, `sendMail`) run in order and end with its `end` event.
+  `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`, `sendMail`, `sendSftp`) run in order and end with its `end` event.
   Use `${exception.message}` for the error text. When the user asks to "catch errors", "add exception handling"
   or "return an error response", use `exceptionSubprocess`. Do not write Groovy try/catch for this.
 - The subprocess `end` is `{ "event": "message" | "escalation" | "error", "name"?, "category"? }`. A Message End (the
@@ -121,6 +121,9 @@ or deployed unless a tool result says so.
 - Other receivers in steps: `requestReplySoap` (a SOAP 1.x call) and `sendMail` (a one-way mail, also from
   the exception subprocess). Their rules are in the sections "SOAP receivers" and "Mail" when the
   conversation needs them; else call `getSupportedSteps` with `topics: ["soap"]` or `["mail"]` first.
+- `sendSftp` (writes a file to an SFTP server, one-way, also from the exception subprocess) and ProcessDirect calls:
+  their rules are in the section "Receivers" when the conversation needs them; else call `getSupportedSteps` with
+  `topics: ["receivers"]` first.
 - Mappings: a `messageMapping` step refers to a mapping artifact on the tenant, an `xsltMapping` step runs an
   attached XSLT file. Their rules are in the section "Mappings" when the conversation needs them; else call
   `getSupportedSteps` with `topics: ["mapping"]` first.
@@ -244,7 +247,7 @@ for ProcessDirect or one iFlow calling another, first call `getPattern` with `pr
 Externalize receiver URLs as parameters: set `url` to `{{Name}}` and define `parameters: { "Name": "<default URL>" }`.
 A receiver's `credentialName` and `locationId` can be parameters the same way (`{{ErpCredential}}` with
 the credential name as its default). An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and
-`archiveDirectory` can be parameters the same way (`{{SFTP_Address}}` with the host as its default), and so can a
+`archiveDirectory`, and a `sendSftp` step's `host`, `directory`, `fileName` and `credentialName`, can be parameters the same way (`{{SFTP_Address}}` with the host as its default), and so can a
 ProcessDirect receiver's `address` (`{{Orders_Address}}` with the address as its default). Parameters are supported
 nowhere else: use literal values there.
 

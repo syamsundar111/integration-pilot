@@ -145,6 +145,14 @@ describe('flow diagram: senders (phase 5)', () => {
     expect(fromParsed.steps.find((s) => s.name === 'RR_CallOrders')).toMatchObject({ detail: 'ProcessDirect', receiver: { name: 'RCV_PD_Orders', detail: '/dummy/pd/orders' } })
     expect(fromParsed.end.receiver).toEqual({ name: 'RCV_PD_Notify', detail: 'ProcessDirect {{PD_Notify_Address}}' })
   })
+  test('SFTP receivers (phase 6): the step shows its file name, the receiver its host, also from a parsed export', async () => {
+    const model = flowDiagram.fromSpec({ trigger: { type: 'timer', mode: 'once' }, steps: [{ type: 'sendSftp', system: 'RCV_SFTP', host: 'sftp.example.com', directory: '/out', fileName: 'a.xml', authentication: 'userPassword', credentialName: 'C' }], end: { type: 'none' } })
+    expect(model.steps[0]).toMatchObject({ type: 'sendSftp', name: 'Send 1', detail: 'a.xml', receiver: { name: 'RCV_SFTP', detail: 'SFTP sftp.example.com' } })
+    const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Receiver_SFTP.zip')))
+    const fromParsed = flowDiagram.fromParsed(parsed)
+    expect(fromParsed.steps.find((s) => s.name === 'SND_SftpKey')).toMatchObject({ detail: 'order_${date:now:yyyyMMddHHmmss}.xml', receiver: { name: 'RCV_SFTP_Key', detail: 'SFTP sftp.example.com:22' } })
+    expect(fromParsed.steps.find((s) => s.name === 'SND_SftpPw')).toMatchObject({ detail: '{{SFTP_Out_FileName}}', receiver: { name: 'RCV_SFTP_Pw', detail: 'SFTP {{SFTP_Out_Address}}' } })
+  })
   test('a ProcessDirect sender shows as ProcessDirect with its address', async () => {
     expect(flowDiagram.fromSpec({ trigger: { type: 'processDirectSender', address: '/dummy/pd/orders' }, steps: [], end: { type: 'none' } }).trigger).toEqual({ kind: 'other', label: 'ProcessDirect', detail: '/dummy/pd/orders' })
     const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Sender_ProcessDirect.zip')))

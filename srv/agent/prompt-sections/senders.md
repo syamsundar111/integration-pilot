@@ -13,11 +13,6 @@ trigger stays `httpsSender`.
   waits for the reply gets the body at the end of the flow. Headers and the body reach the called iFlow, but exchange
   properties may not, so values it needs should be passed as headers. The address must be unique among the
   ProcessDirect senders on the tenant. For the calling iFlow, follow the `processDirect` pattern.
-- A ProcessDirect call, in the calling iFlow: a `requestReplyProcessDirect` step
-  `{ "type": "requestReplyProcessDirect", "name": "RR_CallOrders", "address": "/orders/process" }` waits for the called
-  iFlow and continues with its reply; the end `{ "type": "processDirectReceiver", "address": "/orders/process" }`
-  hands the message on at the end. The address is exactly the called iFlow's `processDirectSender` address. Follow
-  the `processDirect` pattern.
 - `jmsSender`: `{ "type": "jmsSender", "queue": "ORDERS_IN" }`, reads the messages of a JMS queue (letters, digits,
   `_ - .`, up to 80 characters). **The queue name is a value only the user knows: ask for it, and never invent or derive
   one.** The queue is created automatically when the iFlow is first deployed: never tell the user to create it or to

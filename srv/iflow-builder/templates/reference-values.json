@@ -375,6 +375,46 @@
       }
     }
   },
+  "SFTP Receiver": {
+    "authentication": {
+      "public_key": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Receiver_SFTP",
+          "Ref_Receivers_2"
+        ],
+        "confirmed": "Public Key, selected in Ref_Receiver_SFTP (RCV_SFTP_Key, built from scratch in the CPI editor), 2026-11-04"
+      },
+      "user_password": {
+        "references": [
+          "Ref_Receiver_SFTP"
+        ],
+        "confirmed": "User Name/Password, selected in Ref_Receiver_SFTP (RCV_SFTP_Pw, built from scratch), 2026-11-04"
+      }
+    },
+    "proxyType": {
+      "none": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Receiver_SFTP",
+          "Ref_Receiver_SFTP",
+          "Ref_Receivers_2"
+        ],
+        "confirmed": "Proxy Type Internet, selected in Ref_Receiver_SFTP (both receivers, built from scratch), 2026-11-04"
+      }
+    },
+    "fileExist": {
+      "Override": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Receiver_SFTP",
+          "Ref_Receiver_SFTP",
+          "Ref_Receivers_2"
+        ],
+        "confirmed": "Handling for Existing Files Override, selected in Ref_Receiver_SFTP (both receivers, built from scratch), 2026-11-04"
+      }
+    }
+  },
   "SOAP Receiver": {
     "authentication": {
       "Basic": {

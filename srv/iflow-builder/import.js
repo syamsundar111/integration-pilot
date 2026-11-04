@@ -317,6 +317,15 @@ async function importIflow(buffer, { fileName, packageId }) {
         if (!address) return [placeholder(name, what)]
         return [{ type: 'requestReplyProcessDirect', ...(name && { name }), system: uniqueSystem(identifier(s.system, 'Receiver'), 50), address }]
       }
+      case 'sendSftp': {
+        // kept only as the builder writes it (sender-settings); a whole {{Parameter}} needs its value in the export
+        const what = `SFTP Send ${label} to ${s.host || '?'}${s.directory ? ` ${s.directory}` : ''}`
+        const sftp = senderSettings.sftpReceiverOf(s.adapter)
+        if (sftp.differences) return [placeholder(name, `${what} (${sftp.differences.join('; ')})`)]
+        const undefinedParam = Object.values(sftp.call).find((v) => /^\{\{/.test(v) && !Object.hasOwn(params, v.slice(2, -2)))
+        if (undefinedParam) return [placeholder(name, `${what} (the parameter ${undefinedParam} has no value in the export)`)]
+        return [{ type: 'sendSftp', ...(name && { name }), system: uniqueSystem(identifier(s.system, 'Receiver'), 50), ...sftp.call }]
+      }
       case 'requestReplySoap': {
         const raw = s.settings || {}
         const what = `SOAP request-reply ${label} to ${s.url || '?'}`

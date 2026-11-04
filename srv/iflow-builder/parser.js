@@ -249,6 +249,13 @@ function stepOf(node, adaptersBySource, processNames = {}) {
     }
     case 'Send': {
       const adapter = adaptersBySource[base.id]
+      if (adapter?.type === 'SFTP') {
+        // as stored; sender-settings.sftpReceiverOf reads it as the spec holds it
+        const s = adapter.settings || {}
+        const step = { ...base, type: 'sendSftp', system: adapter.system, host: s.host, directory: s.path, fileName: s.fileName }
+        Object.defineProperty(step, 'adapter', { value: adapter, enumerable: false })
+        return step
+      }
       if (adapter?.type !== 'Mail') return { ...base, type: 'send', activityType: p.activityType, adapter: adapter || null }
       const step = { ...base, type: 'sendMail', ...mailCall(adapter) }
       Object.defineProperty(step, 'settings', { value: adapter.settings, enumerable: false })

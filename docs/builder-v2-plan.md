@@ -199,6 +199,12 @@ Phase 5 (format agreed 2026-11-02, one sender per task):
   the parameter reference as the editor writes it. The `processDirect` pattern builds the call instead of a `PH_`
   placeholder. Import and update keep both exactly; Import and update also recognise a placeholder again by its
   `REPLACE_WITH` property (the description is not in the iFlow).
+- **`sendSftp { host, directory, fileName, authentication, username + privateKeyAlias | credentialName, system? }`**
+  (a Send step, one-way: main line, routes, branches, local processes and the exception subprocess), from
+  Ref_Receiver_SFTP. Host, directory, file name and credential name can be whole parameters. The file name may contain
+  `${date:now:<format>}`, `${header.<name>}` and `${property.<name>}` parts (the editor stores it as typed). Proxy
+  Internet, Handling for Existing Files Override, Create Directories and the rest are fixed. Import and update keep it
+  only as the builder writes it. Its rules and the ProcessDirect call are in the new `receivers` prompt topic.
 
 ## Later (no phase yet)
 
@@ -256,11 +262,20 @@ From the former reference export checklist; each needs a reference export first.
   its `.xsd` files as uploads, refused since phase 4); the credential name and location ID as parameters.
 - Mail: other protection, authentication and body types, attachments; a mail or SOAP receiver at the end.
 - From real iFlows (test/local/real-iflows/NOTES.txt): exception subprocesses inside local processes; a
-  Send step with an SFTP receiver. (The OData V2 receiver of the HR cloud adapter is phase 6c.)
+  Send step with an SFTP receiver whose settings are parameters (see the SFTP receiver item). (The OData V2 receiver
+  of the HR cloud adapter is phase 6c.)
 - Message Mapping `MM_DummyOrderToNotif`: not on the re-provisioned tenant (2026-11-04); re-import or rebuild it before
   a chat test or the acceptance test uses it.
 - OData V4 receiver: needs an export built in the CPI editor (Query (GET), resource path, query options, Basic,
   Internet); no real iFlow uses it.
+- SFTP receiver: authentication, existing-file handling, proxy, reconnects and the other settings as externalized
+  parameters (the real iFlows' SFTP receivers have 14 and 15 of them); needs an export that externalizes them. Until
+  then Import makes such a step a placeholder that lists the differences, and an update is blocked.
+- SFTP receiver at the end of the flow (a Message End with an SFTP receiver); needs a small export.
+- SFTP receiver: other Handling for Existing Files options (Append, Fail, Ignore and the others the editor offers);
+  only Override is in an export.
+- SFTP receiver file names: confirm on a deployed run that CPI evaluates `${header.<name>}` and `${property.<name>}`
+  parts (e.g. `${header.CamelFileName}`) as it does `${date:now:<format>}`.
 - More timer schedules: every N hours, daily, weekly and monthly at a time, other time zones, and the
   scheduler externalized as `{{Scheduler}}`.
 

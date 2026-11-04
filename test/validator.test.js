@@ -175,7 +175,7 @@ describe('validator', () => {
     const constantValue = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'constant', value: '{{P}}' }] }], parameters: { P: 'v' } })
     expect(errorsOf(constantValue)).toEqual([])
     const wrongPlace = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'expression', value: '{{P}}' }] }], parameters: { P: 'v' } })
-    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the address of a ProcessDirect receiver, or as a constant value/)
+    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the host, directory, fileName or credentialName of an SFTP receiver \(sendSftp\), the address of a ProcessDirect receiver, or as a constant value/)
 
     const senderParam = baseSpec({ trigger: { type: 'httpsSender', address: '{{Path}}' }, parameters: { Path: '/x' } })
     expectError(senderParam, /trigger\.address: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
@@ -701,6 +701,42 @@ describe('senders (phase 5)', () => {
     })
     test('receiver names stay unique across the step and the end', () => {
       expectError(baseSpec({ steps: [call({ system: 'RCV_PD' })], end: { type: 'processDirectReceiver', system: 'RCV_PD', address: '/x' } }), /RCV_PD/)
+    })
+  })
+  describe('SFTP receiver: sendSftp (phase 6)', () => {
+    const key = (extra = {}) => ({ type: 'sendSftp', name: 'SND_Out', host: 'sftp.example.com:22', directory: '/out', fileName: 'order.xml', authentication: 'publicKey', username: 'SFTP_USER', privateKeyAlias: 'SFTP_KEY', ...extra })
+    const pw = (extra = {}) => ({ type: 'sendSftp', name: 'SND_Out', host: 'sftp.example.com', directory: '/out', fileName: 'order.xml', authentication: 'userPassword', credentialName: 'SFTP_CRED', ...extra })
+    test('both authentications are valid without warnings; main line, routes, local processes and the exception subprocess', () => {
+      expect(validate(baseSpec({ steps: [key()] }))).toMatchObject({ valid: true, warnings: [] })
+      expect(validate(baseSpec({ steps: [pw()] }))).toMatchObject({ valid: true, warnings: [] })
+      expect(validate(baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'LIP' }], localProcesses: [{ name: 'LIP', steps: [pw()] }] }))).toMatchObject({ valid: true })
+      expect(validate(baseSpec({ exceptionSubprocess: { steps: [pw({ name: 'SND_Error' })], end: { event: 'error' } } }))).toMatchObject({ valid: true })
+      // a multicast branch
+      const branches = [{ steps: [pw()] }, { steps: [key({ name: 'SND_Two' })] }]
+      expect(validate(baseSpec({ steps: [{ type: 'multicast', name: 'MC', mode: 'parallel', branches }, { type: 'gather', name: 'G' }] }))).toMatchObject({ valid: true })
+    })
+    test('file names: letters, digits, _ . - with date, header and property parts, or a whole parameter', () => {
+      for (const fileName of ['order_${date:now:yyyyMMddHHmmss}.xml', '${header.CamelFileName}', 'out_${property.OrderId}_${date:now:yyyy-MM-dd}.json'])
+        expect(validate(baseSpec({ steps: [key({ fileName })] })).errors).toEqual([])
+      expect(validate(baseSpec({ steps: [key({ fileName: '{{Out_FileName}}' })], parameters: { Out_FileName: 'order.xml' } })).errors).toEqual([])
+      for (const fileName of ['order list.xml', '${in.body}.xml', 'out/order.xml', '${header.a'])
+        expectError(baseSpec({ steps: [key({ fileName })] }), /steps\[0\]\.fileName: invalid value — use letters, digits, _ \. - and \$\{date:now:<format>\}, \$\{header\.<name>\} or \$\{property\.<name>\} parts/)
+    })
+    test('the fields of the authentication: required, and the other ones refused', () => {
+      expectError(baseSpec({ steps: [key({ privateKeyAlias: undefined })] }), /steps\[0\]: missing required field 'privateKeyAlias' \(authentication publicKey\)/)
+      expectError(baseSpec({ steps: [pw({ credentialName: undefined })] }), /steps\[0\]: missing required field 'credentialName' \(authentication userPassword\)/)
+      expectError(baseSpec({ steps: [key({ credentialName: 'C' })] }), /steps\[0\]\.credentialName: only used with authentication userPassword — remove it, or set authentication "userPassword"/)
+      expectError(baseSpec({ steps: [pw({ username: 'U' })] }), /steps\[0\]\.username: only used with authentication publicKey/)
+    })
+    test('host, directory, file name and credential name may be whole parameters; the user name and key alias may not', () => {
+      const params = { A: 'sftp.example.com', D: '/out', F: 'order.xml', C: 'SFTP_CRED' }
+      expect(validate(baseSpec({ steps: [pw({ host: '{{A}}', directory: '{{D}}', fileName: '{{F}}', credentialName: '{{C}}' })], parameters: params })).errors).toEqual([])
+      expect(validate(baseSpec({ steps: [key({ username: '{{U}}' })], parameters: { U: 'x' } })).valid).toBe(false)
+      expectError(baseSpec({ steps: [pw({ host: '{{Missing}}' })] }), /steps\[0\]\.host: parameter 'Missing' is referenced but not defined in 'parameters'/)
+    })
+    test('pattern hints name the SFTP receiver fields, and an SFTP-like step type points to sendSftp', () => {
+      expectError(baseSpec({ steps: [key({ host: 'sftp example' })] }), /steps\[0\]\.host: invalid value — use host or host:port, e.g\. sftp\.example\.com:22, or a whole parameter like \{\{SFTP_Out_Address\}\}/)
+      expectError(baseSpec({ steps: [{ type: 'sftpReceiver', name: 'X' }] }), /steps\[0\]: 'sftpReceiver' — writing a file to an SFTP server is \{ "type": "sendSftp"/)
     })
   })
   test('an unknown sender names the supported ones', () => {

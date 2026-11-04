@@ -37,6 +37,7 @@ sap.ui.define(
       requestReplySoap: 'Request Reply (SOAP)',
       requestReplyProcessDirect: 'Request Reply (ProcessDirect)',
       sendMail: 'Send (Mail)',
+      sendSftp: 'Send (SFTP)',
       messageMapping: 'Message Mapping',
       xsltMapping: 'XSLT Mapping',
       multicast: 'Multicast'
@@ -214,8 +215,8 @@ sap.ui.define(
     function receiversNote(spec) {
       const calls = [
         ...everyStep(spec)
-          .filter((s) => ['requestReplyHttp', 'requestReplySoap', 'sendMail'].includes(s.type))
-          .map((s) => (s.type === 'sendMail' ? { ...s, authType: 'Plain User/Password' } : s)),
+          .filter((s) => ['requestReplyHttp', 'requestReplySoap', 'sendMail'].includes(s.type) || (s.type === 'sendSftp' && s.authentication === 'userPassword'))
+          .map((s) => (s.type === 'sendMail' ? { ...s, authType: 'Plain User/Password' } : s.type === 'sendSftp' ? { ...s, authType: 'User Name/Password' } : s)),
         ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])
       ]
       if (!calls.length) return ''
@@ -1038,6 +1039,16 @@ sap.ui.define(
                         `Subject: ${s.subject}`,
                         `Body: ${s.body || '${in.body} (the message body)'}`,
                         `${s.server} · STARTTLS mandatory · Plain User/Password, credential ${s.credentialName} · text/plain`,
+                        'One-way: the flow continues after it'
+                      ].join('\n')
+                    : s.type === 'sendSftp'
+                    ? [
+                        `SFTP ${s.host}, directory ${s.directory}, file ${s.fileName}`,
+                        `Authentication: ${s.authentication === 'publicKey' ? `public key (user ${s.username}, key alias ${s.privateKeyAlias})` : `user name and password (credential ${s.credentialName})`}`,
+                        'A file of the same name is overwritten; missing directories are created',
+                        ...(String(s.fileName).includes('${') ? [] : ['To keep each file, add a date part, e.g. order_${date:now:yyyyMMddHHmmss}.xml.']),
+                        ...(s.authentication === 'publicKey' ? ['The key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts.'] : []),
+                        "The SFTP server's host key must be in the tenant's known hosts before deploying.",
                         'One-way: the flow continues after it'
                       ].join('\n')
                     : s.type === 'gather'

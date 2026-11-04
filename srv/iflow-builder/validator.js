@@ -14,16 +14,16 @@ const senderSettings = require('./sender-settings')
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping', 'multicast']
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'sendSftp', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping', 'multicast']
 // steps with a receiver of their own (a participant and an adapter)
-const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail']
+const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'sendSftp']
 // not inside routes, the exception subprocess or local processes
 const MAIN_LINE_ONLY = ['router', 'splitter', 'gather', 'multicast']
 // Steps allowed in the exception subprocess (of the receivers only a Send step: no reply to wait for; Write Variables
 // only in the main flow so far)
-const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail', 'messageMapping', 'xsltMapping']
+const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail', 'sendSftp', 'messageMapping', 'xsltMapping']
 // Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
-const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
+const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'sendSftp', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'soapSender', 'processDirectSender', 'jmsSender', 'sftpSender', 'timer']
 const MAX_MAIN_STEPS = 50 // per process: the main flow and each local process, with its routers and the steps inside routes
 const SUPPORTED_ENDS = ['httpReceiver', 'processDirectReceiver', 'none']
@@ -56,9 +56,9 @@ const DEFAULT_STEP_NAMES = {
   parallelMulticast: 'Parallel Multicast',
   sequentialMulticast: 'Sequential Multicast'
 }
-/** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call, any Request Reply counts as one */
+/** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call, any Request Reply counts as one, any Send too */
 const defaultKey = (s) =>
-  s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type
+  s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
 const DEFAULT_EXCEPTION_SUBPROCESS_NAME = 'Exception Subprocess 1'
 
 const GROOVY_IMPORT = /import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Message\s*;?/
@@ -163,6 +163,15 @@ const PATTERN_HINTS = {
 }
 // a ProcessDirect receiver's address (a step's or the end's): the called iFlow's address, or a whole parameter
 const RECEIVER_ADDRESS_HINT = 'use the ProcessDirect address of the called iFlow, a path like /orders/process (letters, digits, - _ . ~), or a whole parameter like {{PD_Address}}'
+// a sendSftp step's fields (host, directory and the authentication names as for the SFTP sender)
+const SEND_SFTP_HINTS = {
+  host: 'use host or host:port, e.g. sftp.example.com:22, or a whole parameter like {{SFTP_Out_Address}}',
+  directory: 'use a path like /out (letters, digits, _ . ~ - /), or a whole parameter like {{SFTP_Out_Directory}}',
+  fileName: 'use letters, digits, _ . - and ${date:now:<format>}, ${header.<name>} or ${property.<name>} parts, e.g. order_${date:now:yyyyMMddHHmmss}.xml, or a whole parameter like {{SFTP_Out_FileName}}',
+  username: 'use letters, digits, _ . @ -',
+  privateKeyAlias: 'use the alias of a key pair in the tenant keystore (letters, digits, _ . -)',
+  credentialName: 'use the name of the deployed User Credentials (letters, digits, _ . -), or a whole parameter like {{SFTP_Out_Credential}}'
+}
 const TRIGGER_HINTS = {
   host: 'use host or host:port, e.g. sftp.example.com:22, or a whole parameter like {{SFTP_Address}}',
   directory: 'use a path like /in (letters, digits, _ . ~ - /), or a whole parameter like {{SFTP_Directory}}',
@@ -174,7 +183,7 @@ const TRIGGER_HINTS = {
 }
 
 /** Translates Ajv errors into plain sentences: [{ code, message }] */
-function schemaErrors(errors, skipPaths) {
+function schemaErrors(errors, skipPaths, spec) {
   const out = []
   const push = (code, message) => out.push({ code, message })
   for (const e of errors) {
@@ -202,7 +211,7 @@ function schemaErrors(errors, skipPaths) {
         push('BAD_VALUE', `${where}: must be '${e.params.allowedValue}'`)
         break
       case 'pattern':
-        push('BAD_FORMAT', `${where}: invalid value — ${(e.instancePath.startsWith('/trigger/') ? TRIGGER_HINTS[field] : field === 'address' && RECEIVER_ADDRESS_HINT) || PATTERN_HINTS[field] || `must match ${e.params.pattern}`}`)
+        push('BAD_FORMAT', `${where}: invalid value — ${(e.instancePath.startsWith('/trigger/') ? TRIGGER_HINTS[field] : ownerAt(spec, e.instancePath)?.type === 'sendSftp' ? SEND_SFTP_HINTS[field] : field === 'address' && RECEIVER_ADDRESS_HINT) || PATTERN_HINTS[field] || `must match ${e.params.pattern}`}`)
         break
       case 'propertyNames':
         push('BAD_PARAM_NAME', `${where}: invalid parameter name '${e.params.propertyName}' — start with a letter, then letters, digits or underscore`)
@@ -214,6 +223,9 @@ function schemaErrors(errors, skipPaths) {
   return out
 }
 
+/** The object that holds the value at a JSON pointer (e.g. the step of /steps/2/host) */
+const ownerAt = (spec, pointer) => pointer.split('/').slice(1, -1).reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), spec)
+
 /** Visits every string in the spec with its path */
 function walkStrings(node, path, fn) {
   if (typeof node === 'string') return fn(node, path)
@@ -223,13 +235,14 @@ function walkStrings(node, path, fn) {
 
 /**
  * Fields where {{Parameter}} references are allowed: an HTTP receiver's URL, credential name and location ID,
- * an SFTP sender's host, directory, file name, credential name and archive directory (Ref_Sender_SFTP_UserPw), a
+ * an SFTP sender's host, directory, file name, credential name and archive directory (Ref_Sender_SFTP_UserPw), an SFTP
+ * receiver's host, directory, file name and credential name (Ref_Receiver_SFTP), a
  * ProcessDirect receiver's address (Ref_Receiver_ProcessDirect), and the
  * value of a constant header or property (an externalized value; the other sources name a header, property, variable or
  * XPath)
  */
 const STEP_PATH = String.raw`(steps\[\d+\](\.branches\[\d+\]\.steps\[\d+\])?(\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\]|localProcesses\[\d+\]\.steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?)`
-const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId|server|to|address)|trigger\.(host|directory|fileName|credentialName|archiveDirectory)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
+const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId|server|to|address|host|directory|fileName)|trigger\.(host|directory|fileName|credentialName|archiveDirectory)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
 
 /**
  * @param {object} spec
@@ -272,6 +285,7 @@ function validate(spec, { attachments = [] } = {}) {
     else if (/xsl/i.test(type)) err('USE_MAPPING', `${where}: '${type}' — an XSLT step is { "type": "xsltMapping", "file": "transform.xsl" }, with the file attached`)
     else if (/mapping/i.test(type)) err('USE_MAPPING', `${where}: '${type}' — a Message Mapping is { "type": "messageMapping", "mapping": "<artifact id>" }`)
     else if (/soap/i.test(type)) err('USE_SOAP', `${where}: '${type}' — a SOAP call is { "type": "requestReplySoap", "url", "authType": "Basic", "credentialName", "proxyType": "On-Premise", "locationId"? }`)
+    else if (/sftp/i.test(type)) err('USE_SFTP', `${where}: '${type}' — writing a file to an SFTP server is { "type": "sendSftp", "host", "directory", "fileName", "authentication": "publicKey"|"userPassword", "username" and "privateKeyAlias" | "credentialName" }`)
     else if (/mail|smtp/i.test(type)) err('USE_MAIL', `${where}: '${type}' — a mail is { "type": "sendMail", "server": "host:port", "credentialName", "from", "to", "subject", "body"? }`)
     else if (/multicast|join|sequential|parallel/i.test(type))
       err('USE_MULTICAST', `${where}: '${type}' — a multicast is { "type": "multicast", "mode": "parallel"|"sequential", "join"?, "branches": [{ "name"?, "steps": [...] }, ...] }, and the next step is a { "type": "gather" }; the builder adds the Join`)
@@ -383,7 +397,7 @@ function validate(spec, { attachments = [] } = {}) {
     }
   }
 
-  if (!checkSchema(spec)) issues.push(...schemaErrors(checkSchema.errors, skip))
+  if (!checkSchema(spec)) issues.push(...schemaErrors(checkSchema.errors, skip, spec))
 
   // --- semantic rules (defensive: the spec may be partially invalid) ------------
   const isObj = (s) => s && typeof s === 'object'
@@ -633,6 +647,15 @@ function validate(spec, { attachments = [] } = {}) {
         ['every', String(t.minutes)]
       ], 'trigger')
   }
+  // SFTP receivers: the fields of the chosen authentication, and the stored value from the references
+  for (const [s, where] of allSteps.filter(([x]) => x?.type === 'sendSftp')) {
+    const needs = { publicKey: ['username', 'privateKeyAlias'], userPassword: ['credentialName'] }
+    for (const [auth, fields] of Object.entries(needs)) {
+      if (s.authentication === auth) for (const f of fields.filter((f) => s[f] == null)) err('MISSING_FIELD', `${where}: missing required field '${f}' (authentication ${auth})`)
+      else if (s.authentication in needs) for (const f of fields.filter((f) => s[f] != null)) err('SFTP_FIELD_UNUSED', `${where}.${f}: only used with authentication ${auth} — remove it, or set authentication "${auth}"`)
+    }
+    if (s.authentication in needs) valueCheck('SFTP Receiver', [['authentication', senderSettings.SFTP_AUTHENTICATION[s.authentication]]], where)
+  }
   for (const [s, where] of allSteps.filter(([x]) => isObj(x))) {
     if (s.type === 'contentModifier')
       for (const [table, rows] of [['headers', s.headers], ['properties', s.properties]])
@@ -710,7 +733,7 @@ function validate(spec, { attachments = [] } = {}) {
     const row = /\.(headers|properties)\[\d+\]\.value$/.test(path)
     const rowType = row && specSteps.valueAt(spec, path.replace(/\.value$/, ''))?.type
     if (!PARAM_FIELDS.test(path) || (row && rowType !== 'constant')) {
-      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the address of a ProcessDirect receiver, or as a constant value`)
+      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the host, directory, fileName or credentialName of an SFTP receiver (sendSftp), the address of a ProcessDirect receiver, or as a constant value`)
       return
     }
     if (!WHOLE_PARAM.test(value)) {

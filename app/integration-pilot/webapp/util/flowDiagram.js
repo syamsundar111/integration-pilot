@@ -22,6 +22,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     requestReplySoap: 'Request Reply (SOAP)',
     requestReplyProcessDirect: 'Request Reply (ProcessDirect)',
     sendMail: 'Send (Mail)',
+    sendSftp: 'Send (SFTP)',
     messageMapping: 'Message Mapping',
     xsltMapping: 'XSLT Mapping',
     multicast: 'Multicast'
@@ -46,7 +47,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
   }
   /** The key of a step's default name, as the builder counts them (validator.js defaultKey) */
   const defaultKey = (s) =>
-    s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type
+    s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
   const ICONS = {
     https: 'sap-icon://internet-browser',
     timer: 'sap-icon://fob-watch',
@@ -62,6 +63,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     requestReplySoap: 'sap-icon://outbox',
     requestReplyProcessDirect: 'sap-icon://outbox',
     sendMail: 'sap-icon://email',
+    sendSftp: 'sap-icon://upload',
     messageMapping: 'sap-icon://map-2',
     xsltMapping: 'sap-icon://map-2',
     writeVariables: 'sap-icon://save',
@@ -140,6 +142,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
         if (s.type === 'requestReplySoap') return { type: s.type, name, detail: 'SOAP 1.x', receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
         if (s.type === 'requestReplyProcessDirect') return { type: s.type, name, detail: 'ProcessDirect', receiver: { name: s.system || `Receiver${++rr}`, detail: s.address } }
         if (s.type === 'sendMail') return { type: s.type, name, detail: `to ${s.to}`, receiver: { name: s.system || `Receiver${++rr}`, detail: s.server } }
+        if (s.type === 'sendSftp') return { type: s.type, name, detail: s.fileName, receiver: { name: s.system || `Receiver${++rr}`, detail: `SFTP ${s.host}` } }
         if (s.type === 'groovyScript') return { type: s.type, name, detail: `${s.fileName}.groovy` }
         if (s.type === 'contentModifier') {
           const n = (s.headers || []).length + (s.properties || []).length
@@ -211,6 +214,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
             ? 'ProcessDirect'
             : s.type === 'sendMail'
             ? `to ${s.to}`
+            : s.type === 'sendSftp'
+            ? s.fileName
             : s.type === 'writeVariables'
               ? (s.variables || []).map((v) => v.name).join(', ') || undefined
               : s.type === 'router' && s.routes
@@ -223,6 +228,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           ? { name: s.system || 'Receiver', detail: s.url }
           : s.type === 'sendMail'
             ? { name: s.system || 'Receiver', detail: s.server }
+            : s.type === 'sendSftp'
+            ? { name: s.system || 'Receiver', detail: `SFTP ${s.host}` }
             : s.type === 'requestReplyProcessDirect'
               ? { name: s.system || 'Receiver', detail: s.address }
               : undefined,

@@ -860,6 +860,7 @@
             "requestReplySoap",
             "requestReplyProcessDirect",
             "sendMail",
+            "sendSftp",
             "messageMapping",
             "xsltMapping",
             "multicast"
@@ -1027,6 +1028,18 @@
           "if": {
             "properties": {
               "type": {
+                "const": "sendSftp"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/sendSftp"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "messageMapping"
               }
             }
@@ -1075,6 +1088,7 @@
             "xmlToJson",
             "processCall",
             "sendMail",
+            "sendSftp",
             "messageMapping",
             "xsltMapping"
           ]
@@ -1151,6 +1165,18 @@
           },
           "then": {
             "$ref": "#/definitions/sendMail"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sendSftp"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/sendSftp"
           }
         },
         {
@@ -1357,6 +1383,7 @@
             "requestReplySoap",
             "requestReplyProcessDirect",
             "sendMail",
+            "sendSftp",
             "messageMapping",
             "xsltMapping"
           ]
@@ -1481,6 +1508,18 @@
           },
           "then": {
             "$ref": "#/definitions/sendMail"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sendSftp"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/sendSftp"
           }
         },
         {
@@ -1678,6 +1717,69 @@
         "body": {
           "type": "string",
           "description": "Mail body, default ${in.body} (the message body)"
+        }
+      }
+    },
+    "sendSftp": {
+      "type": "object",
+      "required": [
+        "type",
+        "host",
+        "directory",
+        "fileName",
+        "authentication"
+      ],
+      "additionalProperties": false,
+      "description": "Send step with the SFTP adapter: writes the message body as a file, one-way, the flow continues. Proxy Internet, existing files overwritten, directories created. publicKey needs username and privateKeyAlias; userPassword needs credentialName. host, directory, fileName and credentialName can be a whole {{Param}}.",
+      "properties": {
+        "type": {
+          "const": "sendSftp"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "system": {
+          "$ref": "#/definitions/systemName"
+        },
+        "host": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "SFTP server, host or host:port (CPI uses 22 without a port), given by the user"
+        },
+        "directory": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.~/-]{1,255}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Directory the file is written to, e.g. /out, given by the user"
+        },
+        "fileName": {
+          "type": "string",
+          "maxLength": 255,
+          "pattern": "^(([A-Za-z0-9_.-]|\\$\\{(date:now:[A-Za-z0-9_.-]+|header\\.[A-Za-z][A-Za-z0-9_]*|property\\.[A-Za-z][A-Za-z0-9_]*)\\})+|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "File name: letters, digits, _ . - and ${date:now:<format>}, ${header.<name>} or ${property.<name>} parts, e.g. order_${date:now:yyyyMMddHHmmss}.xml"
+        },
+        "authentication": {
+          "enum": [
+            "publicKey",
+            "userPassword"
+          ]
+        },
+        "username": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.@-]{1,100}$",
+          "description": "publicKey: the user on the SFTP server"
+        },
+        "privateKeyAlias": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,100}$",
+          "description": "publicKey: the alias of a key pair in the tenant keystore"
+        },
+        "credentialName": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.-]{1,100}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "userPassword: the name of the deployed User Credentials (never the password)"
         }
       }
     },

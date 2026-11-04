@@ -1269,10 +1269,10 @@ describe('fewer and smaller model inputs', () => {
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', {})).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     const content = llm.chat.mock.calls.at(-1)[0].messages.at(-1).content
-    expect(content.length).toBeLessThan(5300) // 5214 with the SFTP sender's topic summary: before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
+    expect(content.length).toBeLessThan(5300) // 5284 with the receivers topic summary (5214 before it): before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
     const result = JSON.parse(content)
     expect(Object.keys(result.format.steps)).toEqual(['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'writeVariables', 'requestReplyHttp'])
-    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast', 'senders'])
+    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast', 'senders', 'receivers'])
     expect(result.format.trigger.join()).not.toMatch(/soapSender/) // a sender's format comes with its topic
     expect(result.rules).toBeUndefined()
   })
@@ -1284,7 +1284,7 @@ describe('fewer and smaller model inputs', () => {
     expect(Object.keys(result.format.steps)).toEqual(expect.arrayContaining(['splitter', 'gather', 'processCall']))
     expect(result.format.steps.router).toBeUndefined()
     expect(result.rules.splitting).toMatch(/^## Splitters and local processes/)
-    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'soap', 'mail', 'mapping', 'multicast', 'senders'])
+    expect(Object.keys(result.moreTopics)).toEqual(['routing', 'soap', 'mail', 'mapping', 'multicast', 'senders', 'receivers'])
     // the next message has the section in the prompt, and the tool sends no rules twice
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['splitting'] })).mockResolvedValueOnce(answer('ok'))
     await chat({ sessionId: first.sessionId, message: 'ok' })
@@ -1320,20 +1320,37 @@ describe('fewer and smaller model inputs', () => {
     expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toMatch(/## Senders/)
   })
 
-  test('the Senders section for an SFTP sender, without the unsupported-steps section; an SFTP receiver still gets it', async () => {
+  test('the Senders section for an SFTP sender, the Receivers section for an SFTP receiver; neither loads the unsupported-steps section', async () => {
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'Create an iFlow with an SFTP sender that logs each file.' })
     let system = llm.chat.mock.calls.at(-1)[0].messages[0].content
     expect(system).toMatch(/## Senders/)
+    expect(system).not.toMatch(/## Receivers/)
     expect(system).not.toMatch(/## Unsupported steps/)
-    llm.chat.mockResolvedValueOnce(answer('ok'))
-    await chat({ message: 'Create an iFlow that polls files from a server and writes them to SFTP.' })
-    system = llm.chat.mock.calls.at(-1)[0].messages[0].content
-    expect(system).toMatch(/## Senders/)
-    expect(system).toMatch(/## Unsupported steps/)
+    for (const message of ['Create an iFlow that polls files from a server and writes them to SFTP.', 'Create an iFlow with an SFTP receiver.', 'Upload the order to the SFTP server.']) {
+      llm.chat.mockResolvedValueOnce(answer('ok'))
+      await chat({ message })
+      system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+      expect(system).toMatch(/## Receivers/)
+      expect(system).toMatch(/`sendSftp`: a Send step that writes the message body as a file/)
+      expect(system).not.toMatch(/## Unsupported steps/)
+    }
   })
 
-  test('ProcessDirect calls (phase 6): the step and the end come with the senders topic only; the unsupported-steps section no longer loads', async () => {
+  test('the Receivers section: when the draft has an SFTP receiver, its format with the topic only', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', {})).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'what can you build?' })
+    let result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result.format.steps.sendSftp).toBeUndefined()
+    expect(result.format.exceptionSubprocess).toMatch(/sendSftp/)
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['receivers'] })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'what can you build?' })
+    result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result.format.steps.sendSftp).toMatch(/fileName/)
+    expect(result.rules.receivers).toMatch(/^## Receivers/)
+  })
+
+  test('ProcessDirect calls (phase 6): the step and the end come with the receivers topic only; the unsupported-steps section no longer loads', async () => {
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', {})).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     let result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
@@ -1342,19 +1359,30 @@ describe('fewer and smaller model inputs', () => {
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['senders'] })).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result.format.steps.requestReplyProcessDirect).toBeUndefined()
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['receivers'] })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'what can you build?' })
+    result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
     expect(result.format.steps.requestReplyProcessDirect).toMatch(/address/)
     expect(result.format.end.join()).toMatch(/"type": "processDirectReceiver"/)
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'Create an iFlow that calls the order iFlow via ProcessDirect.' })
     const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+    // the caller's rules in Receivers, the called iFlow's sender in Senders
+    expect(system).toMatch(/## Receivers[\s\S]*A ProcessDirect call, in the calling iFlow/)
     expect(system).toMatch(/## Senders/)
+    expect(system).not.toMatch(/## Senders(?:(?!## )[\s\S])*A ProcessDirect call/)
     expect(system).not.toMatch(/## Unsupported steps/)
   })
 
-  test('the Senders section: also when the request names ProcessDirect', async () => {
-    llm.chat.mockResolvedValueOnce(answer('ok'))
-    await chat({ message: 'Create an iFlow that another iFlow calls via ProcessDirect.' })
-    expect(llm.chat.mock.calls.at(-1)[0].messages[0].content).toMatch(/## Senders/)
+  test('a request that names ProcessDirect loads both sections: Senders (the processDirectSender) and Receivers (the call)', async () => {
+    for (const message of ['Create an iFlow that another iFlow calls via ProcessDirect.', 'Create an iFlow that calls the order iFlow via Process Direct.']) {
+      llm.chat.mockResolvedValueOnce(answer('ok'))
+      await chat({ message })
+      const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+      expect(system).toMatch(/## Senders[\s\S]*`processDirectSender`:/)
+      expect(system).toMatch(/## Receivers[\s\S]*A ProcessDirect call, in the calling iFlow/)
+    }
   })
 
   test('the Senders section: when the request names a SOAP sender, or the draft has one', async () => {

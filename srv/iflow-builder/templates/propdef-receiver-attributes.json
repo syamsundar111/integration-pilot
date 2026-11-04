@@ -63,5 +63,25 @@
     "attributeId": "ctype::Adapter/cname::ProcessDirect/vendor::SAP/version::1.1.2/attrId::address",
     "uilabel": "Address",
     "categorySuffix": ""
+  },
+  "sftpRcvHost": {
+    "attributeId": "ctype::AdapterVariant/cname::SFTP/tp::SFTP/mp::File/direction::Receiver/version::1.14.0/attrId::host",
+    "uilabel": "Address",
+    "categorySuffix": ""
+  },
+  "sftpRcvDirectory": {
+    "attributeId": "ctype::AdapterVariant/cname::SFTP/tp::SFTP/mp::File/direction::Receiver/version::1.14.0/attrId::path",
+    "uilabel": "Directory",
+    "categorySuffix": ""
+  },
+  "sftpRcvFileName": {
+    "attributeId": "ctype::AdapterVariant/cname::SFTP/tp::SFTP/mp::File/direction::Receiver/version::1.14.0/attrId::fileName",
+    "uilabel": "File Name",
+    "categorySuffix": ""
+  },
+  "sftpRcvCredentialName": {
+    "attributeId": "ctype::AdapterVariant/cname::SFTP/tp::SFTP/mp::File/direction::Receiver/version::1.14.0/attrId::credential_name",
+    "uilabel": "Credential Name",
+    "categorySuffix": ""
   }
 }

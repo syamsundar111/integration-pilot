@@ -461,6 +461,27 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       messageFlows.push(mf)
       return { p, mf }
     }
+    // an SFTP receiver of a Send step: host, directory, file name and the fields of its authentication
+    if (call.type === 'sendSftp') {
+      const publicKey = call.authentication === 'publicKey'
+      const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id, template: 'iflw/messageflow-sftp-receiver.xml' }
+      mf.vars = {
+        SOURCE: sourceNode.id,
+        TARGET: p.id,
+        SYSTEM_VALUE: val(system),
+        HOST_VALUE: val(call.host),
+        DIRECTORY_VALUE: val(call.directory),
+        FILE_NAME_VALUE: val(call.fileName),
+        AUTHENTICATION_VALUE: val(senderSettings.SFTP_AUTHENTICATION[call.authentication]),
+        USERNAME_VALUE: val(publicKey ? call.username : ''),
+        PRIVATE_KEY_ALIAS_VALUE: val(publicKey ? call.privateKeyAlias : ''),
+        CREDENTIAL_NAME_VALUE: val(publicKey ? '' : call.credentialName)
+      }
+      addParamRefs(system, [['sftpRcvHost', call.host], ['sftpRcvDirectory', call.directory], ['sftpRcvFileName', call.fileName], ['sftpRcvCredentialName', publicKey ? '' : call.credentialName]])
+      adapters.push({ type: 'SFTP', direction: 'Receiver', system, address: call.host })
+      messageFlows.push(mf)
+      return { p, mf }
+    }
     if (call.type === 'requestReplySoap' || call.type === 'sendMail') {
       const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id }
       const common = { SOURCE: sourceNode.id, TARGET: p.id, SYSTEM_VALUE: val(system), CREDENTIAL_NAME_VALUE: val(call.credentialName) }
@@ -768,6 +789,7 @@ function nodeToXml(n) {
     case 'requestReplyProcessDirect':
       return fill('iflw/step-request-reply.xml', io)
     case 'sendMail':
+    case 'sendSftp':
       return fill('iflw/step-send.xml', io)
     case 'messageMapping': {
       // an artifact has its bundle id; a mapping inside the iFlow has its file. The same path and uri either way

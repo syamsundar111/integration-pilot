@@ -30,12 +30,9 @@ sap.ui.define([], () => {
   const FLOW_CHANGE = /\b(create|build|generate|design|propose|add|insert|include|change|update|replace|extend)\b/i
 
   // Step kinds v1 does not build. Quoted text and code are ignored ("contains \"mapping\"" is data, not a step).
-  // SFTP: only receiver wording ("SFTP receiver", "upload/write/send ... to/via SFTP"); the SFTP sender can be built, and
-  // any other mention ("SFTP sender", an iFlow name with SFTP in it) is not a step.
   const UNSUPPORTED = [
     ['content enricher', /\bcontent enricher\b/i],
-    ['poll enrich', /\bpoll enrich\b/i],
-    ['SFTP', /\bsftp[ -]receivers?\b|\b(upload\w*|writ\w*|wrote|send\w*|sent|put\w*|deliver\w*|transfer\w*|push\w*|stor\w*)\b[^.;:\n]{0,40}?\b(to|via|over|into|on)\s+(an?\s+|the\s+)?sftp\b/i]
+    ['poll enrich', /\bpoll enrich\b/i]
   ]
 
   // A password, secret or token value in the message (a credential *name* is fine: "credential ERP_BASIC_USER")
@@ -47,8 +44,8 @@ sap.ui.define([], () => {
   ]
 
   // Where a {{Param}} can stand: a receiver URL (a line about a URL, or right after an HTTP method or
-  // "address"), a receiver's credential name or location ID, a mail's server or recipients, an SFTP sender's host,
-  // directory, file name or archive directory, or a constant
+  // "address"), a receiver's credential name or location ID, a mail's server or recipients, an SFTP sender's or receiver's
+  // host, directory, file name or archive directory, or a constant
   // value ("constant {{X}}", "externalized parameter {{X}}", "server externalized as {{X}}")
   const URL_LINE = /\burls?\b|https?:\/\//i
   const PARAM_POSITION =
@@ -105,7 +102,7 @@ sap.ui.define([], () => {
     unsupported: (found) =>
       `Not supported yet: ${found.join(', ')}. Supported: Content Modifier, Groovy Script, Write Variables, JSON/XML converters, HTTP and SOAP request-reply, mail, mappings, routers, multicasts, splitters, gathers and process calls. Use a Groovy script, or add the step in the CPI web editor after creation.`,
     params: (names) =>
-      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, the URL of a SOAP receiver, the server, credential name or recipients of a mail, the host, directory, file name, credential name or archive directory of an SFTP sender, or as a constant value. Use literal values elsewhere.`,
+      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, the URL of a SOAP receiver, the server, credential name or recipients of a mail, the host, directory, file name, credential name or archive directory of an SFTP sender, the host, directory, file name or credential name of an SFTP receiver, or as a constant value. Use literal values elsewhere.`,
     secret:
       'This looks like a password, secret or token. Never send credentials: deploy them as security material in CPI (User Credentials or OAuth2 Client Credentials) and give only its name, e.g. "Basic, credential ERP_BASIC_USER".'
   }

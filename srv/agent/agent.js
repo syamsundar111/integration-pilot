@@ -60,7 +60,7 @@ const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 
  * prefix for prompt caching); a section, once included, stays for the rest of the conversation
  * (sticky), so the rules do not change between messages. Order is fixed, not the order of activation.
  */
-const UNSUPPORTED_TEXT = /\b(router|splitter|gather|content enricher|poll enrich|aggregator|xslt|(message|graphical|operation|xml|edmx|value)\s+mapping|mapping\s+(step|artifact)|sftp(?![ -]senders?)|write variables?|process ?call|local integration process)\b/i
+const UNSUPPORTED_TEXT = /\b(router|splitter|gather|content enricher|poll enrich|aggregator|xslt|(message|graphical|operation|xml|edmx|value)\s+mapping|mapping\s+(step|artifact)|write variables?|process ?call|local integration process)\b/i
 // words of a request that needs a feature section; the core prompt keeps a pointer line for requests that use other words
 const ROUTING_TEXT = /\b(rout(e|es|er|ers|ing)|branch(es|ing)?|conditions?|conditional|otherwise|depending on|if (it|the|a)\b[^.\n]{0,60}\b(else|otherwise))\b/i
 const SPLITTING_TEXT = /\b(split(s|ter|ters|ting)?|gather|for (each|every)|each (item|order|record|entry|line|element|row|message)|per (item|order|record|entry|line|element|row)|one by one|individually|local (integration )?process(es)?|process calls?|loop(s|ing)?|iterat\w*|paging|page by page|next page|batch(es)?)\b/i
@@ -68,6 +68,8 @@ const SOAP_TEXT = /\b(soap|wsdl|web ?services?)\b/i
 const MAIL_TEXT = /\b(e-?mails?|mails?|smtp)\b/i
 const MAPPING_TEXT = /\b(mappings?|xslt?|mmap)\b/i
 const SENDERS_TEXT = /\b(senders?|process ?direct|jms|(message )?queues?|sftp|poll(s|ing)? (for )?files|soap (service|endpoint|interface|requests?|calls? (it|the iflow))|called (by|via) soap|expose[sd]? (it )?as (a )?soap)\b/i
+// receivers in steps: an SFTP receiver (receiver wording only: an SFTP sender reads files), ProcessDirect calls
+const RECEIVERS_TEXT = /\b(sftp[ -]receivers?|process ?direct|(upload\w*|writ\w*|wrote|send\w*|sent|put\w*|deliver\w*|transfer\w*|push\w*|stor\w*)\b[^.;:\n]{0,40}?\b(to|via|over|into|on)\s+(an?\s+|the\s+)?sftp)\b/i
 const MULTICAST_TEXT = /\b(multicasts?|parallel branch(es)?|fan[- ]?out|at the same time|in parallel|join step)\b/i
 const SENDER_TRIGGERS = ['soapSender', 'processDirectSender', 'jmsSender', 'sftpSender']
 const PROMPT_SECTIONS = [
@@ -84,8 +86,9 @@ const PROMPT_SECTIONS = [
   { name: 'mapping', applies: ({ userText, draftTypes }) => draftTypes.has('messageMapping') || draftTypes.has('xsltMapping') || MAPPING_TEXT.test(userText) },
   { name: 'multicast', applies: ({ userText, draftTypes }) => draftTypes.has('multicast') || MULTICAST_TEXT.test(userText) },
   // a sender other than HTTPS: the request names one, or the draft's trigger is one
-  // senders, and ProcessDirect calls (a step or the end): the request names one, or the draft has one
-  { name: 'senders', applies: ({ userText, draftTrigger, draftTypes, draftEnd }) => SENDER_TRIGGERS.includes(draftTrigger) || draftTypes.has('requestReplyProcessDirect') || draftEnd === 'processDirectReceiver' || SENDERS_TEXT.test(userText) }
+  { name: 'senders', applies: ({ userText, draftTrigger }) => SENDER_TRIGGERS.includes(draftTrigger) || SENDERS_TEXT.test(userText) },
+  // receivers in steps (SFTP) and ProcessDirect calls (a step or the end): the request names one, or the draft has one
+  { name: 'receivers', applies: ({ userText, draftTypes, draftEnd }) => draftTypes.has('sendSftp') || draftTypes.has('requestReplyProcessDirect') || draftEnd === 'processDirectReceiver' || RECEIVERS_TEXT.test(userText) }
 ].map((s) => ({ ...s, text: fs.readFileSync(path.join(__dirname, 'prompt-sections', `${s.name}.md`), 'utf8').trim() }))
 
 const db = (user, fn) => cds.tx({ user }, fn)

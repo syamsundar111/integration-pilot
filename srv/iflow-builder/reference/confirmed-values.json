@@ -128,6 +128,18 @@
       "Non XML": "re-selected in Ref_Structure (LPC_FetchPages), 2026-10-29"
     }
   },
+  "SFTP Receiver": {
+    "authentication": {
+      "public_key": "Public Key, selected in Ref_Receiver_SFTP (RCV_SFTP_Key, built from scratch in the CPI editor), 2026-11-04",
+      "user_password": "User Name/Password, selected in Ref_Receiver_SFTP (RCV_SFTP_Pw, built from scratch), 2026-11-04"
+    },
+    "proxyType": {
+      "none": "Proxy Type Internet, selected in Ref_Receiver_SFTP (both receivers, built from scratch), 2026-11-04"
+    },
+    "fileExist": {
+      "Override": "Handling for Existing Files Override, selected in Ref_Receiver_SFTP (both receivers, built from scratch), 2026-11-04"
+    }
+  },
   "SOAP Receiver": {
     "authentication": {
       "Basic": "re-selected in Ref_Receivers (RR_Soap), confirmed 2026-10-30"

@@ -15,12 +15,12 @@ turns into extra questions.
 | | Supported | Not supported |
 |---|---|---|
 | Trigger | HTTPS sender, SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out), ProcessDirect sender, JMS sender (a queue) or SFTP sender (polls a directory every 15 minutes; public key or user name/password; the file is deleted or moved; host, directory, file name, credential name and archive directory can be parameters), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules and other senders; SFTP sender settings as parameters other than those five |
-| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP, SOAP 1.x and ProcessDirect request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
-| Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP, SOAP 1.x and ProcessDirect request-reply, Send with a Mail or SFTP receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
+| Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail, SFTP Send and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP or ProcessDirect receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
 | SOAP 1.x and Mail receivers | SOAP: Basic with a credential name, On-Premise with an optional location ID, timeout, the address can be a parameter. Mail: STARTTLS mandatory, Plain User/Password, text/plain; the server, credential name and recipients can be parameters | SOAP with a WSDL or operation, over the Internet or without authentication; mail attachments, other protection or body types; SOAP or Mail at the end of the flow |
-| Error handling | One exception subprocess (Content Modifier, Groovy, converters, Process Call, Mail), ending with a Message, Escalation or Error End | Request-reply inside the exception subprocess |
+| Error handling | One exception subprocess (Content Modifier, Groovy, converters, Process Call, Mail, SFTP Send), ending with a Message, Escalation or Error End | Request-reply inside the exception subprocess |
 
 Hard limits:
 
@@ -61,8 +61,9 @@ Hard limits:
   existing iFlow. An XSLT Mapping takes XML, a Message Mapping XML or JSON; CPI may show an input notice on them.
 - Step names, receiver names and Groovy file names must be **unique**.
 - `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver,
-  the **URL** of a SOAP receiver, the **server**, **credential name** or **recipients** of a mail, or as a
-  whole **constant** header or property value. "Default" for a parameter means its value
+  the **URL** of a SOAP receiver, the **server**, **credential name** or **recipients** of a mail, the **host**,
+  **directory**, **file name** or **credential name** of an SFTP sender or receiver (a sender also its **archive
+  directory**), or as a whole **constant** header or property value. "Default" for a parameter means its value
   (Configure); to fill a Content Modifier's Default Value column, say so explicitly: "Default Value
   column = X".
 - Header and property sources: constant, expression, header, property, XPath (with a data type),
@@ -91,10 +92,10 @@ Error handling: <exception subprocess: what to set, log or return when a step fa
 
 Before sending, the chat checks the request without calling the model. It warns about:
 
-- steps the app cannot build yet (Content Enricher, Poll Enrich, SFTP as a step, i.e. an SFTP receiver); an SFTP sender is fine
+- steps the app cannot build yet (Content Enricher, Poll Enrich)
 - more than 25 numbered steps
-- `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID, or an SFTP sender's host,
-  directory, file name, credential name or archive directory
+- `{{…}}` used anywhere other than a whole receiver URL, credential name or location ID, or an SFTP sender's or
+  receiver's host, directory, file name, credential name or (sender) archive directory
 - template fields that are still unfilled
 - a password, secret or token in the message (give the credential name instead)
 
@@ -123,6 +124,12 @@ proposal says which:
   can't be built yet). Name the queue: the assistant asks for it and never invents one. A failed message is retried;
   with error handling, the exception subprocess ends with an Error End so the retry still happens. Your tenant needs
   message queues for JMS; the queue is created when the iFlow is first deployed.
+- An **SFTP receiver** ("write the order to SFTP, directory /out") is a Send step: it writes the message body as a
+  file and the flow continues. Give the host, directory, file name and authentication (public key with user name and
+  key alias, or a credential name); the assistant asks for missing ones. A file of the same name is overwritten, so
+  a file name usually gets a date part (`order_${date:now:yyyyMMddHHmmss}.xml`); `${header.<name>}` and
+  `${property.<name>}` parts work too. Missing directories are created. The SFTP server's host key must be in the
+  tenant's known hosts.
 - **End of error handling**: an exception subprocess ends with an **Escalation End**, so a failed
   message shows as escalated in monitoring. Ask for an Error End, or for "return the error to the
   caller" (a Message End: the sender gets the response, but the message looks completed).
@@ -166,6 +173,8 @@ spec:
 - SOAP 1.x request-replies without a WSDL and Mail steps are kept; a setting given as a parameter takes
   its default unless the field can hold a parameter. A SOAP channel with a WSDL or another
   authentication becomes a placeholder.
+- SFTP Send steps are kept when every setting is as the app writes it and only the host, directory, file name or
+  credential name is a parameter; otherwise the step becomes a placeholder that lists the differences.
 - Iterating and General Splitters, Gathers, (Looping) Process Calls and the local processes they call
   are kept. A splitter's settings given as parameters take their defaults. What a local process cannot
   hold becomes a placeholder inside it.
