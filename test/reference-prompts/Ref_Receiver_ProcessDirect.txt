@@ -1,0 +1,9 @@
+Create iFlow Ref_Receiver_ProcessDirect in package iglowpackage (built from scratch in the CPI editor).
+
+Main integration process:
+1. Timer - Timer start event: Simple Schedule, Repeat None, Schedule On Deployment.
+2. CM_Prepare - Content Modifier. Message Body, Type Expression, Body <Order><id>1</id></Order>.
+3. RR_CallOrders - Request Reply to receiver RCV_PD_Orders, ProcessDirect adapter:
+   Address /dummy/pd/orders.
+4. End - Message End, connected to receiver RCV_PD_Notify, ProcessDirect adapter:
+   Address externalized as {{PD_Notify_Address}} = /dummy/pd/notify.
