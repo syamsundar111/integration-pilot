@@ -123,6 +123,9 @@ Extends the builder beyond the linear spec v1; phases, status and open items: [d
   the 3 tests of `test/no-client-data.test.js` skip without `test/local/forbidden-names.txt`. So the client-data check
   only runs in the main tree: run it there before committing. One of them scans the commits not on a remote
   (`--branches --not --remotes`), so a name in an intermediate commit is caught before a push.
+- Commit with `bash tools/commit.sh <message file> <files...>`: it stops when another file changed, runs the main-tree
+  tests, the client-data scan and ESLint, commits exactly those files, then runs `tools/worktree-check.sh` on the commit.
+  Before a push, `node tools/push-scan.js` scans every unpushed commit (messages, file versions, zip entries).
 - Stop and report after each step. No commit without the user's OK.
 - Push only when the user asks; before pushing, run the client-data scan over every unpushed commit, including zip
   versions, and never force-push.
