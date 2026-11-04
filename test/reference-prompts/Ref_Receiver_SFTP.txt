@@ -1,0 +1,20 @@
+Create iFlow Ref_Receiver_SFTP in package iglowpackage (built from scratch in the CPI editor).
+
+Main integration process:
+1. Start Timer 1 - Timer start event: Simple Schedule, Repeat None, Schedule On Deployment.
+2. CM_Prepare - Content Modifier. Message Body, Type Constant, Body <Order><id>1</id></Order>.
+3. SND_SftpKey - Send to receiver RCV_SFTP_Key, SFTP adapter:
+   Target: Directory /dummy/out, File Name order_${date:now:yyyyMMddHHmmss}.xml, Append Timestamp off,
+   Address sftp.example.com:22, Proxy Type Internet, Authentication Public Key, User Name DUMMY_USER,
+   Private Key Alias DUMMY_KEY, Timeout, Maximum Reconnect Attempts, Reconnect Delay default,
+   Automatically Disconnect off, Enable Support for Deprecated Algorithms off.
+   Processing: Change Directories Stepwise on, Create Directories on, Flatten File Names off,
+   Prevent Directory Traversal on, Use Fast Exists Check on, Handling for Existing Files Override,
+   Use Temporary File off.
+4. SND_SftpPw - Send to receiver RCV_SFTP_Pw, SFTP adapter, as SND_SftpKey except:
+   Authentication User Name/Password. Externalized, with dummy defaults:
+   - Address {{SFTP_Out_Address}} = sftp.example.com:22
+   - Credential Name {{SFTP_Out_Credential}} = DUMMY_SFTP_CREDENTIAL
+   - Directory {{SFTP_Out_Directory}} = /dummy/out
+   - File Name {{SFTP_Out_FileName}} = order.xml
+5. End - Message End.
