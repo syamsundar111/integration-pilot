@@ -699,6 +699,10 @@ describe('senders (phase 5)', () => {
       expect(validate(baseSpec({ exceptionSubprocess: { steps: [call()] } })).valid).toBe(false)
       expectError(baseSpec({ end: { type: 'jmsReceiver' } }), /Use httpReceiver \{ url, method, authType \}, processDirectReceiver \{ address \} or none\./)
     })
+    test('a call without a name is "Request Reply N", counted with the HTTP and SOAP Request Replies, as in CPI', () => {
+      const spec = baseSpec({ steps: [{ type: 'requestReplyHttp', url: 'https://x.example.com/a', method: 'GET', authType: 'None' }, { type: 'requestReplyProcessDirect', address: '/a' }] })
+      expect(effectiveNames(spec).steps).toEqual(['Request Reply 1', 'Request Reply 2'])
+    })
     test('receiver names stay unique across the step and the end', () => {
       expectError(baseSpec({ steps: [call({ system: 'RCV_PD' })], end: { type: 'processDirectReceiver', system: 'RCV_PD', address: '/x' } }), /RCV_PD/)
     })

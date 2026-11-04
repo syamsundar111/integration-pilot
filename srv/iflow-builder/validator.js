@@ -58,7 +58,7 @@ const DEFAULT_STEP_NAMES = {
 }
 /** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call, any Request Reply counts as one, any Send too */
 const defaultKey = (s) =>
-  s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
+  s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : ['requestReplySoap', 'requestReplyProcessDirect'].includes(s.type) ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
 const DEFAULT_EXCEPTION_SUBPROCESS_NAME = 'Exception Subprocess 1'
 
 const GROOVY_IMPORT = /import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Message\s*;?/

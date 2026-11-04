@@ -47,7 +47,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
   }
   /** The key of a step's default name, as the builder counts them (validator.js defaultKey) */
   const defaultKey = (s) =>
-    s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : s.type === 'requestReplySoap' ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
+    s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : ['requestReplySoap', 'requestReplyProcessDirect'].includes(s.type) ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
   const ICONS = {
     https: 'sap-icon://internet-browser',
     timer: 'sap-icon://fob-watch',
