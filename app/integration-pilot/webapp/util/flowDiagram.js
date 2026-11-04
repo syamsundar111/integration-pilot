@@ -20,6 +20,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     gather: 'Gather',
     processCall: 'Process Call',
     requestReplySoap: 'Request Reply (SOAP)',
+    requestReplyProcessDirect: 'Request Reply (ProcessDirect)',
     sendMail: 'Send (Mail)',
     messageMapping: 'Message Mapping',
     xsltMapping: 'XSLT Mapping',
@@ -59,6 +60,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     xmlToJson: 'sap-icon://switch-views',
     requestReplyHttp: 'sap-icon://outbox',
     requestReplySoap: 'sap-icon://outbox',
+    requestReplyProcessDirect: 'sap-icon://outbox',
     sendMail: 'sap-icon://email',
     messageMapping: 'sap-icon://map-2',
     xsltMapping: 'sap-icon://map-2',
@@ -136,6 +138,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
         const name = nameOf(s)
         if (s.type === 'requestReplyHttp') return { type: s.type, name, detail: s.method, receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
         if (s.type === 'requestReplySoap') return { type: s.type, name, detail: 'SOAP 1.x', receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
+        if (s.type === 'requestReplyProcessDirect') return { type: s.type, name, detail: 'ProcessDirect', receiver: { name: s.system || `Receiver${++rr}`, detail: s.address } }
         if (s.type === 'sendMail') return { type: s.type, name, detail: `to ${s.to}`, receiver: { name: s.system || `Receiver${++rr}`, detail: s.server } }
         if (s.type === 'groovyScript') return { type: s.type, name, detail: `${s.fileName}.groovy` }
         if (s.type === 'contentModifier') {
@@ -161,6 +164,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       })),
       end: {
         ...(spec.end.type === 'httpReceiver' && { receiver: { name: spec.end.system || 'Receiver', detail: `${spec.end.method} ${spec.end.url}` } }),
+        ...(spec.end.type === 'processDirectReceiver' && { receiver: { name: spec.end.system || 'Receiver', detail: `ProcessDirect ${spec.end.address}` } }),
         event: spec.end.event || 'message',
         // every route of the last router ends: the main flow has no end of its own
         none: (() => {
@@ -203,6 +207,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
             ? s.method
             : s.type === 'requestReplySoap'
             ? 'SOAP 1.x'
+            : s.type === 'requestReplyProcessDirect'
+            ? 'ProcessDirect'
             : s.type === 'sendMail'
             ? `to ${s.to}`
             : s.type === 'writeVariables'
@@ -217,7 +223,9 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
           ? { name: s.system || 'Receiver', detail: s.url }
           : s.type === 'sendMail'
             ? { name: s.system || 'Receiver', detail: s.server }
-            : undefined,
+            : s.type === 'requestReplyProcessDirect'
+              ? { name: s.system || 'Receiver', detail: s.address }
+              : undefined,
       routes:
         routed && s.type === 'router'
           ? s.routes.map((r) => ({ name: r.name, condition: r.default ? null : r.condition, steps: r.steps.map((x) => x.name), end: r.end ? r.end.kind : null }))
@@ -233,6 +241,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
       end: {
         ...(e.type === 'httpReceiver'
           ? { receiver: { name: e.system || 'Receiver', detail: `${e.method || ''} ${e.url || ''}`.trim() } }
+          : e.type === 'processDirectReceiver'
+            ? { receiver: { name: e.system || 'Receiver', detail: `ProcessDirect ${e.address}` } }
           : e.type === 'receiver'
             ? { receiver: { name: e.adapter || 'Receiver', detail: e.address } }
             : {}),

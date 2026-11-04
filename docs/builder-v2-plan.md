@@ -41,7 +41,7 @@ prompt and the tokens used reported per prompt.
 | 4 | Message Mapping: an existing artifact (a `PH_` placeholder if it does not exist) or a mapping inside the iFlow carried from Import; XSLT Mapping step (format below) | Ref_Mapping, MM_DummyOrderToNotif | done |
 | 9 | Multicast and Join (format below) | Ref_Multicast | done |
 | 5 | Senders (HTTPS, SOAP, ProcessDirect, SFTP, JMS) and the HTTP error response pattern (format below) | Ref_Sender_* | done (error response, SOAP, ProcessDirect, JMS; SFTP committed as e637698) |
-| 6 | Receivers 2, in this order: ProcessDirect, SFTP, OData V2, IDoc, then the IDoc sender, JDBC, RFC. One small export per adapter, built from scratch in the CPI editor; the user makes each just before it starts, from a field-by-field checklist | Ref_Receiver_* and Ref_Sender_IDoc (new); Ref_Receivers_2 (iGlow) only for comparison | in progress: the ProcessDirect receiver waits for its export |
+| 6 | Receivers 2, in this order: ProcessDirect, SFTP, OData V2, IDoc, then the IDoc sender, JDBC, RFC. One small export per adapter, built from scratch in the CPI editor; the user makes each just before it starts, from a field-by-field checklist | Ref_Receiver_* and Ref_Sender_IDoc (new); Ref_Receivers_2 (iGlow) only for comparison | in progress: the ProcessDirect receiver waits for the tenant check |
 | 6b | Content Enricher and Poll Enrich (they need phase 6's OData and SFTP adapters; neither real iFlow uses them) | Ref_Multicast_Enrich, to be re-selected first | after phase 6 |
 | 6c | The OData V2 receiver of the HR cloud adapter (both real iFlows use it) | an export to come | after 6b |
 | 7 | Persistence: Data Store, Idempotent Process Call, JMS (check transaction handling first, see Later) | Ref_Persistence | waits for the user's go |
@@ -191,6 +191,15 @@ Phase 5 (format agreed 2026-11-02, one sender per task):
   said in one line); its summary always says what happens to the files, and ends an exception subprocess with an Error End. The panel says the host key must be
   in the tenant's known hosts (and, for public key, that the key alias must be a key pair the server accepts).
 
+## Phase 6 format
+
+- **`requestReplyProcessDirect { address, system? }`** (a step: main line, routes, branches, local processes; not the
+  exception subprocess) and the end **`processDirectReceiver { address, system? }`** (a Message End), from
+  Ref_Receiver_ProcessDirect. The address is the called iFlow's ProcessDirect sender address, or a whole parameter with
+  the parameter reference as the editor writes it. The `processDirect` pattern builds the call instead of a `PH_`
+  placeholder. Import and update keep both exactly; Import and update also recognise a placeholder again by its
+  `REPLACE_WITH` property (the description is not in the iFlow).
+
 ## Later (no phase yet)
 
 From the former reference export checklist; each needs a reference export first.
@@ -215,6 +224,8 @@ From the former reference export checklist; each needs a reference export first.
 - SFTP sender: authentication, post-processing and the scheduler as externalized parameters (a real iFlow with an
   SFTP sender has them so); needs an export that externalizes them. Until then Import keeps such a sender only as
   HTTPS, with a note, and an update is blocked.
+- ProcessDirect receiver at the end: confirm on a deployed run whether the caller waits until the called iFlow has
+  finished (the panel says "may").
 - JMS and SFTP senders: confirm on a deployed run how JMS retry and SFTP file handling behave when the exception
   subprocess ends with a Message End, an Escalation End and an Error End (the panel says "may" until then).
 - ProcessDirect: confirm on a deployed run that headers and the body reach the called iFlow and exchange properties

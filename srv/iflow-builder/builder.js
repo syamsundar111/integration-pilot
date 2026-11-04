@@ -9,7 +9,7 @@
 const fs = require('fs')
 const path = require('path')
 const JSZip = require('jszip')
-const { validate, effectiveNames, RECEIVER_STEPS } = require('./validator')
+const { validate, effectiveNames, RECEIVER_STEPS, RECEIVER_ENDS } = require('./validator')
 const receiverSettings = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
 const specSteps = require('./spec-steps')
@@ -452,6 +452,15 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
   const addReceiver = (sourceNode, call, system, placement) => {
     const p = { id: nextId('Participant'), kind: 'receiver', name: system, ...placement }
     participants.push(p)
+    // a ProcessDirect receiver (a Request Reply's or the Message End's): only the address
+    if (call.type === 'requestReplyProcessDirect' || call.type === 'processDirectReceiver') {
+      const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id, template: 'iflw/messageflow-processdirect-receiver.xml' }
+      mf.vars = { SOURCE: sourceNode.id, TARGET: p.id, SYSTEM_VALUE: val(system), ADDRESS_VALUE: val(call.address) }
+      addParamRefs(system, [['pdAddress', call.address]])
+      adapters.push({ type: 'ProcessDirect', direction: 'Receiver', system, address: call.address })
+      messageFlows.push(mf)
+      return { p, mf }
+    }
     if (call.type === 'requestReplySoap' || call.type === 'sendMail') {
       const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id }
       const common = { SOURCE: sourceNode.id, TARGET: p.id, SYSTEM_VALUE: val(system), CREDENTIAL_NAME_VALUE: val(call.credentialName) }
@@ -526,7 +535,7 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
     mf.from = [n.x + L.TASK_W / 2, n.y + L.TASK_H]
     mf.to = [p.x + L.PART_W / 2, p.y]
   }
-  if (spec.end.type === 'httpReceiver') {
+  if (RECEIVER_ENDS.includes(spec.end.type)) {
     const { p, mf } = addReceiver(end, spec.end, names.endSystem, { x: L.POOL_X + poolW + L.RECEIVER_GAP, y: cy0 - L.PART_H / 2 })
     mf.from = [end.x + L.EVENT / 2, cy0]
     mf.to = [p.x, cy0]
@@ -658,7 +667,12 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
         ? { type: spec.trigger.type, ...(spec.trigger.address && { address: spec.trigger.address }), ...(spec.trigger.queue && { queue: spec.trigger.queue }), ...(spec.trigger.host && { host: spec.trigger.host, directory: spec.trigger.directory }) }
         : { type: 'timer', mode: spec.trigger.mode, ...(spec.trigger.mode === 'every' && { minutes: spec.trigger.minutes }) },
     steps: nodes.filter((n) => ['step', 'router', 'multicast'].includes(n.kind)).map((n) => ({ id: n.id, type: n.step.type, name: n.name, ...(n.lane && { route: true }) })),
-    end: spec.end.type === 'httpReceiver' ? { type: 'httpReceiver', system: names.endSystem, url: spec.end.url } : { type: 'none' },
+    end:
+      spec.end.type === 'httpReceiver'
+        ? { type: 'httpReceiver', system: names.endSystem, url: spec.end.url }
+        : spec.end.type === 'processDirectReceiver'
+          ? { type: 'processDirectReceiver', system: names.endSystem, address: spec.end.address }
+          : { type: 'none' },
     exceptionSubprocess: sub
       ? { id: sub.id, name: sub.name, steps: subNodes.filter((n) => n.kind === 'step').map((n) => ({ id: n.id, type: n.step.type, name: n.name })) }
       : null,
@@ -751,6 +765,7 @@ function nodeToXml(n) {
       return fill('iflw/step-xml-to-json.xml', io)
     case 'requestReplyHttp':
     case 'requestReplySoap':
+    case 'requestReplyProcessDirect':
       return fill('iflw/step-request-reply.xml', io)
     case 'sendMail':
       return fill('iflw/step-send.xml', io)

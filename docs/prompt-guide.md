@@ -14,10 +14,10 @@ turns into extra questions.
 
 | | Supported | Not supported |
 |---|---|---|
-| Trigger | HTTPS sender, SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out), ProcessDirect sender, JMS sender (a queue) or SFTP sender (polls a directory every 15 minutes; public key or user name/password; the file is deleted or moved; host, directory, file name, credential name and archive directory can be parameters), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules and other senders; SFTP sender settings as parameters other than those five; the ProcessDirect call itself (a placeholder for now) |
-| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP and SOAP 1.x request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
+| Trigger | HTTPS sender, SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out), ProcessDirect sender, JMS sender (a queue) or SFTP sender (polls a directory every 15 minutes; public key or user name/password; the file is deleted or moved; host, directory, file name, credential name and archive directory can be parameters), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules and other senders; SFTP sender settings as parameters other than those five |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP, SOAP 1.x and ProcessDirect request-reply, Send with a Mail receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
 | Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
-| End | HTTP receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
+| End | HTTP or ProcessDirect receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
 | SOAP 1.x and Mail receivers | SOAP: Basic with a credential name, On-Premise with an optional location ID, timeout, the address can be a parameter. Mail: STARTTLS mandatory, Plain User/Password, text/plain; the server, credential name and recipients can be parameters | SOAP with a WSDL or operation, over the Internet or without authentication; mail attachments, other protection or body types; SOAP or Mail at the end of the flow |
 | Error handling | One exception subprocess (Content Modifier, Groovy, converters, Process Call, Mail), ending with a Message, Escalation or Error End | Request-reply inside the exception subprocess |
@@ -116,9 +116,9 @@ proposal says which:
   an HTTPS sender's, need the role ESBMessaging.send.
 - A **ProcessDirect sender** ("ProcessDirect sender at /orders/process") makes an iFlow that other iFlows on the
   tenant call with exactly that address; it needs no authentication. Headers and the body reach it, but exchange
-  properties may not: pass values as headers. For "one iFlow calls another", the assistant builds the called iFlow
-  and puts a placeholder `PH_` step where the caller's call goes; replace it in the CPI editor with a Request Reply
-  to a ProcessDirect receiver at the same address.
+  properties may not: pass values as headers. For "one iFlow calls another", the assistant builds the caller with a
+  ProcessDirect Request Reply (it waits for the reply) or a ProcessDirect receiver at the end (it hands the message
+  on), at exactly the called iFlow's address. Deploy the called iFlow first.
 - A **JMS sender** ("JMS sender, queue ORDERS_IN") reads a queue that another iFlow fills with a JMS receiver (which
   can't be built yet). Name the queue: the assistant asks for it and never invents one. A failed message is retried;
   with error handling, the exception subprocess ends with an Error End so the retry still happens. Your tenant needs

@@ -235,6 +235,11 @@ function stepOf(node, adaptersBySource, processNames = {}) {
     case 'ExternalCall': {
       const adapter = adaptersBySource[base.id]
       if (adapter?.type === 'HTTP') return { ...base, type: 'requestReplyHttp', ...httpCall(adapter) }
+      if (adapter?.type === 'ProcessDirect') {
+        const step = { ...base, type: 'requestReplyProcessDirect', system: adapter.system, address: adapter.address }
+        Object.defineProperty(step, 'adapter', { value: adapter, enumerable: false })
+        return step
+      }
       if (adapter?.type === 'SOAP' && adapter.settings.MessageProtocol === 'SOAP 1.x') {
         const step = { ...base, type: 'requestReplySoap', ...soapCall(adapter) }
         Object.defineProperty(step, 'settings', { value: adapter.settings, enumerable: false })
@@ -252,6 +257,18 @@ function stepOf(node, adaptersBySource, processNames = {}) {
     default:
       return { ...base, type: p.activityType ? p.activityType[0].toLowerCase() + p.activityType.slice(1) : local, activityType: p.activityType || null }
   }
+}
+
+/** The end of a process by the adapter on its end event: none, an HTTP or ProcessDirect receiver, or another receiver */
+function receiverEnd(a) {
+  if (!a) return { type: 'none' }
+  if (a.type === 'HTTP') return { type: 'httpReceiver', ...httpCall(a) }
+  if (a.type === 'ProcessDirect') {
+    const end = { type: 'processDirectReceiver', system: a.system, address: a.address }
+    Object.defineProperty(end, 'adapter', { value: a, enumerable: false })
+    return end
+  }
+  return { type: 'receiver', adapter: a.type, system: a.system, address: a.address }
 }
 
 // --- flow walking ----------------------------------------------------------------------
@@ -677,11 +694,7 @@ async function parse(input) {
   const steps = order.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => stepAt(n))
   const endNodes = order.filter((n) => n.localName === 'endEvent')
   const endAdapter = endNodes.map((n) => adaptersBySource[n.getAttribute('id')]).find(Boolean)
-  const end = !endAdapter
-    ? { type: 'none' }
-    : endAdapter.type === 'HTTP'
-      ? { type: 'httpReceiver', ...httpCall(endAdapter) }
-      : { type: 'receiver', adapter: endAdapter.type, system: endAdapter.system, address: endAdapter.address }
+  const end = receiverEnd(endAdapter)
   // an Error, Escalation or Terminate end (not a plain/message end): kept for update checks
   const mainEndKind = endNodes.length === 1 ? endKind(endNodes[0]) : null
   if (mainEndKind && mainEndKind !== 'message') end.kind = mainEndKind
@@ -697,11 +710,7 @@ async function parse(input) {
       const a = r.endNode && adaptersBySource[r.endNode.getAttribute('id')]
       const routedEnd = !r.endNode
         ? null
-        : !a
-          ? { type: 'none' }
-          : a.type === 'HTTP'
-            ? { type: 'httpReceiver', ...httpCall(a) }
-            : { type: 'receiver', adapter: a.type, system: a.system, address: a.address }
+        : receiverEnd(a)
       if (routedEnd)
         Object.assign(routedEnd, {
           kind: endKind(r.endNode),
@@ -720,11 +729,7 @@ async function parse(input) {
     const a = mainEndNode && adaptersBySource[mainEndNode.getAttribute('id')]
     branching = {
       steps: path.filter((n) => !['startEvent', 'endEvent'].includes(n.localName)).map((n) => ({ ...stepAt(n), ...(branches[n.getAttribute('id')] && { routes: branches[n.getAttribute('id')] }) })),
-      end: !a
-        ? { type: 'none' }
-        : a.type === 'HTTP'
-          ? { type: 'httpReceiver', ...httpCall(a) }
-          : { type: 'receiver', adapter: a.type, system: a.system, address: a.address }
+      end: receiverEnd(a)
     }
   }
 

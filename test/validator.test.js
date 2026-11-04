@@ -175,7 +175,7 @@ describe('validator', () => {
     const constantValue = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'constant', value: '{{P}}' }] }], parameters: { P: 'v' } })
     expect(errorsOf(constantValue)).toEqual([])
     const wrongPlace = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'expression', value: '{{P}}' }] }], parameters: { P: 'v' } })
-    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, or as a constant value/)
+    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the address of a ProcessDirect receiver, or as a constant value/)
 
     const senderParam = baseSpec({ trigger: { type: 'httpsSender', address: '{{Path}}' }, parameters: { Path: '/x' } })
     expectError(senderParam, /trigger\.address: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
@@ -680,6 +680,27 @@ describe('senders (phase 5)', () => {
       expectError(sftp(all, (({ SFTP_Address, ...rest }) => rest)(params)), /trigger\.host: parameter 'SFTP_Address' is referenced but not defined in 'parameters'/)
       expect(validate(sftp({ username: '{{SFTP_User}}' }, { SFTP_User: 'U' })).valid).toBe(false)
       expect(validate(sftp({ directory: '/in/{{Sub}}' }, { Sub: 'x' })).valid).toBe(false)
+    })
+  })
+  describe('ProcessDirect receiver (phase 6)', () => {
+    const call = (extra = {}) => ({ type: 'requestReplyProcessDirect', name: 'RR_Call', address: '/orders/process', ...extra })
+    test('a step and an end with a path or a whole parameter are valid; main line, routes, branches and local processes', () => {
+      expect(validate(baseSpec({ steps: [call()], end: { type: 'processDirectReceiver', address: '/orders/notify' } }))).toMatchObject({ valid: true, warnings: [] })
+      expect(validate(baseSpec({ steps: [call({ address: '{{Orders_Address}}' })], parameters: { Orders_Address: '/orders/process' } }))).toMatchObject({ valid: true, warnings: [] })
+      expect(validate(baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'LIP' }], localProcesses: [{ name: 'LIP', steps: [call()] }] }))).toMatchObject({ valid: true })
+    })
+    test('an address that is no path, part of a text or an undefined parameter is refused with a clear message', () => {
+      expectError(baseSpec({ steps: [call({ address: 'orders' })] }), /steps\[0\]\.address: invalid value — use the ProcessDirect address of the called iFlow, a path like \/orders\/process/)
+      expectError(baseSpec({ steps: [call({ address: '/orders/{{Sub}}' })], parameters: { Sub: 'x' } }), /steps\[0\]\.address: invalid value/)
+      expectError(baseSpec({ end: { type: 'processDirectReceiver', address: '{{Missing}}' } }), /end\.address: parameter 'Missing' is referenced but not defined in 'parameters'/)
+      expectError(baseSpec({ steps: [call({ url: 'https://x' })] }), /steps\[0\]: unknown field 'url'/)
+    })
+    test('not in the exception subprocess; the end names the new end type', () => {
+      expect(validate(baseSpec({ exceptionSubprocess: { steps: [call()] } })).valid).toBe(false)
+      expectError(baseSpec({ end: { type: 'jmsReceiver' } }), /Use httpReceiver \{ url, method, authType \}, processDirectReceiver \{ address \} or none\./)
+    })
+    test('receiver names stay unique across the step and the end', () => {
+      expectError(baseSpec({ steps: [call({ system: 'RCV_PD' })], end: { type: 'processDirectReceiver', system: 'RCV_PD', address: '/x' } }), /RCV_PD/)
     })
   })
   test('an unknown sender names the supported ones', () => {

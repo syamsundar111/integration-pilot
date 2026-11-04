@@ -83,8 +83,7 @@ describe('system prompt: calling another iFlow (manual test 16)', () => {
   const value = (key) => SENDER.match(new RegExp(`<key>${key}</key>\\s*<value>([^<]*)</value>`))?.[1]
 
   test('the HTTPS sender is a workaround for ProcessDirect, not an equivalent', () => {
-    expect(flat).toMatch(/The app builds the called iFlow with a `processDirectSender`; the call itself, a ProcessDirect receiver, is not supported yet/)
-    expect(flat).toMatch(/Only when the user asks for a call that needs no manual step in the editor, offer this \*\*workaround\*\* instead \(never call it an equivalent\)/)
+    expect(flat).toMatch(/Only when the user asks for the call over HTTPS instead, offer this \*\*workaround\*\* \(never call it an equivalent\)/)
     expect(flat).toMatch(/ProcessDirect stays inside the tenant and needs no authentication; an HTTPS endpoint is public and every call to it must be authenticated/)
   })
 
@@ -168,8 +167,7 @@ describe('system prompt: patterns loaded on demand (review item 6)', () => {
   const read = (n) => fs.readFileSync(path.join(__dirname, `../srv/agent/patterns/${n}.md`), 'utf8')
 
   test('the prompt keeps a pointer to each pattern, the details are only in the pattern', () => {
-    expect(flat).toMatch(/is not supported yet: when the user asks for ProcessDirect or one iFlow calling another, first call `getPattern` with `processDirect`/)
-    expect(flat).toMatch(/The called iFlow can have a `processDirectSender` \(see Senders\)\. The caller side, a ProcessDirect receiver, is not supported yet/)
+    expect(flat).toMatch(/The called iFlow can have a `processDirectSender` \(see Senders\)\. The caller calls it with a `requestReplyProcessDirect` step, or hands the message on with the `processDirectReceiver` end: when the user asks for ProcessDirect or one iFlow calling another, first call `getPattern` with `processDirect` and follow it\./)
     expect(flat).toMatch(/To update, change, extend or fix an existing iFlow, first call `getPattern` with `updateIflow`/)
     expect(flat).toMatch(/Never call `proposeIflow` for an iFlow that already exists, and never list the changes yourself/)
     // phase 1b: routers on the main line, the default route last, spaces around Non-XML operators,
@@ -354,19 +352,27 @@ describe('system prompt: ProcessDirect (phase 5)', () => {
     expect(senders).toMatch(/`processDirectSender`: `\{ "type": "processDirectSender", "address": "\/orders\/process" \}`, called by other iFlows on the same tenant with exactly this address/)
     expect(senders).toMatch(/Headers and the body reach the called iFlow, but exchange properties may not, so values it needs should be passed as headers\. The address must be unique among the ProcessDirect senders on the tenant\./)
   })
-  test('the pattern: both iFlows now means a processDirectSender and a PH_ placeholder where the call goes', () => {
-    expect(pattern).toMatch(/\*\*The caller\*\*, when the user wants both iFlows now: where the call goes, a placeholder Content Modifier `PH_<StepName>` with a description starting `REPLACE WITH`/)
-    expect(pattern).toMatch(/replace it in the CPI editor with a Request Reply to a ProcessDirect receiver at exactly that address/)
-    expect(pattern).toMatch(/never present the placeholder as the call/)
+  test('the pattern (phase 6): the caller calls at exactly the called iFlow\'s address, with a step or the end; no placeholder', () => {
+    expect(pattern).toMatch(/\*\*The caller\*\* calls it at exactly the called iFlow's address: with a `requestReplyProcessDirect` step/)
+    expect(pattern).toMatch(/with the end `\{ "type": "processDirectReceiver", "address": "\/orders\/process" \}` when it only hands the message on at the end\./)
+    expect(pattern).toMatch(/for an iFlow that already exists, ask the user for its address and never invent one\./)
+    expect(pattern).toMatch(/\*\*Deploy order:\*\* the called iFlow must be deployed on the same tenant before the caller runs/)
+    expect(pattern).not.toMatch(/PH_|placeholder/)
+  })
+  test('the pattern\'s examples are valid: a caller with the step, and one with the end', () => {
+    const { validate } = require('../srv/iflow-builder/validator')
+    const step = JSON.parse(pattern.match(/`(\{ "type": "requestReplyProcessDirect"[^`]*\})`/)[1])
+    const end = JSON.parse(pattern.match(/`(\{ "type": "processDirectReceiver"[^`]*\})`/)[1])
+    const spec = { id: 'A', name: 'A', packageId: 'P', trigger: { type: 'timer', mode: 'once' }, steps: [step], end: { type: 'none' } }
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+    expect(validate({ ...spec, steps: [], end })).toMatchObject({ valid: true, warnings: [] })
   })
 })
 
 describe('system prompt: placeholders are not deployed on approval', () => {
   const unsupported = sectionFlat('unsupportedSteps')
-  const pattern = fs.readFileSync(path.join(__dirname, '../srv/agent/patterns/processDirect.md'), 'utf8').replace(/\s+/g, ' ')
-  test('the placeholder rules and the processDirect pattern say: approve without deploy, deploy after replacing', () => {
+  test('the placeholder rules say: approve without deploy, deploy after replacing', () => {
     expect(unsupported).toMatch(/Then tell the user which placeholders they must replace, and to approve \*\*without\*\* deploy: an iFlow with a placeholder is deployed only after its placeholders are replaced in the CPI editor\. Never tell the user to deploy it on approval\./)
-    expect(pattern).toMatch(/Approve the caller without deploy and deploy it only after the placeholder is replaced; a timer would otherwise run with nothing to call\./)
   })
 })
 
@@ -400,8 +406,8 @@ describe('system prompt: SFTP sender (phase 5)', () => {
     expect(senders).toMatch(/the SFTP server's host key must be in the tenant's known hosts before deploying, and with `publicKey` that the key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts\./)
   })
   test('the five SFTP sender fields may be parameters: in the hard limits and under Externalized parameters', () => {
-    expect(flat).toMatch(/- `\{\{Param\}\}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver, the whole `host`, `directory`, `fileName`, `credentialName` or `archiveDirectory` of an `sftpSender`, or as the whole value of a `constant` header or property; literal values everywhere else\./)
-    expect(flat).toMatch(/An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and `archiveDirectory` can be parameters the same way \(`\{\{SFTP_Address\}\}` with the host as its default\)\. Parameters are supported nowhere else: use literal values there\./)
+    expect(flat).toMatch(/- `\{\{Param\}\}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver, the whole `host`, `directory`, `fileName`, `credentialName` or `archiveDirectory` of an `sftpSender`, the whole `address` of a ProcessDirect receiver \(`requestReplyProcessDirect` or the `processDirectReceiver` end\), or as the whole value of a `constant` header or property; literal values everywhere else\./)
+    expect(flat).toMatch(/An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and `archiveDirectory` can be parameters the same way \(`\{\{SFTP_Address\}\}` with the host as its default\), and so can a ProcessDirect receiver's `address` \(`\{\{Orders_Address\}\}` with the address as its default\)\. Parameters are supported nowhere else: use literal values there\./)
   })
   test('the example of the Senders section is a valid trigger', () => {
     const { validate } = require('../srv/iflow-builder/validator')

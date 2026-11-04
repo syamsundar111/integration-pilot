@@ -143,6 +143,7 @@
         "type": {
           "enum": [
             "httpReceiver",
+            "processDirectReceiver",
             "none"
           ]
         }
@@ -158,6 +159,18 @@
           },
           "then": {
             "$ref": "#/definitions/httpReceiver"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "processDirectReceiver"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/processDirectReceiver"
           }
         },
         {
@@ -845,6 +858,7 @@
             "gather",
             "processCall",
             "requestReplySoap",
+            "requestReplyProcessDirect",
             "sendMail",
             "messageMapping",
             "xsltMapping",
@@ -983,6 +997,18 @@
           },
           "then": {
             "$ref": "#/definitions/requestReplySoap"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "requestReplyProcessDirect"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/requestReplyProcessDirect"
           }
         },
         {
@@ -1329,6 +1355,7 @@
             "writeVariables",
             "router",
             "requestReplySoap",
+            "requestReplyProcessDirect",
             "sendMail",
             "messageMapping",
             "xsltMapping"
@@ -1436,6 +1463,18 @@
           "if": {
             "properties": {
               "type": {
+                "const": "requestReplyProcessDirect"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/requestReplyProcessDirect"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "sendMail"
               }
             }
@@ -1525,6 +1564,56 @@
           "type": "integer",
           "minimum": 1,
           "description": "Request timeout in milliseconds (default 60000)"
+        }
+      }
+    },
+    "requestReplyProcessDirect": {
+      "type": "object",
+      "required": [
+        "type",
+        "address"
+      ],
+      "additionalProperties": false,
+      "description": "Request Reply with the ProcessDirect adapter: calls another iFlow on the same tenant and continues with its reply",
+      "properties": {
+        "type": {
+          "const": "requestReplyProcessDirect"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "system": {
+          "$ref": "#/definitions/systemName"
+        },
+        "address": {
+          "type": "string",
+          "pattern": "^((/[A-Za-z0-9_.~-]+)+|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "The ProcessDirect address of the called iFlow (exactly its ProcessDirect sender address), or a whole {{Parameter}}"
+        }
+      }
+    },
+    "processDirectReceiver": {
+      "type": "object",
+      "required": [
+        "type",
+        "address"
+      ],
+      "additionalProperties": false,
+      "description": "Message End with the ProcessDirect adapter: hands the message to another iFlow on the same tenant",
+      "properties": {
+        "type": {
+          "const": "processDirectReceiver"
+        },
+        "system": {
+          "$ref": "#/definitions/systemName"
+        },
+        "address": {
+          "type": "string",
+          "pattern": "^((/[A-Za-z0-9_.~-]+)+|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "The ProcessDirect address of the called iFlow (exactly its ProcessDirect sender address), or a whole {{Parameter}}"
         }
       }
     },

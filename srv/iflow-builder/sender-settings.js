@@ -1,6 +1,6 @@
 /**
- * Sender adapters the spec holds besides HTTPS (phase 5), and the settings the builder writes fixed from their
- * templates. Import and update keep an iFlow's sender only when the spec can hold it exactly: every fixed setting as
+ * Sender adapters the spec holds besides HTTPS (phase 5) and the ProcessDirect receiver (phase 6), and the settings the
+ * builder writes fixed from their templates. Import and update keep an iFlow's sender only when the spec can hold it exactly: every fixed setting as
  * the template has it, and a parameter only where the spec holds one (SFTP: host, directory, file name, credential
  * name, archive directory); else Import makes it an HTTPS sender with a note, and an update is blocked.
  */
@@ -20,11 +20,14 @@ const FIXED = {
   processDirectSender: fixed('messageflow-processdirect-sender.xml'),
   jmsSender: fixed('messageflow-jms-sender.xml'),
   // the scheduler is compared by its schedule1 (the other rows are the editor's state)
-  sftpSender: Object.fromEntries(Object.entries(fixed('messageflow-sftp-sender.xml')).filter(([key]) => key !== 'scheduleKey'))
+  sftpSender: Object.fromEntries(Object.entries(fixed('messageflow-sftp-sender.xml')).filter(([key]) => key !== 'scheduleKey')),
+  // the ProcessDirect receiver (Ref_Receiver_ProcessDirect), the other end of a ProcessDirect sender
+  processDirectReceiver: fixed('messageflow-processdirect-receiver.xml')
 }
 const definitions = require('./spec-schema.json').definitions
 const ADDRESS = new RegExp(definitions.soapSender.properties.address.pattern)
 const QUEUE = new RegExp(definitions.jmsSender.properties.queue.pattern)
+const PD_RECEIVER_ADDRESS = new RegExp(definitions.processDirectReceiver.properties.address.pattern)
 
 // SFTP sender: spec values <-> stored, and the one schedule the template holds (every 15 minutes, all day, Etc/GMT)
 const SFTP_AUTHENTICATION = { publicKey: 'public_key', userPassword: 'user_password' }
@@ -93,6 +96,18 @@ function sftp(adapter) {
   }
 }
 
+/**
+ * A ProcessDirect receiver (a Request Reply's or the Message End's) as the spec holds it: its address, a path or a
+ * whole {{Param}}
+ * @returns {{ address: string } | { differences: string[] }}
+ */
+function processDirectReceiverOf(adapter) {
+  const differences = fixedDifferences('processDirectReceiver', adapter?.settings || {})
+  const address = String(adapter?.address ?? '')
+  if (!PD_RECEIVER_ADDRESS.test(address)) differences.push(`the address '${address}' is not a path of letters, digits and - _ . ~ or a whole parameter`)
+  return differences.length ? { differences } : { address }
+}
+
 function fixedDifferences(kind, s) {
   return Object.entries(FIXED[kind])
     .filter(([key, value]) => key in s && String(s[key] ?? '') !== value) // older adapter versions lack some keys
@@ -108,4 +123,4 @@ function check(kind, adapter, trigger) {
   return differences.length ? { differences } : { trigger }
 }
 
-module.exports = { triggerOf, FIXED, SFTP_AUTHENTICATION, SFTP_POST_PROCESSING, SFTP_MINUTES }
+module.exports = { triggerOf, processDirectReceiverOf, FIXED, SFTP_AUTHENTICATION, SFTP_POST_PROCESSING, SFTP_MINUTES }

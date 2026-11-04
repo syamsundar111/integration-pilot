@@ -1014,3 +1014,90 @@ describe('Ref_Sender_SFTP and Ref_Sender_SFTP_UserPw: the SFTP sender (phase 5)'
     }
   })
 })
+
+describe('Ref_Receiver_ProcessDirect: the ProcessDirect receiver (phase 6)', () => {
+  // test/reference-prompts/Ref_Receiver_ProcessDirect.txt (Run Once: Simple Schedule, Repeat None)
+  const spec = {
+    id: 'Ref_Receiver_ProcessDirect',
+    name: 'Ref_Receiver_ProcessDirect',
+    packageId: 'iglowpackage',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [
+      { type: 'contentModifier', name: 'CM_Prepare', body: '<Order><id>1</id></Order>' },
+      { type: 'requestReplyProcessDirect', name: 'RR_CallOrders', system: 'RCV_PD_Orders', address: '/dummy/pd/orders' }
+    ],
+    end: { type: 'processDirectReceiver', system: 'RCV_PD_Notify', address: '{{PD_Notify_Address}}' },
+    parameters: { PD_Notify_Address: '/dummy/pd/notify' }
+  }
+  const zipOf = async (s) => Buffer.from((await build(s)).zipBase64, 'base64')
+  const flows = async (buf) => {
+    const zip = await JSZip.loadAsync(buf)
+    const iflw = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+    return iflw.match(/<bpmn2:messageFlow[\s\S]*?<\/bpmn2:messageFlow>/g).map((m) => m.replace(/ (id|sourceRef|targetRef)="[^"]*"/g, '')).sort()
+  }
+  const refs = async (buf) => {
+    const zip = await JSZip.loadAsync(buf)
+    const propdef = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('parameters.propdef'))).async('string')
+    return [...propdef.matchAll(/<reference [^>]*\/>/g)].map((m) => m[0]).sort()
+  }
+
+  test('the spec is valid without warnings', () => {
+    expect(require('../srv/iflow-builder/validator').validate(spec)).toMatchObject({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('both receivers (Request Reply and Message End) and the parameter reference are as in the export', async () => {
+    const built = await zipOf(spec)
+    expect(await flows(built)).toEqual(await flows(readRef('Ref_Receiver_ProcessDirect.zip')))
+    expect(await refs(built)).toEqual(await refs(readRef('Ref_Receiver_ProcessDirect.zip')))
+  })
+
+  test('update and Import keep the step, the end and the parameter', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const update = specFromParsed(await parse(readRef('Ref_Receiver_ProcessDirect.zip')), { packageId: 'iglowpackage' })
+    expect(update.blockers).toEqual([])
+    expect(update.spec).toEqual(spec)
+    const imported = await importIflow(readRef('Ref_Receiver_ProcessDirect.zip'), { fileName: 'Ref_Receiver_ProcessDirect.zip', packageId: 'iglowpackage' })
+    expect(imported).toMatchObject({ valid: true, errors: [], placeholders: 0 })
+    expect({ steps: imported.spec.steps, end: imported.spec.end, parameters: imported.spec.parameters }).toEqual({ steps: spec.steps, end: spec.end, parameters: spec.parameters })
+  })
+
+  test('a setting the builder does not write: the update is blocked, Import puts a placeholder where the call was', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const zip = await JSZip.loadAsync(readRef('Ref_Receiver_ProcessDirect.zip'))
+    const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+    const before = await zip.file(file).async('string')
+    const after = before.replace('<value>/dummy/pd/orders</value>', '<value>orders</value>')
+    expect(after).not.toBe(before)
+    zip.file(file, after)
+    const changed = await zip.generateAsync({ type: 'nodebuffer' })
+    expect(specFromParsed(await parse(changed), { packageId: 'iglowpackage' }).blockers.join()).toMatch(/receiver RCV_PD_Orders: the address 'orders' is not a path/)
+    const imported = await importIflow(changed, { fileName: 'x.zip', packageId: 'iglowpackage' })
+    expect(imported.placeholders).toBe(1)
+    expect(imported.spec.steps[1]).toMatchObject({ name: 'RR_CallOrders', description: expect.stringMatching(/^REPLACE WITH ProcessDirect request-reply/) })
+  })
+})
+
+describe('placeholders survive the iFlow: Import and update recognise a REPLACE_WITH step (phase 6)', () => {
+  const spec = {
+    id: 'Placeholder_Again',
+    name: 'Placeholder_Again',
+    packageId: 'iglowpackage',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [{ type: 'contentModifier', name: 'PH_CallOrders', description: 'REPLACE WITH Request Reply to the order iFlow', properties: [{ name: 'REPLACE_WITH', type: 'constant', value: 'x' }] }],
+    end: { type: 'none' }
+  }
+  test('the description is not in the iFlow, but the REPLACE_WITH property brings the placeholder back', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const { placeholderNames } = require('../srv/iflow-builder/placeholders')
+    const zip = Buffer.from((await build(spec)).zipBase64, 'base64')
+    const imported = await importIflow(zip, { fileName: 'x.zip', packageId: 'iglowpackage' })
+    expect(imported.placeholders).toBe(1)
+    expect(imported.spec.steps[0]).toMatchObject({ name: 'PH_CallOrders', description: 'REPLACE WITH Request Reply to the order iFlow' })
+    const update = specFromParsed(await parse(zip), { packageId: 'iglowpackage' })
+    expect(update.spec.steps[0].description).toBe('REPLACE WITH Request Reply to the order iFlow')
+    expect(placeholderNames(update.spec)).toEqual(['PH_CallOrders'])
+  })
+})

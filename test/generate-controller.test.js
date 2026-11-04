@@ -428,6 +428,18 @@ describe('proposal panel for routers (phase 1b)', () => {
     )
   })
 
+  test('the ProcessDirect receiver cards (phase 6): the call waits for the reply; the end "may" wait; the called iFlow must exist', () => {
+    const active = activeFor({ ...base([{ type: 'requestReplyProcessDirect', name: 'RR_Call', address: '/orders/process' }]), end: { type: 'processDirectReceiver', address: '/orders/notify' } })
+    const step = active.stepCards.find((c) => c.title.startsWith('1.'))
+    expect(step).toMatchObject({ type: 'Request Reply (ProcessDirect)' })
+    expect(step.lines).toBe('ProcessDirect /orders/process: calls another iFlow and continues with its reply (the message body at the end of that iFlow).\nThe called iFlow must have a ProcessDirect sender with exactly this address and be deployed on the same tenant.')
+    expect(active.stepCards.find((c) => c.title === 'End')).toEqual({
+      title: 'End',
+      type: 'ProcessDirect receiver',
+      lines: 'ProcessDirect /orders/notify: hands the message to another iFlow at the end.\nThe called iFlow must have a ProcessDirect sender with exactly this address and be deployed on the same tenant.\nThis iFlow may wait until the called iFlow has finished.'
+    })
+  })
+
   test('the ProcessDirect sender card (phase 5): no role, headers rather than properties, a unique address', () => {
     const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'processDirectSender', address: '/orders/process' } })
     expect(active.stepCards[0]).toEqual({

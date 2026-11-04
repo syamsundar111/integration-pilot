@@ -35,6 +35,7 @@ sap.ui.define(
       gather: 'Gather',
       processCall: 'Process Call',
       requestReplySoap: 'Request Reply (SOAP)',
+      requestReplyProcessDirect: 'Request Reply (ProcessDirect)',
       sendMail: 'Send (Mail)',
       messageMapping: 'Message Mapping',
       xsltMapping: 'XSLT Mapping',
@@ -1023,6 +1024,8 @@ sap.ui.define(
                       : `Mapping inside the iFlow: ${s.file}${(s.schemas || []).length ? `, with ${s.schemas.join(', ')}` : ''}`
                     : s.type === 'xsltMapping'
                     ? `mapping/${s.file} (attached file)`
+                    : s.type === 'requestReplyProcessDirect'
+                    ? `ProcessDirect ${s.address}: calls another iFlow and continues with its reply (the message body at the end of that iFlow).\nThe called iFlow must have a ProcessDirect sender with exactly this address and be deployed on the same tenant.`
                     : s.type === 'requestReplySoap'
                     ? [
                         `SOAP 1.x ${s.url}`,
@@ -1096,10 +1099,12 @@ sap.ui.define(
             ]),
             {
               title: 'End',
-              type: spec.end.type === 'httpReceiver' ? 'HTTP receiver' : endText(spec.end),
+              type: spec.end.type === 'httpReceiver' ? 'HTTP receiver' : spec.end.type === 'processDirectReceiver' ? 'ProcessDirect receiver' : endText(spec.end),
               lines: (() => {
                 const last = spec.steps[spec.steps.length - 1]
                 if (last && last.type === 'router' && (last.routes || []).every((r) => r.end)) return 'Every route of the last router ends; the main flow has no end of its own'
+                if (spec.end.type === 'processDirectReceiver')
+                  return `ProcessDirect ${spec.end.address}: hands the message to another iFlow at the end.\nThe called iFlow must have a ProcessDirect sender with exactly this address and be deployed on the same tenant.\nThis iFlow may wait until the called iFlow has finished.`
                 return spec.end.type === 'httpReceiver' ? [`${spec.end.method} ${spec.end.url}`, receiverSettingsText(spec.end)].filter(Boolean).join('\n') : 'No receiver'
               })()
             },

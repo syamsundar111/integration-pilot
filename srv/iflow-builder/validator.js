@@ -14,19 +14,21 @@ const senderSettings = require('./sender-settings')
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping', 'multicast']
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping', 'multicast']
 // steps with a receiver of their own (a participant and an adapter)
-const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'sendMail']
+const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail']
 // not inside routes, the exception subprocess or local processes
 const MAIN_LINE_ONLY = ['router', 'splitter', 'gather', 'multicast']
 // Steps allowed in the exception subprocess (of the receivers only a Send step: no reply to wait for; Write Variables
 // only in the main flow so far)
 const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail', 'messageMapping', 'xsltMapping']
 // Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
-const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'sendMail', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
+const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'soapSender', 'processDirectSender', 'jmsSender', 'sftpSender', 'timer']
 const MAX_MAIN_STEPS = 50 // per process: the main flow and each local process, with its routers and the steps inside routes
-const SUPPORTED_ENDS = ['httpReceiver', 'none']
+const SUPPORTED_ENDS = ['httpReceiver', 'processDirectReceiver', 'none']
+// ends with a receiver of their own
+const RECEIVER_ENDS = ['httpReceiver', 'processDirectReceiver']
 
 // Step kinds people (and LLMs) ask for that v1 deliberately does not build
 const NOT_IN_V1 = /gateway|aggregat|filter/i
@@ -108,7 +110,7 @@ function effectiveNames(spec) {
   const withNames = (x) => ({ ...x, name: named.get(x.step), system: systemOf.get(x.step) })
   const flat = flatMain.map(withNames)
   const local = flatLocal.map(withNames)
-  const endSystem = spec.end?.type === 'httpReceiver' ? spec.end.system || 'Receiver' : null
+  const endSystem = RECEIVER_ENDS.includes(spec.end?.type) ? spec.end.system || 'Receiver' : null
   const exceptionSubprocess = spec.exceptionSubprocess ? spec.exceptionSubprocess.name || DEFAULT_EXCEPTION_SUBPROCESS_NAME : null
   return { steps, systems, flat, local, joins, endSystem, exceptionSubprocess, exceptionSteps: exception, exceptionSystems }
 }
@@ -159,6 +161,8 @@ const PATTERN_HINTS = {
   cc: 'use mail addresses separated by commas',
   bcc: 'use mail addresses separated by commas'
 }
+// a ProcessDirect receiver's address (a step's or the end's): the called iFlow's address, or a whole parameter
+const RECEIVER_ADDRESS_HINT = 'use the ProcessDirect address of the called iFlow, a path like /orders/process (letters, digits, - _ . ~), or a whole parameter like {{PD_Address}}'
 const TRIGGER_HINTS = {
   host: 'use host or host:port, e.g. sftp.example.com:22, or a whole parameter like {{SFTP_Address}}',
   directory: 'use a path like /in (letters, digits, _ . ~ - /), or a whole parameter like {{SFTP_Directory}}',
@@ -198,7 +202,7 @@ function schemaErrors(errors, skipPaths) {
         push('BAD_VALUE', `${where}: must be '${e.params.allowedValue}'`)
         break
       case 'pattern':
-        push('BAD_FORMAT', `${where}: invalid value — ${(e.instancePath.startsWith('/trigger/') && TRIGGER_HINTS[field]) || PATTERN_HINTS[field] || `must match ${e.params.pattern}`}`)
+        push('BAD_FORMAT', `${where}: invalid value — ${(e.instancePath.startsWith('/trigger/') ? TRIGGER_HINTS[field] : field === 'address' && RECEIVER_ADDRESS_HINT) || PATTERN_HINTS[field] || `must match ${e.params.pattern}`}`)
         break
       case 'propertyNames':
         push('BAD_PARAM_NAME', `${where}: invalid parameter name '${e.params.propertyName}' — start with a letter, then letters, digits or underscore`)
@@ -219,12 +223,13 @@ function walkStrings(node, path, fn) {
 
 /**
  * Fields where {{Parameter}} references are allowed: an HTTP receiver's URL, credential name and location ID,
- * an SFTP sender's host, directory, file name, credential name and archive directory (Ref_Sender_SFTP_UserPw), and the
+ * an SFTP sender's host, directory, file name, credential name and archive directory (Ref_Sender_SFTP_UserPw), a
+ * ProcessDirect receiver's address (Ref_Receiver_ProcessDirect), and the
  * value of a constant header or property (an externalized value; the other sources name a header, property, variable or
  * XPath)
  */
 const STEP_PATH = String.raw`(steps\[\d+\](\.branches\[\d+\]\.steps\[\d+\])?(\.routes\[\d+\]\.steps\[\d+\])?|exceptionSubprocess\.steps\[\d+\]|localProcesses\[\d+\]\.steps\[\d+\](\.routes\[\d+\]\.steps\[\d+\])?)`
-const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId|server|to)|trigger\.(host|directory|fileName|credentialName|archiveDirectory)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
+const PARAM_FIELDS = new RegExp(String.raw`^((${STEP_PATH}|end)\.(url|credentialName|locationId|server|to|address)|trigger\.(host|directory|fileName|credentialName|archiveDirectory)|${STEP_PATH}\.(headers|properties)\[\d+\]\.value)$`)
 
 /**
  * @param {object} spec
@@ -322,7 +327,7 @@ function validate(spec, { attachments = [] } = {}) {
   }
   if (spec.end?.type && !SUPPORTED_ENDS.includes(spec.end.type)) {
     skip.push('/end')
-    err('END_UNSUPPORTED', `end: '${spec.end.type}' is not supported yet. Use httpReceiver { url, method, authType } or none.`)
+    err('END_UNSUPPORTED', `end: '${spec.end.type}' is not supported yet. Use httpReceiver { url, method, authType }, processDirectReceiver { address } or none.`)
   }
 
   // Receiver authentication, proxy and timeout: one actionable message per problem instead of schema noise
@@ -705,7 +710,7 @@ function validate(spec, { attachments = [] } = {}) {
     const row = /\.(headers|properties)\[\d+\]\.value$/.test(path)
     const rowType = row && specSteps.valueAt(spec, path.replace(/\.value$/, ''))?.type
     if (!PARAM_FIELDS.test(path) || (row && rowType !== 'constant')) {
-      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, or as a constant value`)
+      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the address of a ProcessDirect receiver, or as a constant value`)
       return
     }
     if (!WHOLE_PARAM.test(value)) {
@@ -744,4 +749,4 @@ function normalizeTypes(spec) {
   return { spec: out, fixes }
 }
 
-module.exports = { validate, normalizeTypes, effectiveNames, hasScriptSecret, RECEIVER_STEPS, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, SUPPORTED_LOCAL_STEPS, MAIN_LINE_ONLY, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }
+module.exports = { validate, normalizeTypes, effectiveNames, hasScriptSecret, RECEIVER_STEPS, RECEIVER_ENDS, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, SUPPORTED_LOCAL_STEPS, MAIN_LINE_ONLY, DEFAULT_STEP_NAMES, GROOVY_IMPORT, GROOVY_ENTRY, schema }

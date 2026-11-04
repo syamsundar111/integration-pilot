@@ -60,7 +60,7 @@ const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 
  * prefix for prompt caching); a section, once included, stays for the rest of the conversation
  * (sticky), so the rules do not change between messages. Order is fixed, not the order of activation.
  */
-const UNSUPPORTED_TEXT = /\b(router|splitter|gather|content enricher|poll enrich|aggregator|xslt|(message|graphical|operation|xml|edmx|value)\s+mapping|mapping\s+(step|artifact)|sftp(?![ -]senders?)|write variables?|process ?call|processdirect|local integration process)\b/i
+const UNSUPPORTED_TEXT = /\b(router|splitter|gather|content enricher|poll enrich|aggregator|xslt|(message|graphical|operation|xml|edmx|value)\s+mapping|mapping\s+(step|artifact)|sftp(?![ -]senders?)|write variables?|process ?call|local integration process)\b/i
 // words of a request that needs a feature section; the core prompt keeps a pointer line for requests that use other words
 const ROUTING_TEXT = /\b(rout(e|es|er|ers|ing)|branch(es|ing)?|conditions?|conditional|otherwise|depending on|if (it|the|a)\b[^.\n]{0,60}\b(else|otherwise))\b/i
 const SPLITTING_TEXT = /\b(split(s|ter|ters|ting)?|gather|for (each|every)|each (item|order|record|entry|line|element|row|message)|per (item|order|record|entry|line|element|row)|one by one|individually|local (integration )?process(es)?|process calls?|loop(s|ing)?|iterat\w*|paging|page by page|next page|batch(es)?)\b/i
@@ -84,7 +84,8 @@ const PROMPT_SECTIONS = [
   { name: 'mapping', applies: ({ userText, draftTypes }) => draftTypes.has('messageMapping') || draftTypes.has('xsltMapping') || MAPPING_TEXT.test(userText) },
   { name: 'multicast', applies: ({ userText, draftTypes }) => draftTypes.has('multicast') || MULTICAST_TEXT.test(userText) },
   // a sender other than HTTPS: the request names one, or the draft's trigger is one
-  { name: 'senders', applies: ({ userText, draftTrigger }) => SENDER_TRIGGERS.includes(draftTrigger) || SENDERS_TEXT.test(userText) }
+  // senders, and ProcessDirect calls (a step or the end): the request names one, or the draft has one
+  { name: 'senders', applies: ({ userText, draftTrigger, draftTypes, draftEnd }) => SENDER_TRIGGERS.includes(draftTrigger) || draftTypes.has('requestReplyProcessDirect') || draftEnd === 'processDirectReceiver' || SENDERS_TEXT.test(userText) }
 ].map((s) => ({ ...s, text: fs.readFileSync(path.join(__dirname, 'prompt-sections', `${s.name}.md`), 'utf8').trim() }))
 
 const db = (user, fn) => cds.tx({ user }, fn)
@@ -233,11 +234,12 @@ async function promptSections(user, sessionId, session, { files, message }) {
   const placeholders = allSteps(draft).filter((x) => /^REPLACE WITH /.test(x.step?.description || '')).length
   const draftTypes = new Set(allSteps(draft).map((x) => x.step?.type))
   const draftTrigger = draft?.trigger?.type
+  const draftEnd = draft?.end?.type
   const { ChatMessage } = E()
   const past = await db(user, (tx) => tx.run(SELECT.from(ChatMessage).columns('content').where({ session_ID: sessionId, role: 'user' })))
   const userText = [...past.map((m) => m.content || ''), message].join('\n')
   const before = used.size
-  for (const s of PROMPT_SECTIONS) if (!used.has(s.name) && s.applies({ files, userText, placeholders, draftTypes, draftTrigger })) used.add(s.name)
+  for (const s of PROMPT_SECTIONS) if (!used.has(s.name) && s.applies({ files, userText, placeholders, draftTypes, draftTrigger, draftEnd })) used.add(s.name)
   if (used.size !== before) {
     const { ChatSession } = E()
     await db(user, (tx) => tx.run(UPDATE(ChatSession, sessionId).set({ promptSections: JSON.stringify(PROMPT_SECTIONS.map((s) => s.name).filter((n) => used.has(n))) })))

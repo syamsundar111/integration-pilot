@@ -11,6 +11,7 @@ const { validate, SUPPORTED_STEPS, SUPPORTED_EXCEPTION_STEPS, SUPPORTED_LOCAL_ST
 const { AUTH_TYPES } = require('./receiver-settings')
 const cpiValues = require('./cpi-values')
 const senderSettings = require('./sender-settings')
+const placeholders = require('./placeholders')
 const schema = require('./spec-schema.json')
 const ESCALATION_CATEGORIES = schema.definitions.endEvent.properties.category.enum
 
@@ -139,6 +140,10 @@ function toStep(s, scripts, files, where) {
       if (s.headers?.length) step.headers = rows(s.headers, 'header')
       if (s.properties?.length) step.properties = rows(s.properties, 'property')
       if (s.body) step.body = s.body
+      // a placeholder (an AI's PH_ step or Import's): its note is the REPLACE_WITH property, as the description is not
+      // written into the iFlow; with the description back, it stays a placeholder (no deploy while one is left)
+      if (placeholders.hasReplaceWith(step) && step.properties.find((p) => p.name === 'REPLACE_WITH').type === 'constant' && placeholders.usable(placeholders.noteOf(step)))
+        step.description = `REPLACE WITH ${placeholders.noteOf(step)}`
       return step
     }
     case 'groovyScript': {
@@ -176,6 +181,11 @@ function toStep(s, scripts, files, where) {
       if (s.kind === 'iterating' && s.settings?.tokenValue != null && s.settings.tokenValue !== s.expression)
         throw `${where} '${s.name}': tokenValue '${s.settings.tokenValue}' differs from the expression; an update would set it to '${s.expression}'`
       return { ...base, kind: s.kind, expression: s.expression, ...(s.grouping !== 1 && { grouping: s.grouping }), ...(!s.streaming && { streaming: false }), stopOnException: s.stopOnException }
+    }
+    case 'requestReplyProcessDirect': {
+      const pd = senderSettings.processDirectReceiverOf(s.adapter)
+      if (pd.differences) throw `${where} '${s.name}': receiver ${s.system}: ${pd.differences.join('; ')}`
+      return { ...base, ...(s.system && { system: s.system }), address: pd.address }
     }
     case 'requestReplySoap':
       checkFixed(s, FIXED_SETTINGS.soap, `${where} '${s.name}': receiver ${s.system}`)
@@ -268,7 +278,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     )
 
   for (const a of parsed.adapters || [])
-    if (!(['HTTPS', 'SOAP', 'ProcessDirect', 'JMS', 'SFTP'].includes(a.type) && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
+    if (!(['HTTPS', 'SOAP', 'ProcessDirect', 'JMS', 'SFTP'].includes(a.type) && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail', 'ProcessDirect'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
 
   const stepFrom = (s, where) =>
     SUPPORTED_STEPS.includes(s.type) && s.type !== 'router' && s.type !== 'multicast'
@@ -357,7 +367,12 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
   else if (e.type === 'httpReceiver') {
     if (e.kind && e.kind !== 'message') blockers.push(`the main flow ends with an ${e.kind} end and a receiver (a receiver needs a Message End)`)
     else attempt(() => (end = { type: 'httpReceiver', ...callFields(e, `end receiver ${e.system}`) }))
-  } else blockers.push(`end: ${e.adapter || e.type} receiver (only HTTP receiver or none)`)
+  } else if (e.type === 'processDirectReceiver') {
+    const pd = senderSettings.processDirectReceiverOf(e.adapter)
+    if (e.kind && e.kind !== 'message') blockers.push(`the main flow ends with an ${e.kind} end and a receiver (a receiver needs a Message End)`)
+    else if (pd.differences) blockers.push(`end receiver ${e.system}: ${pd.differences.join('; ')}`)
+    else end = { type: 'processDirectReceiver', ...(e.system && { system: e.system }), address: pd.address }
+  } else blockers.push(`end: ${e.adapter || e.type} receiver (only HTTP or ProcessDirect receiver, or none)`)
 
   // Resources the builder does not write (mappings, schemas, other scripts) would be deleted
   // XSLT files are kept as spec.resources (their content comes back in `resources`)

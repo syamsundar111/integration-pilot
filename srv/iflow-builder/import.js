@@ -16,6 +16,7 @@ const JSZip = require('jszip')
 const { parse } = require('./parser')
 const cpiValues = require('./cpi-values')
 const senderSettings = require('./sender-settings')
+const placeholderNotes = require('./placeholders')
 const { validate } = require('./validator')
 const { IMPORT_NO_PACKAGE } = require('../lib/package-id')
 
@@ -81,6 +82,21 @@ async function importIflow(buffer, { fileName, packageId }) {
 
   /** {{Param}} in notes and descriptions -> its default, so the user reads the real value */
   const withDefaults = (text) => String(text ?? '').replace(PARAM_REF, (m, p) => (defaults[p] ? defaults[p] : m))
+  /**
+   * The address of a parsed ProcessDirect receiver (a step's or the end's), or null when the spec cannot hold it: a
+   * whole {{Parameter}} stays a parameter; another parameter becomes its default (noted) when that is a path
+   */
+  const processDirectAddress = (r) => {
+    const pd = senderSettings.processDirectReceiverOf(r.adapter)
+    if (pd.differences?.some((d) => !d.startsWith('the address'))) return null
+    const raw = String(r.address ?? '')
+    const whole = raw.match(/^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/)?.[1]
+    if (whole && Object.hasOwn(params, whole)) return raw
+    const value = withDefaults(raw)
+    if (!/^(\/[A-Za-z0-9_.~-]+)+$/.test(value)) return null
+    if (value !== raw) notes.push(`${r.system || 'ProcessDirect receiver'}: the address ${raw} became its value ${value}`)
+    return value
+  }
   /**
    * Authentication, proxy and timeout of a parsed HTTP receiver call, as the spec holds them. A
    * credential name or location ID given as a whole {{Parameter}} stays a parameter; one the spec
@@ -233,6 +249,10 @@ async function importIflow(buffer, { fileName, packageId }) {
           ...(was.length ? [`Parameter defaults used: ${[...new Set(was)].join('; ')}`] : [])
         ]
         if (notes_.length) cm.description = truncate(notes_.join('. '), 500)
+        // a placeholder (an AI's PH_ step or an earlier Import's): recognised by its REPLACE_WITH property, as the
+        // description is not written into the iFlow; it stays a placeholder, so the app does not deploy it
+        const replaceWith = (cm.properties || []).find((p) => p.name === 'REPLACE_WITH' && p.type === 'constant')
+        if (replaceWith && placeholderNotes.usable(placeholderNotes.noteOf(cm))) return [{ ...cm, description: `REPLACE WITH ${placeholderNotes.noteOf(cm)}`, placeholder: placeholderNotes.noteOf(cm) }]
         return [cm]
       }
       case 'writeVariables': {
@@ -289,6 +309,13 @@ async function importIflow(buffer, { fileName, packageId }) {
         if (raw.mappingSource !== 'mappingSrcIflow' || raw.mappingoutputformat !== 'Bytes') return [placeholder(name, `${what}: source ${raw.mappingSource}, output format ${raw.mappingoutputformat}`)]
         usedXsl.add(file)
         return [{ type: 'xsltMapping', ...(name && { name }), file }]
+      }
+      case 'requestReplyProcessDirect': {
+        const what = `ProcessDirect request-reply ${label} to ${s.address || '?'}`
+        if (where === 'exception') return [placeholder(name, `${what} (not supported in the exception subprocess)`)]
+        const address = processDirectAddress(s)
+        if (!address) return [placeholder(name, what)]
+        return [{ type: 'requestReplyProcessDirect', ...(name && { name }), system: uniqueSystem(identifier(s.system, 'Receiver'), 50), address }]
       }
       case 'requestReplySoap': {
         const raw = s.settings || {}
@@ -560,6 +587,10 @@ async function importIflow(buffer, { fileName, packageId }) {
       end = { type: 'httpReceiver', system: endSystem, url, method: METHODS.includes(e.method) ? e.method : 'POST', ...receiverFields(e, endSystem) }
       if (e.unsupportedSettings?.length) notes.push(`End receiver ${endSystem}: set ${e.unsupportedSettings.map(withDefaults).join(', ')} in the CPI web editor`)
     } else steps.push(placeholder(undefined, `the HTTP receiver ${e.system || ''} at ${e.url || '?'} (the URL could not be converted)`))
+  } else if (e.type === 'processDirectReceiver') {
+    const address = processDirectAddress(e)
+    if (address) end = { type: 'processDirectReceiver', system: uniqueSystem(identifier(e.system, 'Receiver'), 50), address }
+    else steps.push(placeholder(undefined, `the ProcessDirect receiver ${e.system || ''} at ${e.address || '?'}`))
   } else if (e.type === 'receiver') steps.push(placeholder(undefined, `the ${e.adapter} receiver${e.system ? ` ${e.system}` : ''}${e.address ? ` (${e.address})` : ''}`))
 
   // --- exception subprocess ----------------------------------------------------------------

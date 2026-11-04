@@ -279,6 +279,13 @@ async function main() {
     attrs: { 'id="MessageFlow_1"': 'id="{{ID}}"', 'sourceRef="Participant_1"': 'sourceRef="{{SOURCE}}"', 'targetRef="StartEvent_1"': 'targetRef="{{TARGET}}"' },
     props: { address: 'ADDRESS_VALUE', system: 'SYSTEM_VALUE' }
   })
+  // ProcessDirect receiver (Ref_Receiver_ProcessDirect, built in the CPI editor): only the address, from a Request Reply
+  // (RR_CallOrders) or the Message End; both adapters are the same apart from the address
+  const pdReceiver = await readZip('Ref_Receiver_ProcessDirect.zip')
+  t['iflw/messageflow-processdirect-receiver.xml'] = apply(block(pdReceiver.iflw, 'id="MessageFlow_12"'), 'processdirect-receiver', {
+    attrs: { 'id="MessageFlow_12"': 'id="{{ID}}"', 'sourceRef="ServiceTask_7"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_2"': 'targetRef="{{TARGET}}"' },
+    props: { address: 'ADDRESS_VALUE', system: 'SYSTEM_VALUE' }
+  })
   t['iflw/messageflow-http-receiver.xml'] = apply(block(x, 'id="MessageFlow_22"'), 'http-receiver', {
     attrs: { 'id="MessageFlow_22"': 'id="{{ID}}"', 'sourceRef="ServiceTask_18"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_21"': 'targetRef="{{TARGET}}"' },
     props: {
@@ -546,6 +553,13 @@ async function main() {
       return [field, { attributeId: r[2], uilabel: r[3], categorySuffix: r[1].slice(sftpSystem.length) }]
     })
   )
+  // the ProcessDirect receiver's address (Ref_Receiver_ProcessDirect: PD_Notify_Address on RCV_PD_Notify), as the
+  // CPI editor wrote it: category = the receiver's system name, attribute_id of the adapter type with version 1.1.2
+  const pdPropdef = pdReceiver.files['src/main/resources/parameters.propdef']
+  const pdMatch = pdPropdef.match(/<reference attribute_category="([^"]+)" attribute_id="([^"]+\/attrId::address)" attribute_uilabel="([^"]*)" param_key="PD_Notify_Address"\/>/)
+  if (!pdMatch) throw new Error('Ref_Receiver_ProcessDirect.zip: no parameter reference for the address')
+  if (pdMatch[1] !== 'RCV_PD_Notify') throw new Error(`Ref_Receiver_ProcessDirect.zip: category ${pdMatch[1]} is not the receiver RCV_PD_Notify`)
+  const pdRef = { attributeId: pdMatch[2], uilabel: pdMatch[3], categorySuffix: '' }
   t['propdef-receiver-attributes.json'] =
     JSON.stringify(
       {
@@ -556,7 +570,8 @@ async function main() {
         mailServer: refOf('server', { ownVersion: true }),
         mailTo: refOf('to', { ownVersion: true }),
         mailCredential: refOf('user', { ownVersion: true }),
-        ...sftpRefs
+        ...sftpRefs,
+        pdAddress: pdRef
       },
       null,
       2

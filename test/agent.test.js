@@ -1333,6 +1333,24 @@ describe('fewer and smaller model inputs', () => {
     expect(system).toMatch(/## Unsupported steps/)
   })
 
+  test('ProcessDirect calls (phase 6): the step and the end come with the senders topic only; the unsupported-steps section no longer loads', async () => {
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', {})).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'what can you build?' })
+    let result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result.format.steps.requestReplyProcessDirect).toBeUndefined()
+    expect(result.format.end.join()).not.toMatch(/processDirectReceiver/)
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['senders'] })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'what can you build?' })
+    result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result.format.steps.requestReplyProcessDirect).toMatch(/address/)
+    expect(result.format.end.join()).toMatch(/"type": "processDirectReceiver"/)
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow that calls the order iFlow via ProcessDirect.' })
+    const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+    expect(system).toMatch(/## Senders/)
+    expect(system).not.toMatch(/## Unsupported steps/)
+  })
+
   test('the Senders section: also when the request names ProcessDirect', async () => {
     llm.chat.mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'Create an iFlow that another iFlow calls via ProcessDirect.' })

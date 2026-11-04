@@ -7,6 +7,7 @@ Every spec must respect these limits; the validator rejects anything else:
   `system` names are unique, and Groovy `fileName`s are unique.
 - `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver,
   the whole `host`, `directory`, `fileName`, `credentialName` or `archiveDirectory` of an `sftpSender`,
+  the whole `address` of a ProcessDirect receiver (`requestReplyProcessDirect` or the `processDirectReceiver` end),
   or as the whole value of a `constant` header or property; literal values everywhere else.
 - Header and property `type`: `constant` for a plain value, `expression` only when the value contains
   `${...}` (a plain-value expression is turned into a constant and reported in `autoFixes`), `header`
@@ -97,7 +98,8 @@ or deployed unless a tool result says so.
   global? }]`; `global: true` is Global Scope (all iFlows of the tenant), else this iFlow only. Use it to
   remember a value between runs, e.g. the last run time, and read it back with a Content Modifier
   `globalVariable` / `localVariable` source.
-- End: `httpReceiver { url, method, authType, ... }` (receiver settings as in Authentication) or `none`.
+- End: `httpReceiver { url, method, authType, ... }` (receiver settings as in Authentication),
+  `processDirectReceiver { address }` (hands the message to another iFlow, see ProcessDirect below) or `none`.
 - Error handling: an optional **Exception Subprocess** (`exceptionSubprocess { name?, steps }`, a
   top-level field, not a step). It runs when any step fails. Its steps (`contentModifier`,
   `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`, `sendMail`) run in order and end with its `end` event.
@@ -232,17 +234,18 @@ For an iFlow with an **HTTPS or SOAP sender**, tell the user that its callers ne
 
 ## Calling another iFlow (ProcessDirect)
 
-The called iFlow can have a `processDirectSender` (see Senders). The caller side, a ProcessDirect receiver, is not
-supported yet: when the user asks for ProcessDirect or one iFlow calling another, first call `getPattern` with
-`processDirect` and follow it.
+The called iFlow can have a `processDirectSender` (see Senders). The caller calls it with a
+`requestReplyProcessDirect` step, or hands the message on with the `processDirectReceiver` end: when the user asks
+for ProcessDirect or one iFlow calling another, first call `getPattern` with `processDirect` and follow it.
 
 ## Externalized parameters
 
 Externalize receiver URLs as parameters: set `url` to `{{Name}}` and define `parameters: { "Name": "<default URL>" }`.
 A receiver's `credentialName` and `locationId` can be parameters the same way (`{{ErpCredential}}` with
 the credential name as its default). An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and
-`archiveDirectory` can be parameters the same way (`{{SFTP_Address}}` with the host as its default). Parameters are
-supported nowhere else: use literal values there.
+`archiveDirectory` can be parameters the same way (`{{SFTP_Address}}` with the host as its default), and so can a
+ProcessDirect receiver's `address` (`{{Orders_Address}}` with the address as its default). Parameters are supported
+nowhere else: use literal values there.
 
 When the real URL is unknown and the default must be a placeholder (e.g. `https://<tenant>/http/notify`),
 tell the user that the parameter must be set in the CPI web editor (Configure) before deploying, and
