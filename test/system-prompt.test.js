@@ -406,7 +406,7 @@ describe('system prompt: SFTP sender (phase 5)', () => {
     expect(senders).toMatch(/the SFTP server's host key must be in the tenant's known hosts before deploying, and with `publicKey` that the key alias must be a key pair in the tenant keystore whose public key the SFTP server accepts\./)
   })
   test('the five SFTP sender fields may be parameters: in the hard limits and under Externalized parameters', () => {
-    expect(flat).toMatch(/- `\{\{Param\}\}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver, the whole `host`, `directory`, `fileName`, `credentialName` or `archiveDirectory` of an `sftpSender`, the whole `address` of a ProcessDirect receiver \(`requestReplyProcessDirect` or the `processDirectReceiver` end\), or as the whole value of a `constant` header or property; literal values everywhere else\./)
+    expect(flat).toMatch(/`archiveDirectory` of `sftpSender`;/)
     expect(flat).toMatch(/An `sftpSender`'s `host`, `directory`, `fileName`, `credentialName` and `archiveDirectory` can be parameters the same way \(`\{\{SFTP_Address\}\}` with the host as its default\), and so can a ProcessDirect receiver's `address` \(`\{\{Orders_Address\}\}` with the address as its default\)\. Parameters are supported nowhere else: use literal values there\./)
   })
   test('the example of the Senders section is a valid trigger', () => {
@@ -419,5 +419,62 @@ describe('system prompt: SFTP sender (phase 5)', () => {
 describe('system prompt: the id of a new iFlow', () => {
   test('made from its name; another id only when the user gives one', () => {
     expect(flat).toMatch(/- id: a new iFlow's id is made from its name; set a different id only when the user gives one;/)
+  })
+})
+
+describe('system prompt: the Hard limits list exactly the fields the validator accepts as {{Param}}', () => {
+  const { validate } = require('../srv/iflow-builder/validator')
+  // the fields the prompt names: "`a`, `b` of `owner` and the `owner2` end; ..."
+  const listed = () => {
+    const line = flat.match(/`\{\{Param\}\}` references only as the whole value of these fields, literal values everywhere else: (.*?)\. - /)[1]
+    return new Set(
+      line.split('; ').flatMap((part) => {
+        const [fields, owners] = part.split(' of ')
+        const names = (text) => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1])
+        return names(fields).flatMap((f) => names(owners).map((o) => `${o}.${f}`))
+      })
+    )
+  }
+  // every string field of each place that can hold a value, with a valid spec around it; text fields (description,
+  // body, code) are documentation, and names are no values
+  const base = { id: 'A', name: 'A', packageId: 'P', trigger: { type: 'timer', mode: 'once' }, steps: [], end: { type: 'none' } }
+  const HTTP = { url: 'https://x.example.com/a', method: 'POST', authType: 'Basic', credentialName: 'C', proxyType: 'On-Premise', locationId: 'L' }
+  const SFTP = { type: 'sftpSender', host: 'h.example.com', directory: '/in', fileName: '*.xml', minutes: 15 }
+  const places = [
+    ['requestReplyHttp', (v) => ({ ...base, steps: [{ type: 'requestReplyHttp', name: 'S', ...HTTP, ...v }] })],
+    ['httpReceiver', (v) => ({ ...base, end: { type: 'httpReceiver', ...HTTP, ...v } })],
+    ['requestReplySoap', (v) => ({ ...base, steps: [{ type: 'requestReplySoap', name: 'S', url: 'https://x.example.com/s', authType: 'Basic', credentialName: 'C', proxyType: 'On-Premise', locationId: 'L', ...v }] })],
+    ['sendMail', (v) => ({ ...base, steps: [{ type: 'sendMail', name: 'S', server: 'smtp.example.com:587', credentialName: 'C', from: 'a@example.com', to: 'b@example.com', cc: 'c@example.com', bcc: 'd@example.com', subject: 'S', ...v }] })],
+    ['sftpSender', (v) => ({ ...base, trigger: { ...SFTP, authentication: 'userPassword', credentialName: 'C', postProcessing: 'move', archiveDirectory: '.archive', ...v } })],
+    ['sftpSender', (v) => ({ ...base, trigger: { ...SFTP, authentication: 'publicKey', username: 'U', privateKeyAlias: 'K', postProcessing: 'delete', ...v } })],
+    ['requestReplyProcessDirect', (v) => ({ ...base, steps: [{ type: 'requestReplyProcessDirect', name: 'S', address: '/a', ...v }] })],
+    ['processDirectReceiver', (v) => ({ ...base, end: { type: 'processDirectReceiver', address: '/a', ...v } })],
+    ['httpsSender', (v) => ({ ...base, trigger: { type: 'httpsSender', address: '/a', ...v } })],
+    ['soapSender', (v) => ({ ...base, trigger: { type: 'soapSender', address: '/a', ...v } })],
+    ['processDirectSender', (v) => ({ ...base, trigger: { type: 'processDirectSender', address: '/a', ...v } })],
+    ['jmsSender', (v) => ({ ...base, trigger: { type: 'jmsSender', queue: 'Q', ...v } })],
+    ['groovyScript', (v) => ({ ...base, steps: [{ type: 'groovyScript', name: 'S', fileName: 'f', code: 'import com.sap.gateway.ip.core.customdev.util.Message\ndef Message processData(Message message) {\n  return message\n}', ...v }] })],
+    ['messageMapping', (v) => ({ ...base, steps: [{ type: 'messageMapping', name: 'S', mapping: 'M', ...v }] })]
+  ]
+  const fieldsOf = (make) => {
+    const spec = make({})
+    const where = spec.steps[0] || (spec.end.type !== 'none' ? spec.end : spec.trigger)
+    return Object.keys(where).filter((k) => typeof where[k] === 'string' && !['type', 'name', 'system', 'description', 'body', 'code', 'method', 'authType', 'proxyType', 'authentication', 'postProcessing', 'mode'].includes(k))
+  }
+  const accepted = () => {
+    const out = new Set()
+    for (const [owner, make] of places) {
+      expect(validate(make({})).errors).toEqual([]) // the probe starts from a valid spec
+      for (const field of fieldsOf(make)) if (validate({ ...make({ [field]: '{{P}}' }), parameters: { P: 'https://x.example.com/p' } }).valid) out.add(`${owner}.${field}`)
+    }
+    // header and property rows: by source type
+    for (const type of ['constant', 'expression', 'header', 'property']) {
+      const spec = { ...base, steps: [{ type: 'contentModifier', name: 'S', properties: [{ name: 'p', type, value: '{{P}}' }] }], parameters: { P: 'x' } }
+      if (validate(spec).valid) out.add(`${type}.value`)
+    }
+    return out
+  }
+  test('the prompt line and the validator name the same fields', () => {
+    expect([...listed()].sort()).toEqual([...accepted()].sort())
   })
 })

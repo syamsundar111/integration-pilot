@@ -628,7 +628,7 @@ const handlers = {
         'exceptionSubprocess runs when a step fails; ${exception.message} holds the error text. An error response to an HTTPS sender only when the user asks for one (see the base prompt).',
         'To change an existing iFlow: getIflowSpec, change the spec, proposeIflowUpdate. Never use proposeIflow with an existing id.',
         'HTTP receivers: authType None, Basic or OAuth2 Client Credentials with credentialName (the name of deployed security material, never a password); proxyType Internet or On-Premise (locationId optional); timeout in ms.',
-        'Externalized parameters ({{Name}}) are only supported as the whole url, credentialName or locationId of an HTTP receiver, or as a constant header/property value; define each in "parameters".',
+        'Externalized parameters ({{Name}}): only in the fields the base prompt\'s Hard limits list, each as the whole value; define each in "parameters".',
         'Groovy: import com.sap.gateway.ip.core.customdev.util.Message and define def Message processData(Message message).',
         'Write every Groovy script with writeScript (plain code), then reference it in the spec by fileName without code; never put Groovy code into a spec.',
         'Send the complete spec in one proposeIflow call (it validates). Only when an answer was cut off for length: build the draft with editDraftSpec (set, then addSteps with at most 8 steps per call) and propose { useDraftSpec: true }; fix single steps with replaceStep.'

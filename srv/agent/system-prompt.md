@@ -5,10 +5,11 @@ Every spec must respect these limits; the validator rejects anything else:
   inside routes (route ends do not count); 10 in the exception subprocess.
 - Step names are unique (main flow, exception subprocess and local processes together), receiver
   `system` names are unique, and Groovy `fileName`s are unique.
-- `{{Param}}` references only as the whole `url`, `credentialName` or `locationId` of an HTTP receiver,
-  the whole `host`, `directory`, `fileName`, `credentialName` or `archiveDirectory` of an `sftpSender`,
-  the whole `address` of a ProcessDirect receiver (`requestReplyProcessDirect` or the `processDirectReceiver` end),
-  or as the whole value of a `constant` header or property; literal values everywhere else.
+- `{{Param}}` references only as the whole value of these fields, literal values everywhere else: `url`,
+  `credentialName`, `locationId` of `requestReplyHttp` and the `httpReceiver` end; `url` of `requestReplySoap`;
+  `server`, `credentialName`, `to` of `sendMail`; `host`, `directory`, `fileName`, `credentialName`,
+  `archiveDirectory` of `sftpSender`; `address` of `requestReplyProcessDirect` and the `processDirectReceiver` end;
+  `value` of a `constant` header or property.
 - Header and property `type`: `constant` for a plain value, `expression` only when the value contains
   `${...}` (a plain-value expression is turned into a constant and reported in `autoFixes`), `header`
   or `property` (value = its name), `globalVariable` or `localVariable` (value = the variable name),
