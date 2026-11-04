@@ -244,6 +244,8 @@ From the former reference export checklist; each needs a reference export first.
 - Mail: other protection, authentication and body types, attachments; a mail or SOAP receiver at the end.
 - From real iFlows (test/local/real-iflows/NOTES.txt): exception subprocesses inside local processes; a
   Send step with an SFTP receiver. (The OData V2 receiver of the HR cloud adapter is phase 6c.)
+- Message Mapping `MM_DummyOrderToNotif`: not on the re-provisioned tenant (2026-11-04); re-import or rebuild it before
+  a chat test or the acceptance test uses it.
 - OData V4 receiver: needs an export built in the CPI editor (Query (GET), resource path, query options, Basic,
   Internet); no real iFlow uses it.
 - More timer schedules: every N hours, daily, weekly and monthly at a time, other time zones, and the
