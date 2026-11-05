@@ -102,7 +102,7 @@ sap.ui.define([], () => {
     unsupported: (found) =>
       `Not supported yet: ${found.join(', ')}. Supported: Content Modifier, Groovy Script, Write Variables, JSON/XML converters, HTTP and SOAP request-reply, mail, mappings, routers, multicasts, splitters, gathers and process calls. Use a Groovy script, or add the step in the CPI web editor after creation.`,
     params: (names) =>
-      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP receiver, the URL of a SOAP receiver, the server, credential name or recipients of a mail, the host, directory, file name, credential name or archive directory of an SFTP sender, the host, directory, file name or credential name of an SFTP receiver, or as a constant value. Use literal values elsewhere.`,
+      `${names.join(', ')}: parameters work only as the whole URL, credential name or location ID of an HTTP or OData receiver, the URL of a SOAP receiver, the server, credential name or recipients of a mail, the host, directory, file name, credential name or archive directory of an SFTP sender, the host, directory, file name or credential name of an SFTP receiver, or as a constant value. Use literal values elsewhere.`,
     secret:
       'This looks like a password, secret or token. Never send credentials: deploy them as security material in CPI (User Credentials or OAuth2 Client Credentials) and give only its name, e.g. "Basic, credential ERP_BASIC_USER".'
   }

@@ -14,16 +14,16 @@ const senderSettings = require('./sender-settings')
 const ajv = new Ajv({ allErrors: true, strict: false })
 const checkSchema = ajv.compile(schema)
 
-const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'sendSftp', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping', 'multicast']
+const SUPPORTED_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyOData', 'requestReplyProcessDirect', 'sendMail', 'sendSftp', 'writeVariables', 'router', 'splitter', 'gather', 'processCall', 'messageMapping', 'xsltMapping', 'multicast']
 // steps with a receiver of their own (a participant and an adapter)
-const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'sendSftp']
+const RECEIVER_STEPS = ['requestReplyHttp', 'requestReplySoap', 'requestReplyOData', 'requestReplyProcessDirect', 'sendMail', 'sendSftp']
 // not inside routes, the exception subprocess or local processes
 const MAIN_LINE_ONLY = ['router', 'splitter', 'gather', 'multicast']
 // Steps allowed in the exception subprocess (of the receivers only a Send step: no reply to wait for; Write Variables
 // only in the main flow so far)
 const SUPPORTED_EXCEPTION_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'processCall', 'sendMail', 'sendSftp', 'messageMapping', 'xsltMapping']
 // Steps allowed in a local process (a router on its line, as on the main line; no splitters or process calls so far)
-const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyProcessDirect', 'sendMail', 'sendSftp', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
+const SUPPORTED_LOCAL_STEPS = ['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'requestReplyHttp', 'requestReplySoap', 'requestReplyOData', 'requestReplyProcessDirect', 'sendMail', 'sendSftp', 'messageMapping', 'xsltMapping', 'writeVariables', 'router']
 const SUPPORTED_TRIGGERS = ['httpsSender', 'soapSender', 'processDirectSender', 'jmsSender', 'sftpSender', 'timer']
 const MAX_MAIN_STEPS = 50 // per process: the main flow and each local process, with its routers and the steps inside routes
 const SUPPORTED_ENDS = ['httpReceiver', 'processDirectReceiver', 'none']
@@ -58,7 +58,7 @@ const DEFAULT_STEP_NAMES = {
 }
 /** The key of a step's default name: splitters by kind, a process call with a loop is a Looping Process Call, any Request Reply counts as one, any Send too */
 const defaultKey = (s) =>
-  s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : ['requestReplySoap', 'requestReplyProcessDirect'].includes(s.type) ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
+  s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : ['requestReplySoap', 'requestReplyOData', 'requestReplyProcessDirect'].includes(s.type) ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
 const DEFAULT_EXCEPTION_SUBPROCESS_NAME = 'Exception Subprocess 1'
 
 const GROOVY_IMPORT = /import\s+com\.sap\.gateway\.ip\.core\.customdev\.util\.Message\s*;?/
@@ -156,6 +156,8 @@ const PATTERN_HINTS = {
   credentialName: 'use the name of the deployed credential (letters, digits, dot, dash, underscore) or a whole parameter like {{ErpCredential}}',
   locationId: 'use letters, digits, dot, dash or underscore, or a whole parameter like {{ErpLocation}}',
   server: 'use host:port, e.g. smtp.example.com:587, or a whole parameter like {{Mail_Server}}',
+  resourcePath: 'use the name of the entity set, e.g. Products (letters, digits, underscore)',
+  queryOptions: 'use $select, $filter, $orderby, $top, $skip or $expand options joined by &, e.g. $select=ProductID,Name&$top=10',
   from: 'use one mail address, e.g. noreply@example.com',
   to: 'use mail addresses separated by commas, or a whole parameter like {{Mail_To}}',
   cc: 'use mail addresses separated by commas',
@@ -236,7 +238,8 @@ function walkStrings(node, path, fn) {
 /**
  * Fields where {{Parameter}} references are allowed: an HTTP receiver's URL, credential name and location ID,
  * an SFTP sender's host, directory, file name, credential name and archive directory (Ref_Sender_SFTP_UserPw), an SFTP
- * receiver's host, directory, file name and credential name (Ref_Receiver_SFTP), a
+ * receiver's host, directory, file name and credential name (Ref_Receiver_SFTP), an OData V2 receiver's URL, credential name
+ * and location ID (Ref_Receiver_OData), a
  * ProcessDirect receiver's address (Ref_Receiver_ProcessDirect), and the
  * value of a constant header or property (an externalized value; the other sources name a header, property, variable or
  * XPath)
@@ -285,6 +288,7 @@ function validate(spec, { attachments = [] } = {}) {
     else if (/xsl/i.test(type)) err('USE_MAPPING', `${where}: '${type}' — an XSLT step is { "type": "xsltMapping", "file": "transform.xsl" }, with the file attached`)
     else if (/mapping/i.test(type)) err('USE_MAPPING', `${where}: '${type}' — a Message Mapping is { "type": "messageMapping", "mapping": "<artifact id>" }`)
     else if (/soap/i.test(type)) err('USE_SOAP', `${where}: '${type}' — a SOAP call is { "type": "requestReplySoap", "url", "authType": "Basic", "credentialName", "proxyType": "On-Premise", "locationId"? }`)
+    else if (/odata/i.test(type)) err('USE_ODATA', `${where}: '${type}' — an OData V2 call is { "type": "requestReplyOData", "url": "<service root>", "operation": "query"|"create", "resourcePath": "<entity set>", "queryOptions"?, "authType": "Basic"|"OAuth2 Client Credentials", "credentialName", "proxyType": "Internet"|"On-Premise", "locationId"? }`)
     else if (/sftp/i.test(type)) err('USE_SFTP', `${where}: '${type}' — writing a file to an SFTP server is { "type": "sendSftp", "host", "directory", "fileName", "authentication": "publicKey"|"userPassword", "username" and "privateKeyAlias" | "credentialName" }`)
     else if (/mail|smtp/i.test(type)) err('USE_MAIL', `${where}: '${type}' — a mail is { "type": "sendMail", "server": "host:port", "credentialName", "from", "to", "subject", "body"? }`)
     else if (/multicast|join|sequential|parallel/i.test(type))
@@ -379,7 +383,7 @@ function validate(spec, { attachments = [] } = {}) {
 
   // SOAP and Mail receivers: credentials never in the spec; on SOAP only the url can be a parameter (the references
   // have no parameter reference for its credential name and location ID); stored values from the references
-  for (const { step: s, where, ptr } of [...specSteps.allSteps(spec)].filter((x) => ['requestReplySoap', 'sendMail'].includes(x.step?.type))) {
+  for (const { step: s, where, ptr } of [...specSteps.allSteps(spec)].filter((x) => ['requestReplySoap', 'requestReplyOData', 'sendMail'].includes(x.step?.type))) {
     for (const key of Object.keys(s).filter((k) => SECRET_NAME.test(k) || /^(user(name)?|clientId)$/i.test(k))) {
       skip.push(`${ptr}/${key}`)
       err('SECRET', `${where}.${key}: never put credentials into the spec — ${CREDENTIAL_HINT}`)
@@ -391,6 +395,16 @@ function validate(spec, { attachments = [] } = {}) {
       }
       if (typeof s.url === 'string' && /^https?:\/\/[^/@\s]+:[^/@\s]+@/.test(s.url)) err('URL_CREDENTIALS', `${where}.url: contains user:password — remove it; set credentialName instead (${CREDENTIAL_HINT})`)
       if (s.authType === 'Basic' && s.proxyType === 'On-Premise') valueCheck('SOAP Receiver', [['authentication', 'Basic'], ['proxyType', 'sapcc']], where)
+    } else if (s.type === 'requestReplyOData') {
+      if (typeof s.url === 'string' && /^https?:\/\/[^/@\s]+:[^/@\s]+@/.test(s.url)) err('URL_CREDENTIALS', `${where}.url: contains user:password — remove it; set credentialName instead (${CREDENTIAL_HINT})`)
+      if (s.queryOptions != null && s.operation === 'create') err('ODATA_FIELD_UNUSED', `${where}.queryOptions: only used with operation query — remove it, or set operation "query"`)
+      if (s.locationId != null && s.proxyType === 'Internet') err('ODATA_FIELD_UNUSED', `${where}.locationId: only used with proxyType On-Premise — remove it, or set proxyType "On-Premise"`)
+      const stored = [
+        ['authenticationMethod', senderSettings.ODATA_AUTHENTICATION[s.authType]],
+        ['proxyType', senderSettings.ODATA_PROXY[s.proxyType]],
+        ['operation', senderSettings.ODATA_OPERATION[s.operation]]
+      ].filter(([, v]) => v)
+      valueCheck('OData Receiver', stored, where)
     } else {
       if (typeof s.body === 'string' && /"(password|passwd|pwd|secret|client_secret|token)"\s*:\s*"[^"$]+"/i.test(s.body)) err('SECRET', `${where}.body: contains a plaintext secret — never put passwords or tokens in the flow`)
       valueCheck('Mail Receiver', [['auth', 'loginPlain'], ['ssl', 'starttls_mandatory'], ['content_type', 'text/plain']], where)
@@ -733,7 +747,7 @@ function validate(spec, { attachments = [] } = {}) {
     const row = /\.(headers|properties)\[\d+\]\.value$/.test(path)
     const rowType = row && specSteps.valueAt(spec, path.replace(/\.value$/, ''))?.type
     if (!PARAM_FIELDS.test(path) || (row && rowType !== 'constant')) {
-      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the host, directory, fileName or credentialName of an SFTP receiver (sendSftp), the address of a ProcessDirect receiver, or as a constant value`)
+      err('PARAM_NOT_URL', `${path}: parameters ({{…}}) can only be used as the whole url, credentialName or locationId of an HTTP or OData receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the host, directory, fileName or credentialName of an SFTP receiver (sendSftp), the address of a ProcessDirect receiver, or as a constant value`)
       return
     }
     if (!WHOLE_PARAM.test(value)) {

@@ -317,6 +317,16 @@ async function importIflow(buffer, { fileName, packageId }) {
         if (!address) return [placeholder(name, what)]
         return [{ type: 'requestReplyProcessDirect', ...(name && { name }), system: uniqueSystem(identifier(s.system, 'Receiver'), 50), address }]
       }
+      case 'requestReplyOData': {
+        // kept only as the builder writes it (sender-settings); a whole {{Parameter}} needs its value in the export
+        const what = `OData V2 request-reply ${label} (${s.operation || '?'} ${s.resourcePath || '?'}) to ${s.url || '?'}`
+        if (where === 'exception') return [placeholder(name, `${what} (not supported in the exception subprocess)`)]
+        const odata = senderSettings.odataReceiverOf(s.adapter)
+        if (odata.differences) return [placeholder(name, `${what} (${odata.differences.join('; ')})`)]
+        const undefinedParam = Object.values(odata.call).find((v) => /^\{\{/.test(v) && !Object.hasOwn(params, v.slice(2, -2)))
+        if (undefinedParam) return [placeholder(name, `${what} (the parameter ${undefinedParam} has no value in the export)`)]
+        return [{ type: 'requestReplyOData', ...(name && { name }), system: uniqueSystem(identifier(s.system, 'Receiver'), 50), ...odata.call }]
+      }
       case 'sendSftp': {
         // kept only as the builder writes it (sender-settings); a whole {{Parameter}} needs its value in the export
         const what = `SFTP Send ${label} to ${s.host || '?'}${s.directory ? ` ${s.directory}` : ''}`

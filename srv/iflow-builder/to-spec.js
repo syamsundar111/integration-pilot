@@ -187,6 +187,11 @@ function toStep(s, scripts, files, where) {
       if (pd.differences) throw `${where} '${s.name}': receiver ${s.system}: ${pd.differences.join('; ')}`
       return { ...base, ...(s.system && { system: s.system }), address: pd.address }
     }
+    case 'requestReplyOData': {
+      const odata = senderSettings.odataReceiverOf(s.adapter)
+      if (odata.differences) throw `${where} '${s.name}': receiver ${s.system}: ${odata.differences.join('; ')}`
+      return { ...base, ...(s.system && { system: s.system }), ...odata.call }
+    }
     case 'sendSftp': {
       const sftp = senderSettings.sftpReceiverOf(s.adapter)
       if (sftp.differences) throw `${where} '${s.name}': receiver ${s.system}: ${sftp.differences.join('; ')}`
@@ -283,7 +288,7 @@ function specFromParsed(parsed, { packageId, configurations = [] }) {
     )
 
   for (const a of parsed.adapters || [])
-    if (!(['HTTPS', 'SOAP', 'ProcessDirect', 'JMS', 'SFTP'].includes(a.type) && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail', 'ProcessDirect', 'SFTP'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
+    if (!(['HTTPS', 'SOAP', 'ProcessDirect', 'JMS', 'SFTP'].includes(a.type) && a.direction === 'Sender') && !(['HTTP', 'SOAP', 'Mail', 'ProcessDirect', 'SFTP', 'HCIOData'].includes(a.type) && a.direction === 'Receiver')) blockers.push(`adapter ${a.type} (${a.direction || 'unknown direction'})`)
 
   const stepFrom = (s, where) =>
     SUPPORTED_STEPS.includes(s.type) && s.type !== 'router' && s.type !== 'multicast'

@@ -68,8 +68,8 @@ const SOAP_TEXT = /\b(soap|wsdl|web ?services?)\b/i
 const MAIL_TEXT = /\b(e-?mails?|mails?|smtp)\b/i
 const MAPPING_TEXT = /\b(mappings?|xslt?|mmap)\b/i
 const SENDERS_TEXT = /\b(senders?|process ?direct|jms|(message )?queues?|sftp|poll(s|ing)? (for )?files|soap (service|endpoint|interface|requests?|calls? (it|the iflow))|called (by|via) soap|expose[sd]? (it )?as (a )?soap)\b/i
-// receivers in steps: an SFTP receiver (receiver wording only: an SFTP sender reads files), ProcessDirect calls
-const RECEIVERS_TEXT = /\b(sftp[ -]receivers?|process ?direct|(upload\w*|writ\w*|wrote|send\w*|sent|put\w*|deliver\w*|transfer\w*|push\w*|stor\w*)\b[^.;:\n]{0,40}?\b(to|via|over|into|on)\s+(an?\s+|the\s+)?sftp)\b/i
+// receivers in steps: OData, an SFTP receiver (receiver wording only: an SFTP sender reads files), ProcessDirect calls
+const RECEIVERS_TEXT = /\b(odata|sftp[ -]receivers?|process ?direct|(upload\w*|writ\w*|wrote|send\w*|sent|put\w*|deliver\w*|transfer\w*|push\w*|stor\w*)\b[^.;:\n]{0,40}?\b(to|via|over|into|on)\s+(an?\s+|the\s+)?sftp)\b/i
 const MULTICAST_TEXT = /\b(multicasts?|parallel branch(es)?|fan[- ]?out|at the same time|in parallel|join step)\b/i
 const SENDER_TRIGGERS = ['soapSender', 'processDirectSender', 'jmsSender', 'sftpSender']
 const PROMPT_SECTIONS = [
@@ -87,8 +87,8 @@ const PROMPT_SECTIONS = [
   { name: 'multicast', applies: ({ userText, draftTypes }) => draftTypes.has('multicast') || MULTICAST_TEXT.test(userText) },
   // a sender other than HTTPS: the request names one, or the draft's trigger is one
   { name: 'senders', applies: ({ userText, draftTrigger }) => SENDER_TRIGGERS.includes(draftTrigger) || SENDERS_TEXT.test(userText) },
-  // receivers in steps (SFTP) and ProcessDirect calls (a step or the end): the request names one, or the draft has one
-  { name: 'receivers', applies: ({ userText, draftTypes, draftEnd }) => draftTypes.has('sendSftp') || draftTypes.has('requestReplyProcessDirect') || draftEnd === 'processDirectReceiver' || RECEIVERS_TEXT.test(userText) }
+  // receivers in steps (OData, SFTP) and ProcessDirect calls (a step or the end): the request names one, or the draft has one
+  { name: 'receivers', applies: ({ userText, draftTypes, draftEnd }) => draftTypes.has('requestReplyOData') || draftTypes.has('sendSftp') || draftTypes.has('requestReplyProcessDirect') || draftEnd === 'processDirectReceiver' || RECEIVERS_TEXT.test(userText) }
 ].map((s) => ({ ...s, text: fs.readFileSync(path.join(__dirname, 'prompt-sections', `${s.name}.md`), 'utf8').trim() }))
 
 const db = (user, fn) => cds.tx({ user }, fn)

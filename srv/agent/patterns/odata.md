@@ -1,6 +1,8 @@
 # Pattern: read an OData response in Groovy
 
-Use this when a receiver URL contains `/odata/` or `.svc` and a script reads its response.
+Use this when a `requestReplyHttp` URL contains `/odata/`, `/odata4/` or `.svc` and a script reads its JSON
+response. After `requestReplyOData` the reply is XML (the entity set, e.g. `<Products><Product>…</Product></Products>`):
+read it with `XmlSlurper`, not with this pattern.
 
 **Data shape**
 - OData V2 JSON (`$format=json`): `{"d": {"results": [ ... ]}}`; some services return `{"d": [ ... ]}`, and a

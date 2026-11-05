@@ -200,8 +200,9 @@ describe('system prompt: OData and streaming (Test 3)', () => {
   const tools = require('../srv/agent/tools')
   const FIXTURE = fs.readFileSync(path.join(__dirname, 'fixtures/odata/filterProducts.groovy'), 'utf8')
 
-  test('the prompt points to the odata pattern for /odata/ and .svc URLs and asks for streamed parsing', () => {
-    expect(flat).toMatch(/when a receiver URL contains `\/odata\/` or `\.svc`, call `getPattern` with `odata`/)
+  test('the prompt points to the odata pattern for requestReplyHttp OData URLs only and asks for streamed parsing', () => {
+    expect(flat).toMatch(/when a `requestReplyHttp` URL contains `\/odata\/`, `\/odata4\/` or `\.svc`, call `getPattern` with `odata` before you write a script that reads its JSON response/)
+    expect(flat).toMatch(/After `requestReplyOData` the reply is XML: a script reads the entity set's XML, not this JSON\./)
     expect(flat).toMatch(/Parse the body \*\*streamed\*\*: `new JsonSlurper\(\)\.parse\(message\.getBody\(java\.io\.Reader\.class\)\)`/)
     expect(flat).toMatch(/never `parseText\(message\.getBody\(String\)\)`/)
   })
@@ -211,6 +212,7 @@ describe('system prompt: OData and streaming (Test 3)', () => {
     const p = pattern.replace(/\s+/g, ' ')
     expect(p).toMatch(/`\{"d": \{"results": \[ \.\.\. \]\}\}`/)
     expect(p).toMatch(/OData V4: `\{"value": \[ \.\.\. \]\}`/)
+    expect(p).toMatch(/Use this when a `requestReplyHttp` URL contains `\/odata\/`, `\/odata4\/` or `\.svc` and a script reads its JSON response\. After `requestReplyOData` the reply is XML/)
     expect(p).toMatch(/`new BigDecimal\(value\.toString\(\)\)`/)
     expect(p).toMatch(/Cannot get property 'UnitPrice' on null object/)
     expect(pattern).toContain(FIXTURE)
@@ -420,7 +422,7 @@ describe('system prompt: receivers (phase 6)', () => {
   const receivers = sectionFlat('receivers')
   const senders = sectionFlat('senders')
   test('the core prompt points to the Receivers topic for sendSftp and ProcessDirect calls; sendSftp in the exception subprocess', () => {
-    expect(flat).toMatch(/- `sendSftp` \(writes a file to an SFTP server, one-way, also from the exception subprocess\) and ProcessDirect calls: their rules are in the section "Receivers" when the conversation needs them; else call `getSupportedSteps` with `topics: \["receivers"\]` first\./)
+    expect(flat).toMatch(/- `requestReplyOData` \(an OData V2 query or create\), `sendSftp` \(writes a file to an SFTP server, one-way, also from the exception subprocess\) and ProcessDirect calls: their rules are in the section "Receivers" when the conversation needs them; else call `getSupportedSteps` with `topics: \["receivers"\]` first\./)
     expect(flat).toMatch(/Its steps \(`contentModifier`, `groovyScript`, `jsonToXml`, `xmlToJson`, `processCall`, `sendMail`, `sendSftp`\) run in order/)
   })
   test('sendSftp: values only the user knows, file name parts, overwrite, tenant needs', () => {
@@ -433,6 +435,33 @@ describe('system prompt: receivers (phase 6)', () => {
   test('the ProcessDirect call moved from Senders to Receivers, word for word', () => {
     expect(receivers).toMatch(/- A ProcessDirect call, in the calling iFlow: a `requestReplyProcessDirect` step `\{ "type": "requestReplyProcessDirect", "name": "RR_CallOrders", "address": "\/orders\/process" \}` waits for the called iFlow and continues with its reply; the end `\{ "type": "processDirectReceiver", "address": "\/orders\/process" \}` hands the message on at the end\. The address is exactly the called iFlow's `processDirectSender` address\. Follow the `processDirect` pattern\./)
     expect(senders).not.toMatch(/requestReplyProcessDirect|processDirectReceiver/)
+  })
+  test('requestReplyOData: service root and entity set, the reply and body are XML, values only the user knows, when HTTP instead', () => {
+    expect(receivers).toMatch(/`url` is the service root, without the entity set and without a query; `resourcePath` is the entity set\./)
+    expect(receivers).toMatch(/`create` \(Create\(POST\)\) sends the message body as a new entity, so the body must be XML in that format\./)
+    expect(receivers).toMatch(/\*\*The service root, the entity set and the credential are values only the user knows: ask for the missing ones in one message, and never invent them\.\*\*/)
+    expect(receivers).toMatch(/The entity set is only a name the user gives as the entity set \(e\.g\. "entity set A_Product"\): a word of the request such as "products" is not its name, so ask for it\./)
+    expect(receivers).toMatch(/It is OData V2 only: for an OData V4 service \(the user says V4, or the URL contains `\/odata4\/`\) use `requestReplyHttp` with the `odata` pattern\./)
+    expect(receivers).toMatch(/When the input is JSON, put a `jsonToXml` before a `create`; when the caller expects JSON, put an `xmlToJson` after a `query`\./)
+    expect(receivers).toMatch(/Use `requestReplyHttp` to an OData URL only when the user asks for plain HTTP or for JSON \(`\$format=json`\); a script that reads the reply of `requestReplyOData` reads XML, not the JSON of the `odata` pattern\./)
+  })
+  test('the OData example of the Receivers section is a valid step that builds', async () => {
+    const { validate } = require('../srv/iflow-builder/validator')
+    const { build } = require('../srv/iflow-builder/builder')
+    const step = JSON.parse(receivers.match(/`(\{ "type": "requestReplyOData"[^`]*\})`/)[1])
+    const spec = { id: 'A', name: 'A', packageId: 'P', trigger: { type: 'timer', mode: 'once' }, steps: [step], end: { type: 'none' } }
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+    await expect(build(spec)).resolves.toMatchObject({ zipBase64: expect.any(String) })
+  })
+  test('the JSON default of the Receivers section is valid: jsonToXml before a create, xmlToJson after a query', async () => {
+    const { validate } = require('../srv/iflow-builder/validator')
+    const { build } = require('../srv/iflow-builder/builder')
+    const query = JSON.parse(receivers.match(/`(\{ "type": "requestReplyOData"[^`]*\})`/)[1])
+    const { queryOptions, ...create } = { ...query, name: 'RR_CreateProduct', system: 'S4_Products_Create', operation: 'create' }
+    expect(queryOptions).toBeDefined()
+    const spec = { id: 'A', name: 'A', packageId: 'P', trigger: { type: 'httpsSender', address: '/products' }, steps: [{ type: 'jsonToXml' }, create, query, { type: 'xmlToJson' }], end: { type: 'none' } }
+    expect(validate(spec)).toMatchObject({ valid: true, warnings: [] })
+    await expect(build(spec)).resolves.toMatchObject({ zipBase64: expect.any(String) })
   })
   test('the example of the Receivers section is a valid step that builds', async () => {
     const { validate } = require('../srv/iflow-builder/validator')
@@ -475,6 +504,7 @@ describe('system prompt: the Hard limits list exactly the fields the validator a
     ['sendMail', (v) => ({ ...base, steps: [{ type: 'sendMail', name: 'S', server: 'smtp.example.com:587', credentialName: 'C', from: 'a@example.com', to: 'b@example.com', cc: 'c@example.com', bcc: 'd@example.com', subject: 'S', ...v }] })],
     ['sftpSender', (v) => ({ ...base, trigger: { ...SFTP, authentication: 'userPassword', credentialName: 'C', postProcessing: 'move', archiveDirectory: '.archive', ...v } })],
     ['sftpSender', (v) => ({ ...base, trigger: { ...SFTP, authentication: 'publicKey', username: 'U', privateKeyAlias: 'K', postProcessing: 'delete', ...v } })],
+    ['requestReplyOData', (v) => ({ ...base, steps: [{ type: 'requestReplyOData', name: 'S', url: 'https://x.example.com/s', operation: 'query', resourcePath: 'E', queryOptions: '$top=1', authType: 'Basic', credentialName: 'C', proxyType: 'On-Premise', locationId: 'L', ...v }] })],
     ['sendSftp', (v) => ({ ...base, steps: [{ type: 'sendSftp', name: 'S', host: 'h.example.com', directory: '/out', fileName: 'a.xml', authentication: 'userPassword', credentialName: 'C', ...v }] })],
     ['sendSftp', (v) => ({ ...base, steps: [{ type: 'sendSftp', name: 'S', host: 'h.example.com', directory: '/out', fileName: 'a.xml', authentication: 'publicKey', username: 'U', privateKeyAlias: 'K', ...v }] })],
     ['requestReplyProcessDirect', (v) => ({ ...base, steps: [{ type: 'requestReplyProcessDirect', name: 'S', address: '/a', ...v }] })],

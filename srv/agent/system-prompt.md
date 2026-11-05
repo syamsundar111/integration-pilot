@@ -6,7 +6,7 @@ Every spec must respect these limits; the validator rejects anything else:
 - Step names are unique (main flow, exception subprocess and local processes together), receiver
   `system` names are unique, and Groovy `fileName`s are unique.
 - `{{Param}}` references only as the whole value of these fields, literal values everywhere else: `url`,
-  `credentialName`, `locationId` of `requestReplyHttp` and the `httpReceiver` end; `url` of `requestReplySoap`;
+  `credentialName`, `locationId` of `requestReplyHttp`, `requestReplyOData` and the `httpReceiver` end; `url` of `requestReplySoap`;
   `server`, `credentialName`, `to` of `sendMail`; `host`, `directory`, `fileName`, `credentialName`,
   `archiveDirectory` of `sftpSender`; `host`, `directory`, `fileName`, `credentialName` of `sendSftp`; `address` of
   `requestReplyProcessDirect` and the `processDirectReceiver` end; `value` of a `constant` header or property.
@@ -121,8 +121,8 @@ or deployed unless a tool result says so.
 - Other receivers in steps: `requestReplySoap` (a SOAP 1.x call) and `sendMail` (a one-way mail, also from
   the exception subprocess). Their rules are in the sections "SOAP receivers" and "Mail" when the
   conversation needs them; else call `getSupportedSteps` with `topics: ["soap"]` or `["mail"]` first.
-- `sendSftp` (writes a file to an SFTP server, one-way, also from the exception subprocess) and ProcessDirect calls:
-  their rules are in the section "Receivers" when the conversation needs them; else call `getSupportedSteps` with
+- `requestReplyOData` (an OData V2 query or create), `sendSftp` (writes a file to an SFTP server, one-way, also from the
+  exception subprocess) and ProcessDirect calls: their rules are in the section "Receivers" when the conversation needs them; else call `getSupportedSteps` with
   `topics: ["receivers"]` first.
 - Mappings: a `messageMapping` step refers to a mapping artifact on the tenant, an `xsltMapping` step runs an
   attached XSLT file. Their rules are in the section "Mappings" when the conversation needs them; else call
@@ -180,8 +180,9 @@ but fails on CPI with "unable to resolve class"):
 - JSON: `groovy.json.JsonSlurper` and `groovy.json.JsonOutput`. Parse the body **streamed**:
   `new JsonSlurper().parse(message.getBody(java.io.Reader.class))` (the same with `XmlSlurper`); never
   `parseText(message.getBody(String))`, which CPI's script check reports as High.
-- OData: when a receiver URL contains `/odata/` or `.svc`, call `getPattern` with `odata` before you write
-  a script that reads its response (V2 `d.results`, V4 `value`, decimals as strings).
+- OData: when a `requestReplyHttp` URL contains `/odata/`, `/odata4/` or `.svc`, call `getPattern` with `odata`
+  before you write a script that reads its JSON response (V2 `d.results`, V4 `value`, decimals as strings). After
+  `requestReplyOData` the reply is XML: a script reads the entity set's XML, not this JSON.
 - For a public GET receiver without authentication, call `getSampleResponse` with its real URL before you
   write a script that reads its response, and write the script against that structure.
 

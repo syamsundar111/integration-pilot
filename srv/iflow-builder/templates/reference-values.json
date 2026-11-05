@@ -415,6 +415,56 @@
       }
     }
   },
+  "OData Receiver": {
+    "authenticationMethod": {
+      "Basic": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Receiver_OData",
+          "Ref_Receivers_2"
+        ],
+        "confirmed": "Basic, selected in Ref_Receiver_OData (RCV_OData_Create, built from scratch in the CPI editor), 2026-11-04"
+      },
+      "OAuth2ClientCredentials": {
+        "references": [
+          "Ref_Receiver_OData"
+        ],
+        "confirmed": "OAuth2 Client Credentials, selected in Ref_Receiver_OData (RCV_OData_Query, built from scratch), 2026-11-04"
+      }
+    },
+    "proxyType": {
+      "default": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Receiver_OData",
+          "Ref_Receivers_2"
+        ],
+        "confirmed": "Internet, selected in Ref_Receiver_OData (RCV_OData_Query, built from scratch), 2026-11-04"
+      },
+      "sapcc": {
+        "references": [
+          "Ref_Receiver_OData"
+        ],
+        "confirmed": "On-Premise, selected in Ref_Receiver_OData (RCV_OData_Create, built from scratch), 2026-11-04"
+      }
+    },
+    "operation": {
+      "Query(GET)": {
+        "references": [
+          "Ref_Multicast_Enrich",
+          "Ref_Receiver_OData",
+          "Ref_Receivers_2"
+        ],
+        "confirmed": "Query(GET), selected in Ref_Receiver_OData (RCV_OData_Query, built from scratch), 2026-11-04"
+      },
+      "Create(POST)": {
+        "references": [
+          "Ref_Receiver_OData"
+        ],
+        "confirmed": "Create(POST), selected in Ref_Receiver_OData (RCV_OData_Create, built from scratch), 2026-11-04"
+      }
+    }
+  },
   "SOAP Receiver": {
     "authentication": {
       "Basic": {

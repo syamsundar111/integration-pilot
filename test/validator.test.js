@@ -175,10 +175,10 @@ describe('validator', () => {
     const constantValue = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'constant', value: '{{P}}' }] }], parameters: { P: 'v' } })
     expect(errorsOf(constantValue)).toEqual([])
     const wrongPlace = baseSpec({ steps: [{ type: 'contentModifier', headers: [{ name: 'X', type: 'expression', value: '{{P}}' }] }], parameters: { P: 'v' } })
-    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the host, directory, fileName or credentialName of an SFTP receiver \(sendSftp\), the address of a ProcessDirect receiver, or as a constant value/)
+    expectError(wrongPlace, /steps\[0\]\.headers\[0\]\.value: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP or OData receiver, the url of a SOAP receiver, the server, credentialName or to of a mail, the host, directory, fileName, credentialName or archiveDirectory of an SFTP sender, the host, directory, fileName or credentialName of an SFTP receiver \(sendSftp\), the address of a ProcessDirect receiver, or as a constant value/)
 
     const senderParam = baseSpec({ trigger: { type: 'httpsSender', address: '{{Path}}' }, parameters: { Path: '/x' } })
-    expectError(senderParam, /trigger\.address: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP receiver/)
+    expectError(senderParam, /trigger\.address: parameters .* can only be used as the whole url, credentialName or locationId of an HTTP or OData receiver/)
     expectError(senderParam, /trigger\.address: invalid value — use a path like \/orders\/create/)
 
     const partial = baseSpec({ end: { type: 'httpReceiver', url: 'https://x.org/{{P}}', method: 'POST', authType: 'None' }, parameters: { P: 'x' } })
@@ -705,6 +705,40 @@ describe('senders (phase 5)', () => {
     })
     test('receiver names stay unique across the step and the end', () => {
       expectError(baseSpec({ steps: [call({ system: 'RCV_PD' })], end: { type: 'processDirectReceiver', system: 'RCV_PD', address: '/x' } }), /RCV_PD/)
+    })
+  })
+  describe('OData V2 receiver: requestReplyOData (phase 6)', () => {
+    const call = (extra = {}) => ({ type: 'requestReplyOData', name: 'RR_Products', url: 'https://s4.example.com/sap/opu/odata/sap/ZPRODUCTS_SRV', operation: 'query', resourcePath: 'Products', authType: 'Basic', credentialName: 'S4_ODATA_USER', proxyType: 'Internet', ...extra })
+    test('query and create, Basic and OAuth2, Internet and On-Premise; main line, routes, branches and local processes', () => {
+      expect(validate(baseSpec({ steps: [call({ queryOptions: "$select=ProductID,Name&$filter=ProductID eq '${property.ProductID}'&$top=10" })] }))).toMatchObject({ valid: true, warnings: [] })
+      expect(validate(baseSpec({ steps: [call({ operation: 'create', authType: 'OAuth2 Client Credentials', proxyType: 'On-Premise', locationId: 'LOC' })] }))).toMatchObject({ valid: true, warnings: [] })
+      expect(validate(baseSpec({ steps: [{ type: 'processCall', name: 'PC', process: 'LIP' }], localProcesses: [{ name: 'LIP', steps: [call()] }] }))).toMatchObject({ valid: true })
+      const branches = [{ steps: [call()] }, { steps: [call({ name: 'RR_Two' })] }]
+      expect(validate(baseSpec({ steps: [{ type: 'multicast', name: 'MC', mode: 'parallel', branches }, { type: 'gather', name: 'G' }] }))).toMatchObject({ valid: true })
+    })
+    test('not in the exception subprocess; no authentication None', () => {
+      expect(validate(baseSpec({ exceptionSubprocess: { steps: [call()] } })).valid).toBe(false)
+      expectError(baseSpec({ steps: [call({ authType: 'None' })] }), /steps\[0\]\.authType: must be one of Basic, OAuth2 Client Credentials/)
+    })
+    test('query options only with query, the location ID only On-Premise', () => {
+      expectError(baseSpec({ steps: [call({ operation: 'create', queryOptions: '$top=1' })] }), /steps\[0\]\.queryOptions: only used with operation query — remove it, or set operation "query"/)
+      expectError(baseSpec({ steps: [call({ locationId: 'LOC' })] }), /steps\[0\]\.locationId: only used with proxyType On-Premise/)
+    })
+    test('url, entity set and query options: clear messages for what CPI cannot take', () => {
+      expectError(baseSpec({ steps: [call({ url: 'https://s4.example.com/sap/opu/odata/sap/ZPRODUCTS_SRV/Products?$top=1' })] }), /steps\[0\]\.url: invalid value/)
+      expectError(baseSpec({ steps: [call({ resourcePath: 'Products(1)' })] }), /steps\[0\]\.resourcePath: invalid value — use the name of the entity set, e\.g\. Products/)
+      expectError(baseSpec({ steps: [call({ queryOptions: '$format=json' })] }), /steps\[0\]\.queryOptions: invalid value — use \$select, \$filter, \$orderby, \$top, \$skip or \$expand options joined by &/)
+      expectError(baseSpec({ steps: [call({ url: 'https://user:pw@s4.example.com/sap/opu/odata/sap/Z_SRV' })] }), /steps\[0\]\.url: contains user:password/)
+    })
+    test('url, credential name and location ID may be whole parameters, over the Internet too', () => {
+      const params = { U: 'https://s4.example.com/sap/opu/odata/sap/Z_SRV', C: 'S4_ODATA_USER', L: 'LOC' }
+      expect(validate(baseSpec({ steps: [call({ url: '{{U}}', credentialName: '{{C}}' })], parameters: params })).errors).toEqual([])
+      expect(validate(baseSpec({ steps: [call({ url: '{{U}}', credentialName: '{{C}}', proxyType: 'On-Premise', locationId: '{{L}}' })], parameters: params })).errors).toEqual([])
+      expect(validate(baseSpec({ steps: [call({ resourcePath: '{{R}}' })], parameters: { R: 'Products' } })).valid).toBe(false)
+    })
+    test('an OData-like step type points to requestReplyOData; without a name it is a Request Reply', () => {
+      expectError(baseSpec({ steps: [{ type: 'odataQuery', name: 'X' }] }), /steps\[0\]: 'odataQuery' — an OData V2 call is \{ "type": "requestReplyOData"/)
+      expect(effectiveNames(baseSpec({ steps: [call({ name: undefined })] })).steps).toEqual(['Request Reply 1'])
     })
   })
   describe('SFTP receiver: sendSftp (phase 6)', () => {

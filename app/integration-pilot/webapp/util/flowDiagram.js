@@ -20,6 +20,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     gather: 'Gather',
     processCall: 'Process Call',
     requestReplySoap: 'Request Reply (SOAP)',
+    requestReplyOData: 'Request Reply (OData V2)',
     requestReplyProcessDirect: 'Request Reply (ProcessDirect)',
     sendMail: 'Send (Mail)',
     sendSftp: 'Send (SFTP)',
@@ -47,7 +48,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
   }
   /** The key of a step's default name, as the builder counts them (validator.js defaultKey) */
   const defaultKey = (s) =>
-    s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : ['requestReplySoap', 'requestReplyProcessDirect'].includes(s.type) ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
+    s.type === 'multicast' ? `${s.mode === 'sequential' ? 'sequential' : 'parallel'}Multicast` : s.type === 'splitter' ? `${s.kind === 'general' ? 'general' : 'iterating'}Splitter` : s.type === 'processCall' && s.loop ? 'loopingProcessCall' : ['requestReplySoap', 'requestReplyOData', 'requestReplyProcessDirect'].includes(s.type) ? 'requestReplyHttp' : s.type === 'sendSftp' ? 'sendMail' : s.type
   const ICONS = {
     https: 'sap-icon://internet-browser',
     timer: 'sap-icon://fob-watch',
@@ -61,6 +62,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
     xmlToJson: 'sap-icon://switch-views',
     requestReplyHttp: 'sap-icon://outbox',
     requestReplySoap: 'sap-icon://outbox',
+    requestReplyOData: 'sap-icon://outbox',
     requestReplyProcessDirect: 'sap-icon://outbox',
     sendMail: 'sap-icon://email',
     sendSftp: 'sap-icon://upload',
@@ -140,6 +142,7 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
         const name = nameOf(s)
         if (s.type === 'requestReplyHttp') return { type: s.type, name, detail: s.method, receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
         if (s.type === 'requestReplySoap') return { type: s.type, name, detail: 'SOAP 1.x', receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
+        if (s.type === 'requestReplyOData') return { type: s.type, name, detail: `OData ${s.operation === 'create' ? 'Create' : 'Query'} ${s.resourcePath}`, receiver: { name: s.system || `Receiver${++rr}`, detail: s.url } }
         if (s.type === 'requestReplyProcessDirect') return { type: s.type, name, detail: 'ProcessDirect', receiver: { name: s.system || `Receiver${++rr}`, detail: s.address } }
         if (s.type === 'sendMail') return { type: s.type, name, detail: `to ${s.to}`, receiver: { name: s.system || `Receiver${++rr}`, detail: s.server } }
         if (s.type === 'sendSftp') return { type: s.type, name, detail: s.fileName, receiver: { name: s.system || `Receiver${++rr}`, detail: `SFTP ${s.host}` } }
@@ -210,6 +213,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
             ? s.method
             : s.type === 'requestReplySoap'
             ? 'SOAP 1.x'
+            : s.type === 'requestReplyOData'
+            ? `OData ${/^Create/.test(s.operation || '') ? 'Create' : 'Query'} ${s.resourcePath}`
             : s.type === 'requestReplyProcessDirect'
             ? 'ProcessDirect'
             : s.type === 'sendMail'
@@ -230,6 +235,8 @@ sap.ui.define(['sap/ui/core/IconPool', 'integration/pilot/util/markdown'], (Icon
             ? { name: s.system || 'Receiver', detail: s.server }
             : s.type === 'sendSftp'
             ? { name: s.system || 'Receiver', detail: `SFTP ${s.host}` }
+            : s.type === 'requestReplyOData'
+            ? { name: s.system || 'Receiver', detail: s.url }
             : s.type === 'requestReplyProcessDirect'
               ? { name: s.system || 'Receiver', detail: s.address }
               : undefined,

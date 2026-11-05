@@ -120,6 +120,11 @@ const VALUE_FIELDS = {
     variant: /cname::(?:sap:)?SFTP\/tp::SFTP\/mp::File\/direction::Receiver\//,
     values: (p) => [['authentication', p.authentication], ['proxyType', p.proxyType], ['fileExist', p.fileExist]]
   },
+  // OData V2 receiver: authentication, proxy and operation
+  'OData Receiver': {
+    variant: /cname::(?:sap:)?HCIOData\/tp::HTTP\/mp::OData V2\/direction::Receiver\//,
+    values: (p) => [['authenticationMethod', p.authenticationMethod], ['proxyType', p.proxyType], ['operation', p.operation]]
+  },
   // SOAP 1.x receiver: authentication and proxy type
   'SOAP Receiver': {
     variant: /cname::(?:sap:)?SOAP\/tp::HTTP\/mp::SOAP 1\.x\/direction::Receiver\//,
@@ -306,6 +311,24 @@ async function main() {
       privateKeyAlias: 'PRIVATE_KEY_ALIAS_VALUE',
       credential_name: 'CREDENTIAL_NAME_VALUE',
       system: 'SYSTEM_VALUE'
+    }
+  })
+  // OData V2 receiver of a Request Reply (Ref_Receiver_OData, built in the CPI editor; RR_ODataCreate, RR_ODataQuery has the
+  // Internet, OAuth2 and query variant): address, authentication, proxy, location ID, operation, resource path and query
+  // options; timeout, CSRF, content type, paging, batch, retry and the rest stay as exported
+  const odataReceiver = await readZip('Ref_Receiver_OData.zip')
+  t['iflw/messageflow-odata-receiver.xml'] = apply(block(odataReceiver.iflw, 'id="MessageFlow_13"'), 'odata-receiver', {
+    attrs: { 'id="MessageFlow_13"': 'id="{{ID}}"', 'sourceRef="ServiceTask_6"': 'sourceRef="{{SOURCE}}"', 'targetRef="Participant_2"': 'targetRef="{{TARGET}}"' },
+    props: {
+      address: 'ADDRESS_VALUE',
+      system: 'SYSTEM_VALUE',
+      authenticationMethod: 'AUTH_METHOD_VALUE',
+      alias: 'CREDENTIAL_NAME_VALUE',
+      proxyType: 'PROXY_TYPE_VALUE',
+      scc_location_id: 'LOCATION_ID_VALUE',
+      operation: 'OPERATION_VALUE',
+      resourcePath: 'RESOURCE_PATH_VALUE',
+      queryOptions: 'QUERY_OPTIONS_VALUE'
     }
   })
   t['iflw/messageflow-http-receiver.xml'] = apply(block(x, 'id="MessageFlow_22"'), 'http-receiver', {
@@ -593,6 +616,17 @@ async function main() {
       return [field, { attributeId: r[2], uilabel: r[3], categorySuffix: '' }]
     })
   )
+  // the OData V2 receiver's fields (Ref_Receiver_OData: on RCV_OData_Create), as the CPI editor wrote them: category = the
+  // receiver's system name, for address and credential with the suffix the editor adds (.Receiver.System, .Receiver.Auth)
+  const odataPropdef = odataReceiver.files['src/main/resources/parameters.propdef']
+  const odataRefs = Object.fromEntries(
+    Object.entries({ odataAddress: 'address', odataCredential: 'alias', odataLocation: 'scc_location_id' }).map(([field, attr]) => {
+      const r = odataPropdef.match(new RegExp(`<reference attribute_category="([^"]+)" attribute_id="([^"]+/attrId::${attr})" attribute_uilabel="([^"]*)" param_key="[^"]+"/>`))
+      if (!r) throw new Error(`Ref_Receiver_OData.zip: no parameter reference for ${attr}`)
+      if (!r[1].startsWith('RCV_OData_Create')) throw new Error(`Ref_Receiver_OData.zip: category ${r[1]} does not start with the receiver RCV_OData_Create`)
+      return [field, { attributeId: r[2], uilabel: r[3], categorySuffix: r[1].slice('RCV_OData_Create'.length) }]
+    })
+  )
   t['propdef-receiver-attributes.json'] =
     JSON.stringify(
       {
@@ -605,7 +639,8 @@ async function main() {
         mailCredential: refOf('user', { ownVersion: true }),
         ...sftpRefs,
         pdAddress: pdRef,
-        ...sftpRcvRefs
+        ...sftpRcvRefs,
+        ...odataRefs
       },
       null,
       2

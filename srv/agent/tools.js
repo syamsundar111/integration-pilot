@@ -45,10 +45,10 @@ const TOPICS = {
     summary: 'senders: soapSender (SOAP 1.x, XML in and out), processDirectSender (called by other iFlows on the tenant), jmsSender (reads a queue), sftpSender (polls files on an SFTP server)'
   },
   receivers: {
-    steps: ['sendSftp', 'requestReplyProcessDirect'],
+    steps: ['requestReplyOData', 'sendSftp', 'requestReplyProcessDirect'],
     ends: ['processDirectReceiver'],
-    label: 'SFTP receiver; ProcessDirect calls',
-    summary: 'receivers: sendSftp (writes a file to SFTP, one-way); ProcessDirect calls to another iFlow'
+    label: 'OData V2 and SFTP receivers; ProcessDirect calls',
+    summary: 'receivers: requestReplyOData (OData V2), sendSftp (SFTP file); ProcessDirect calls'
   }
 }
 for (const [t, def] of Object.entries(TOPICS)) def.rules = () => fs.readFileSync(path.join(__dirname, 'prompt-sections', `${t}.md`), 'utf8').trim()
@@ -159,6 +159,7 @@ const SPEC_FORMAT = {
     requestReplySoap: '{ type, name?, description?, system?, url ("{{Param}}" allowed), authType: Basic, credentialName, proxyType: On-Premise, locationId?, timeout? } — no WSDL: the body is sent as it is; not in exceptionSubprocess',
     messageMapping: '{ type, name?, description?, mapping (artifact id) } — or file (.mmap) and schemas from an imported or existing iFlow, never written by you',
     xsltMapping: '{ type, name?, description?, file (an attached .xsl) }',
+    requestReplyOData: '{ type, name?, description?, system?, url (service root), operation: query|create, resourcePath (entity set), queryOptions? (query only: $select, $filter, $orderby, $top, $skip, $expand joined by &), authType: Basic|OAuth2 Client Credentials, credentialName, proxyType: Internet|On-Premise, locationId? } — query: the reply is XML; create: sends the XML body; url, credentialName, locationId may be "{{Param}}"; not in exceptionSubprocess',
     requestReplyProcessDirect: '{ type, name?, description?, system?, address (the called iFlow\'s ProcessDirect address, or "{{Param}}") } — calls another iFlow on the tenant and continues with its reply; not in exceptionSubprocess',
     sendMail: '{ type, name?, description?, system?, server (host:port), credentialName, from, to (comma-separated), cc?, bcc?, subject, body? (default ${in.body}) } — one-way; server, credentialName, to may be "{{Param}}"; also in exceptionSubprocess',
     sendSftp: '{ type, name?, description?, system?, host (host or host:port), directory, fileName (may contain ${date:now:<format>}, ${header.<name>}, ${property.<name>}), authentication: publicKey (username, privateKeyAlias) | userPassword (credentialName) } — one-way, overwrites a file of the same name; host, directory, fileName, credentialName may be "{{Param}}"; also in exceptionSubprocess'

@@ -1269,7 +1269,7 @@ describe('fewer and smaller model inputs', () => {
     llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', {})).mockResolvedValueOnce(answer('ok'))
     await chat({ message: 'what can you build?' })
     const content = llm.chat.mock.calls.at(-1)[0].messages.at(-1).content
-    expect(content.length).toBeLessThan(5300) // 5284 with the receivers topic summary (5214 before it): before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
+    expect(content.length).toBeLessThan(5300) // 5276 with the receivers topic summary (OData, SFTP, ProcessDirect; 5214 before it): before builder v2 ~3.2k (+ receivers, 1a sources); all topics ~5.7k; the schema ~18k
     const result = JSON.parse(content)
     expect(Object.keys(result.format.steps)).toEqual(['contentModifier', 'groovyScript', 'jsonToXml', 'xmlToJson', 'writeVariables', 'requestReplyHttp'])
     expect(Object.keys(result.moreTopics)).toEqual(['routing', 'splitting', 'soap', 'mail', 'mapping', 'multicast', 'senders', 'receivers'])
@@ -1335,6 +1335,18 @@ describe('fewer and smaller model inputs', () => {
       expect(system).toMatch(/`sendSftp`: a Send step that writes the message body as a file/)
       expect(system).not.toMatch(/## Unsupported steps/)
     }
+  })
+
+  test('the Receivers section when the request names OData; requestReplyOData comes with the topic', async () => {
+    llm.chat.mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'Create an iFlow that reads the products from the OData service of our S/4 system.' })
+    const system = llm.chat.mock.calls.at(-1)[0].messages[0].content
+    expect(system).toMatch(/## Receivers[\s\S]*`requestReplyOData`: a Request Reply with the OData V2 adapter/)
+    expect(system).not.toMatch(/## Unsupported steps/)
+    llm.chat.mockResolvedValueOnce(toolCall('getSupportedSteps', { topics: ['receivers'] })).mockResolvedValueOnce(answer('ok'))
+    await chat({ message: 'what can you build?' })
+    const result = JSON.parse(llm.chat.mock.calls.at(-1)[0].messages.at(-1).content)
+    expect(result.format.steps.requestReplyOData).toMatch(/resourcePath \(entity set\)/)
   })
 
   test('the Receivers section: when the draft has an SFTP receiver, its format with the topic only', async () => {

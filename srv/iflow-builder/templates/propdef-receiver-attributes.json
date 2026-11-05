@@ -83,5 +83,20 @@
     "attributeId": "ctype::AdapterVariant/cname::SFTP/tp::SFTP/mp::File/direction::Receiver/version::1.14.0/attrId::credential_name",
     "uilabel": "Credential Name",
     "categorySuffix": ""
+  },
+  "odataAddress": {
+    "attributeId": "ctype::AdapterVariant/cname::HCIOData/tp::HTTP/mp::OData V2/direction::Receiver/version::1.32.1/attrId::address",
+    "uilabel": "Address",
+    "categorySuffix": ".Receiver.System"
+  },
+  "odataCredential": {
+    "attributeId": "ctype::AdapterVariant/cname::HCIOData/tp::HTTP/mp::OData V2/direction::Receiver/version::1.32.1/attrId::alias",
+    "uilabel": "Credential Name",
+    "categorySuffix": ".Receiver.Auth"
+  },
+  "odataLocation": {
+    "attributeId": "ctype::AdapterVariant/cname::HCIOData/tp::HTTP/mp::OData V2/direction::Receiver/version::1.32.1/attrId::scc_location_id",
+    "uilabel": "Location ID",
+    "categorySuffix": ""
   }
 }

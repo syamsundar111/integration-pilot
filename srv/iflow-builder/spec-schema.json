@@ -858,6 +858,7 @@
             "gather",
             "processCall",
             "requestReplySoap",
+            "requestReplyOData",
             "requestReplyProcessDirect",
             "sendMail",
             "sendSftp",
@@ -998,6 +999,18 @@
           },
           "then": {
             "$ref": "#/definitions/requestReplySoap"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "requestReplyOData"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/requestReplyOData"
           }
         },
         {
@@ -1381,6 +1394,7 @@
             "writeVariables",
             "router",
             "requestReplySoap",
+            "requestReplyOData",
             "requestReplyProcessDirect",
             "sendMail",
             "sendSftp",
@@ -1484,6 +1498,18 @@
           },
           "then": {
             "$ref": "#/definitions/requestReplySoap"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "requestReplyOData"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/definitions/requestReplyOData"
           }
         },
         {
@@ -1603,6 +1629,80 @@
           "type": "integer",
           "minimum": 1,
           "description": "Request timeout in milliseconds (default 60000)"
+        }
+      }
+    },
+    "requestReplyOData": {
+      "type": "object",
+      "required": [
+        "type",
+        "url",
+        "operation",
+        "resourcePath",
+        "authType",
+        "credentialName",
+        "proxyType"
+      ],
+      "additionalProperties": false,
+      "description": "Request Reply with the OData V2 adapter: query (Query(GET)) reads an entity set, the reply is the result as XML; create (Create(POST)) sends the XML body as a new entity. Timeout 1 minute, CSRF on, no paging, no batch. url, credentialName and locationId can be a whole {{Param}}.",
+      "properties": {
+        "type": {
+          "const": "requestReplyOData"
+        },
+        "name": {
+          "$ref": "#/definitions/stepName"
+        },
+        "description": {
+          "$ref": "#/definitions/stepDescription"
+        },
+        "system": {
+          "$ref": "#/definitions/systemName"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^(https?://[^\\s?#]+|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "The service root, e.g. https://host/sap/opu/odata/sap/ZORDERS_SRV, without the entity set and without a query; or a whole {{Parameter}}"
+        },
+        "operation": {
+          "enum": [
+            "query",
+            "create"
+          ],
+          "description": "query: Query(GET), reads the entity set; create: Create(POST), sends the body as a new entity"
+        },
+        "resourcePath": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
+          "description": "The entity set, e.g. Products"
+        },
+        "queryOptions": {
+          "type": "string",
+          "maxLength": 2000,
+          "pattern": "^\\$(select|filter|orderby|top|skip|expand)=[^&\\r\\n]+(&\\$(select|filter|orderby|top|skip|expand)=[^&\\r\\n]+)*$",
+          "description": "query only: $select, $filter, $orderby, $top, $skip, $expand joined by &, e.g. $select=ProductID,Name&$top=10; values may contain ${property.<name>} or ${header.<name>}"
+        },
+        "authType": {
+          "enum": [
+            "Basic",
+            "OAuth2 Client Credentials"
+          ],
+          "description": "Basic or OAuth2 Client Credentials, with credentialName"
+        },
+        "credentialName": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.-]{1,150}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Name of the deployed security material (User Credentials or OAuth2 Client Credentials) in CPI, or a whole {{Parameter}} with the name as its default. A name only, never a password or secret. Required unless authType is None."
+        },
+        "proxyType": {
+          "enum": [
+            "Internet",
+            "On-Premise"
+          ]
+        },
+        "locationId": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9_.-]{1,100}|\\{\\{[A-Za-z][A-Za-z0-9_]*\\}\\})$",
+          "description": "Cloud Connector location ID, or a whole {{Parameter}}; only with proxyType On-Premise, optional (empty: the default location)"
         }
       }
     },

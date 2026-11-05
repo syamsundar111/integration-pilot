@@ -205,6 +205,12 @@ Phase 5 (format agreed 2026-11-02, one sender per task):
   `${date:now:<format>}`, `${header.<name>}` and `${property.<name>}` parts (the editor stores it as typed). Proxy
   Internet, Handling for Existing Files Override, Create Directories and the rest are fixed. Import and update keep it
   only as the builder writes it. Its rules and the ProcessDirect call are in the new `receivers` prompt topic.
+- **`requestReplyOData { url, operation: query|create, resourcePath, queryOptions?, authType, credentialName,
+  proxyType, locationId?, system? }`** (a Request Reply: main line, routes, branches, local processes; not the exception
+  subprocess), from Ref_Receiver_OData. Basic or OAuth2 Client Credentials, Internet or On-Premise; the address,
+  credential name and location ID can be whole parameters (the address also with Internet). Query options `$select`,
+  `$filter`, `$orderby`, `$top`, `$skip`, `$expand`, stored as typed. Timeout 1 minute, CSRF, Atom, no paging, no batch,
+  no retry are fixed. The panel notes the editor's XML notice and that a Create needs an XML body.
 
 ## Later (no phase yet)
 
@@ -276,6 +282,12 @@ From the former reference export checklist; each needs a reference export first.
   only Override is in an export.
 - SFTP receiver file names: confirm on a deployed run that CPI evaluates `${header.<name>}` and `${property.<name>}`
   parts (e.g. `${header.CamelFileName}`) as it does `${date:now:<format>}`.
+- OData V2 receiver: the other operations (Read by key, Update(PUT), Merge(PATCH), Delete, function imports),
+  `$batch`, paging (Process in Pages, Page Size), custom query options, and an OData receiver at the end of the flow.
+- OData V2 receiver: confirm on a deployed run the XML shape of a Query reply (`<Products><Product>…`) and of the body a
+  Create expects, whether a Create accepts the body of a `jsonToXml` (which always adds the root element `root`; the
+  receivers rule puts one before a create when the input is JSON), and whether the editor's notice also appears after
+  a JSON to XML Converter (the panel leaves it out there, as for SOAP).
 - More timer schedules: every N hours, daily, weekly and monthly at a time, other time zones, and the
   scheduler externalized as `{{Scheduler}}`.
 

@@ -1,5 +1,5 @@
 /**
- * Sender adapters the spec holds besides HTTPS (phase 5), the ProcessDirect and SFTP receivers (phase 6), and the settings the
+ * Sender adapters the spec holds besides HTTPS (phase 5), the ProcessDirect, SFTP and OData V2 receivers (phase 6), and the settings the
  * builder writes fixed from their templates. Import and update keep an iFlow's sender only when the spec can hold it exactly: every fixed setting as
  * the template has it, and a parameter only where the spec holds one (SFTP: host, directory, file name, credential
  * name, archive directory); else Import makes it an HTTPS sender with a note, and an update is blocked. The receivers
@@ -25,7 +25,9 @@ const FIXED = {
   // the ProcessDirect receiver (Ref_Receiver_ProcessDirect), the other end of a ProcessDirect sender
   processDirectReceiver: fixed('messageflow-processdirect-receiver.xml'),
   // the SFTP receiver of a Send step (Ref_Receiver_SFTP): proxy, existing-file handling, reconnects and the rest
-  sftpReceiver: fixed('messageflow-sftp-receiver.xml')
+  sftpReceiver: fixed('messageflow-sftp-receiver.xml'),
+  // the OData V2 receiver of a Request Reply (Ref_Receiver_OData): timeout, CSRF, content type, paging, batch, retry, ...
+  odataReceiver: fixed('messageflow-odata-receiver.xml')
 }
 const definitions = require('./spec-schema.json').definitions
 const ADDRESS = new RegExp(definitions.soapSender.properties.address.pattern)
@@ -39,6 +41,11 @@ const unescape = (v) => String(v || '').replace(/&lt;/g, '<').replace(/&gt;/g, '
 const scheduleOf = (scheduleKey) => unescape(unescape(scheduleKey).match(/<row><cell>schedule1<\/cell><cell>([^<]*)<\/cell><\/row>/)?.[1])
 const SFTP_SCHEDULE = scheduleOf(fs.readFileSync(path.join(__dirname, 'templates', 'iflw', 'messageflow-sftp-sender.xml'), 'utf8').match(/<key>scheduleKey<\/key>\s*<value>([^<]*)<\/value>/)[1])
 const SFTP_MINUTES = Number(SFTP_SCHEDULE.match(/^0\+0\/(\d+)\+/)[1])
+
+// OData V2 receiver: spec values <-> stored (the authentication is stored without spaces, unlike the HTTP receiver's)
+const ODATA_AUTHENTICATION = { Basic: 'Basic', 'OAuth2 Client Credentials': 'OAuth2ClientCredentials' }
+const ODATA_PROXY = { Internet: 'default', 'On-Premise': 'sapcc' }
+const ODATA_OPERATION = { query: 'Query(GET)', create: 'Create(POST)' }
 
 /**
  * The spec trigger for an iFlow's sender adapter (parser: adapters, with settings).
@@ -100,6 +107,46 @@ function sftp(adapter) {
 }
 
 /**
+ * An OData V2 receiver (a Request Reply's) as the spec holds it: its fixed settings, the authentication, proxy and
+ * operation, and the fields (a whole {{Param}} only in the address, credential name and location ID)
+ * @returns {{ call: object } | { differences: string[] }} call: the requestReplyOData fields besides type, name and system
+ */
+function odataReceiverOf(adapter) {
+  const s = adapter?.settings || {}
+  const differences = fixedDifferences('odataReceiver', s)
+  const fromCpi = (map, stored, label) => {
+    const value = Object.keys(map).find((k) => map[k] === stored)
+    if (!value) differences.push(/\{\{/.test(stored || '') ? `the ${label} is the parameter ${stored}` : `the ${label} is '${stored || ''}' (the builder writes ${Object.values(map).join(' or ')})`)
+    return value
+  }
+  const authType = fromCpi(ODATA_AUTHENTICATION, s.authenticationMethod, 'authentication')
+  const proxyType = fromCpi(ODATA_PROXY, s.proxyType, 'proxy type')
+  const operation = fromCpi(ODATA_OPERATION, s.operation, 'operation')
+  const props = definitions.requestReplyOData.properties
+  const call = { url: '', operation, resourcePath: '', authType, credentialName: '', proxyType }
+  const fields = [
+    ['url', 'address', 'address'],
+    ['resourcePath', 'resourcePath', 'resource path'],
+    ['credentialName', 'alias', 'credential name'],
+    ...(proxyType === 'On-Premise' && s.scc_location_id ? [['locationId', 'scc_location_id', 'location ID']] : []),
+    ...(operation === 'query' && s.queryOptions ? [['queryOptions', 'queryOptions', 'query options']] : [])
+  ]
+  for (const [field, key, label] of fields) {
+    const value = String(s[key] ?? '')
+    if (!new RegExp(props[field].pattern).test(value))
+      differences.push(/\{\{/.test(value) ? `the ${label} is ${value}, which the spec cannot hold as a parameter` : `the ${label} '${value}' is not a value the spec allows`)
+    call[field] = value
+  }
+  // set in CPI but not used by the chosen proxy type or operation: an update would drop them
+  if (proxyType === 'Internet' && s.scc_location_id) differences.push(`the location ID '${s.scc_location_id}' is set with proxy type Internet`)
+  if (operation === 'create' && s.queryOptions) differences.push(`the query options '${s.queryOptions}' are set with Create(POST)`)
+  if (differences.length) return { differences }
+  // in the order of the spec's fields
+  const { url, resourcePath, queryOptions, credentialName, locationId } = call
+  return { call: { url, operation, resourcePath, ...(queryOptions && { queryOptions }), authType, credentialName, proxyType, ...(locationId && { locationId }) } }
+}
+
+/**
  * An SFTP receiver (a Send step's) as the spec holds it: its fixed settings, and the fields of its authentication (a
  * whole {{Param}} only where the spec allows one)
  * @returns {{ call: object } | { differences: string[] }} call: the sendSftp fields besides type, name and system
@@ -155,4 +202,4 @@ function check(kind, adapter, trigger) {
   return differences.length ? { differences } : { trigger }
 }
 
-module.exports = { triggerOf, processDirectReceiverOf, sftpReceiverOf, FIXED, SFTP_AUTHENTICATION, SFTP_POST_PROCESSING, SFTP_MINUTES }
+module.exports = { triggerOf, processDirectReceiverOf, sftpReceiverOf, odataReceiverOf, ODATA_AUTHENTICATION, ODATA_PROXY, ODATA_OPERATION, FIXED, SFTP_AUTHENTICATION, SFTP_POST_PROCESSING, SFTP_MINUTES }

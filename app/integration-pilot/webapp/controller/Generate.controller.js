@@ -35,6 +35,7 @@ sap.ui.define(
       gather: 'Gather',
       processCall: 'Process Call',
       requestReplySoap: 'Request Reply (SOAP)',
+      requestReplyOData: 'Request Reply (OData V2)',
       requestReplyProcessDirect: 'Request Reply (ProcessDirect)',
       sendMail: 'Send (Mail)',
       sendSftp: 'Send (SFTP)',
@@ -204,6 +205,15 @@ sap.ui.define(
       return hits
     }
 
+    /** OData calls after a step CPI does not know to produce XML: the editor's notice, and what a Create needs */
+    function xmlODataNote(spec) {
+      const hits = xmlInputHits(spec, ['requestReplyOData'])
+      const create = everyStep(spec).some((s) => s.type === 'requestReplyOData' && s.operation === 'create')
+      return hits.length
+        ? `CPI may show the notice "… may not pass XML or None message to OData Receiver …" on the OData line of ${hits.join(', ')}: it cannot tell what the step before produces. Not an error.${create ? ' A Create needs an XML body in the format of the entity set.' : ''}`
+        : ''
+    }
+
     function xmlSoapNote(spec) {
       const hits = xmlInputHits(spec, ['requestReplySoap'])
       return hits.length
@@ -215,7 +225,7 @@ sap.ui.define(
     function receiversNote(spec) {
       const calls = [
         ...everyStep(spec)
-          .filter((s) => ['requestReplyHttp', 'requestReplySoap', 'sendMail'].includes(s.type) || (s.type === 'sendSftp' && s.authentication === 'userPassword'))
+          .filter((s) => ['requestReplyHttp', 'requestReplySoap', 'requestReplyOData', 'sendMail'].includes(s.type) || (s.type === 'sendSftp' && s.authentication === 'userPassword'))
           .map((s) => (s.type === 'sendMail' ? { ...s, authType: 'Plain User/Password' } : s.type === 'sendSftp' ? { ...s, authType: 'User Name/Password' } : s)),
         ...(spec.end.type === 'httpReceiver' ? [spec.end] : [])
       ]
@@ -983,6 +993,7 @@ sap.ui.define(
           receiversText: '',
           xmlRouterText: '',
           xmlSoapText: '',
+          xmlODataText: '',
           xmlMappingText: '',
           gatherText: '',
           combineText: ''
@@ -1027,6 +1038,14 @@ sap.ui.define(
                     ? `mapping/${s.file} (attached file)`
                     : s.type === 'requestReplyProcessDirect'
                     ? `ProcessDirect ${s.address}: calls another iFlow and continues with its reply (the message body at the end of that iFlow).\nThe called iFlow must have a ProcessDirect sender with exactly this address and be deployed on the same tenant.`
+                    : s.type === 'requestReplyOData'
+                    ? [
+                        `OData V2 ${s.operation === 'create' ? 'Create(POST)' : 'Query(GET)'} ${s.url}/${s.resourcePath}${s.queryOptions ? `?${s.queryOptions}` : ''}`,
+                        `${s.authType}, credential ${s.credentialName} · ${s.proxyType}${s.locationId ? `, location ${s.locationId}` : ''} · timeout 1 minute`,
+                        s.operation === 'create'
+                          ? 'The message body must be XML in the format of the entity set, e.g. <Products><Product>…</Product></Products>.'
+                          : 'The message body is not sent; the reply is the result as XML.'
+                      ].join('\n')
                     : s.type === 'requestReplySoap'
                     ? [
                         `SOAP 1.x ${s.url}`,
@@ -1184,6 +1203,7 @@ sap.ui.define(
           active.receiversText = receiversNote(spec)
           active.xmlRouterText = xmlRouterNote(spec)
           active.xmlSoapText = xmlSoapNote(spec)
+          active.xmlODataText = xmlODataNote(spec)
           active.xmlMappingText = xmlMappingNote(spec)
           active.gatherText = gatherNote(spec)
           active.combineText = combineNote(spec)

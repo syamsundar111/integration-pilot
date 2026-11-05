@@ -462,6 +462,22 @@ describe('proposal panel for routers (phase 1b)', () => {
     expect(active.receiversText).toBe('Before deploying, the credentials must exist as security material on the tenant: SFTP_CRED (User Name/Password, SysP).')
   })
 
+  test('the OData V2 receiver cards (phase 6): operation, URL, settings, what the body must be; the XML notice; the credentials', () => {
+    const create = { type: 'requestReplyOData', name: 'RR_Create', system: 'SysC', url: '{{OData_Address}}', operation: 'create', resourcePath: 'Products', authType: 'Basic', credentialName: 'ODATA_CRED', proxyType: 'On-Premise', locationId: 'LOC' }
+    const query = { type: 'requestReplyOData', name: 'RR_Query', system: 'SysQ', url: 'https://odata.example.com/sap/opu/odata/sap/Z_SRV', operation: 'query', resourcePath: 'Products', queryOptions: '$top=10', authType: 'OAuth2 Client Credentials', credentialName: 'ODATA_OAUTH', proxyType: 'Internet' }
+    const active = activeFor(base([{ type: 'contentModifier', name: 'CM', body: '<a/>' }, create, query]))
+    const card = (title) => active.stepCards.find((c) => c.title === title)
+    expect(card('2. RR_Create')).toMatchObject({
+      type: 'Request Reply (OData V2)',
+      lines: 'OData V2 Create(POST) {{OData_Address}}/Products\nBasic, credential ODATA_CRED · On-Premise, location LOC · timeout 1 minute\nThe message body must be XML in the format of the entity set, e.g. <Products><Product>…</Product></Products>.'
+    })
+    expect(card('3. RR_Query').lines).toBe('OData V2 Query(GET) https://odata.example.com/sap/opu/odata/sap/Z_SRV/Products?$top=10\nOAuth2 Client Credentials, credential ODATA_OAUTH · Internet · timeout 1 minute\nThe message body is not sent; the reply is the result as XML.')
+    expect(active.xmlODataText).toBe('CPI may show the notice "… may not pass XML or None message to OData Receiver …" on the OData line of RR_Create (after CM), RR_Query (after RR_Create): it cannot tell what the step before produces. Not an error. A Create needs an XML body in the format of the entity set.')
+    expect(activeFor(base([query])).xmlODataText).toMatch(/RR_Query \(first step\): it cannot tell what the step before produces\. Not an error\.$/)
+    expect(activeFor(base([{ type: 'jsonToXml', name: 'ToXml' }, query])).xmlODataText).toBe('')
+    expect(active.receiversText).toBe('Before deploying, the credentials must exist as security material on the tenant: ODATA_CRED (Basic, SysC), ODATA_OAUTH (OAuth2 Client Credentials, SysQ).')
+  })
+
   test('the ProcessDirect sender card (phase 5): no role, headers rather than properties, a unique address', () => {
     const active = activeFor({ ...base([{ type: 'contentModifier', name: 'A', properties: [{ name: 'p', type: 'constant', value: 'x' }] }]), trigger: { type: 'processDirectSender', address: '/orders/process' } })
     expect(active.stepCards[0]).toEqual({

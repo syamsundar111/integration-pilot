@@ -15,8 +15,8 @@ turns into extra questions.
 | | Supported | Not supported |
 |---|---|---|
 | Trigger | HTTPS sender, SOAP 1.x sender (with a path; SOAP without WSDL, XML in and out), ProcessDirect sender, JMS sender (a queue) or SFTP sender (polls a directory every 15 minutes; public key or user name/password; the file is deleted or moved; host, directory, file name, credential name and archive directory can be parameters), timer that runs once after deployment or every N minutes (UTC, all day) | Other schedules and other senders; SFTP sender settings as parameters other than those five |
-| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP, SOAP 1.x and ProcessDirect request-reply, Send with a Mail or SFTP receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
-| Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP and SOAP request-reply, Mail, SFTP Send and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
+| Steps | Content Modifier, Groovy Script, Write Variables, JSON to XML, XML to JSON, HTTP, SOAP 1.x, OData V2 (Query, Create) and ProcessDirect request-reply, Send with a Mail or SFTP receiver, Message Mapping and XSLT Mapping, Router, Iterating and General Splitter, Gather (on the main line or in a multicast branch), Parallel and Sequential Multicast with Join (main line), Process Call and Looping Process Call | Router, splitter or gather inside a route; a router before a gather in a split or a branch; routes that join again in a multicast branch; nested splits; a multicast in a route, branch or local process; Content Enricher, Poll Enrich, Idempotent Process Call |
+| Local processes | Local integration processes with Content Modifier, Groovy Script, Write Variables, converters, HTTP, SOAP and OData V2 request-reply, Mail, SFTP Send and Router steps (a route continues or ends with a plain End, which returns to the caller), called by a Process Call from the main line, a route or the exception subprocess | Splitters and process calls inside a local process; Escalation or Error End there |
 | End | HTTP or ProcessDirect receiver, or no receiver; Message, Escalation or Error End (also at the end of a route) | Mail, SFTP and other receivers; Terminate End |
 | HTTP receivers | Authentication None, Basic or OAuth2 Client Credentials with a credential name; proxy Internet or On-Premise with a location ID (both can be parameters); timeout | Client certificate and other methods; manual proxy |
 | SOAP 1.x and Mail receivers | SOAP: Basic with a credential name, On-Premise with an optional location ID, timeout, the address can be a parameter. Mail: STARTTLS mandatory, Plain User/Password, text/plain; the server, credential name and recipients can be parameters | SOAP with a WSDL or operation, over the Internet or without authentication; mail attachments, other protection or body types; SOAP or Mail at the end of the flow |
@@ -60,7 +60,7 @@ Hard limits:
   a file you attach. Mappings inside an iFlow (`.mmap` with its schemas) come only from Import or an
   existing iFlow. An XSLT Mapping takes XML, a Message Mapping XML or JSON; CPI may show an input notice on them.
 - Step names, receiver names and Groovy file names must be **unique**.
-- `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP receiver,
+- `{{Parameter}}` only as the **whole URL**, **credential name** or **location ID** of an HTTP or OData V2 receiver,
   the **URL** of a SOAP receiver, the **server**, **credential name** or **recipients** of a mail, the **host**,
   **directory**, **file name** or **credential name** of an SFTP sender or receiver (a sender also its **archive
   directory**), or as a whole **constant** header or property value. "Default" for a parameter means its value
@@ -130,6 +130,12 @@ proposal says which:
   a file name usually gets a date part (`order_${date:now:yyyyMMddHHmmss}.xml`); `${header.<name>}` and
   `${property.<name>}` parts work too. Missing directories are created. The SFTP server's host key must be in the
   tenant's known hosts.
+- An **OData V2 receiver** ("read the products from the OData service … ZPRODUCTS_SRV, entity set Products") is a
+  Request Reply: Query reads an entity set, with query options such as `$select`, `$filter` and `$top`, and the reply
+  is XML; Create sends the message body, which must be XML in the format of the entity set. Give the service root,
+  the entity set, Basic or OAuth2 Client Credentials with a credential name, and Internet or On-Premise. CPI may show
+  a notice that the step before may not pass XML to the OData receiver; it is not an error. Ask for plain HTTP to get
+  JSON instead.
 - **End of error handling**: an exception subprocess ends with an **Escalation End**, so a failed
   message shows as escalated in monitoring. Ask for an Error End, or for "return the error to the
   caller" (a Message End: the sender gets the response, but the message looks completed).
@@ -173,6 +179,9 @@ spec:
 - SOAP 1.x request-replies without a WSDL and Mail steps are kept; a setting given as a parameter takes
   its default unless the field can hold a parameter. A SOAP channel with a WSDL or another
   authentication becomes a placeholder.
+- OData V2 request-replies (Query and Create) are kept when every setting is as the app writes it and only the
+  address, credential name or location ID is a parameter; otherwise the step becomes a placeholder that lists the
+  differences.
 - SFTP Send steps are kept when every setting is as the app writes it and only the host, directory, file name or
   credential name is a parameter; otherwise the step becomes a placeholder that lists the differences.
 - Iterating and General Splitters, Gathers, (Looping) Process Calls and the local processes they call

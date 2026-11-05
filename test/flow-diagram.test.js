@@ -155,6 +155,13 @@ describe('flow diagram: senders (phase 5)', () => {
     expect(fromParsed.steps.find((s) => s.name === 'SND_SftpKey')).toMatchObject({ detail: 'order_${date:now:yyyyMMddHHmmss}.xml', receiver: { name: 'RCV_SFTP_Key', detail: 'SFTP sftp.example.com:22' } })
     expect(fromParsed.steps.find((s) => s.name === 'SND_SftpPw')).toMatchObject({ detail: '{{SFTP_Out_FileName}}', receiver: { name: 'RCV_SFTP_Pw', detail: 'SFTP {{SFTP_Out_Address}}' } })
   })
+  test('OData V2 receivers (phase 6): the step shows the operation and entity set, the receiver its URL, also from a parsed export', async () => {
+    const model = flowDiagram.fromSpec({ trigger: { type: 'timer', mode: 'once' }, steps: [{ type: 'requestReplyOData', system: 'RCV_O', url: 'https://o.example.com/Z_SRV', operation: 'query', resourcePath: 'Products', authType: 'Basic', credentialName: 'C', proxyType: 'Internet' }], end: { type: 'none' } })
+    expect(model.steps[0]).toMatchObject({ type: 'requestReplyOData', name: 'Request Reply 1', detail: 'OData Query Products', receiver: { name: 'RCV_O', detail: 'https://o.example.com/Z_SRV' } })
+    const fromParsed = flowDiagram.fromParsed(await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Receiver_OData.zip'))))
+    expect(fromParsed.steps.find((s) => s.name === 'RR_ODataCreate')).toMatchObject({ detail: 'OData Create Products', receiver: { name: 'RCV_OData_Create', detail: '{{OData_Address}}' } })
+    expect(fromParsed.steps.find((s) => s.name === 'RR_ODataQuery')).toMatchObject({ detail: 'OData Query Products', receiver: { name: 'RCV_OData_Query', detail: 'https://odata.example.com/sap/opu/odata/sap/ZDUMMY_SRV' } })
+  })
   test('a ProcessDirect sender shows as ProcessDirect with its address', async () => {
     expect(flowDiagram.fromSpec({ trigger: { type: 'processDirectSender', address: '/dummy/pd/orders' }, steps: [], end: { type: 'none' } }).trigger).toEqual({ kind: 'other', label: 'ProcessDirect', detail: '/dummy/pd/orders' })
     const parsed = await parse(fs.readFileSync(path.join(__dirname, '../srv/iflow-builder/reference/Ref_Sender_ProcessDirect.zip')))

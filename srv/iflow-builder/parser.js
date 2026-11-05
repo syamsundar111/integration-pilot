@@ -240,6 +240,13 @@ function stepOf(node, adaptersBySource, processNames = {}) {
         Object.defineProperty(step, 'adapter', { value: adapter, enumerable: false })
         return step
       }
+      if (adapter?.type === 'HCIOData' && adapter.settings.MessageProtocol === 'OData V2') {
+        // as stored; sender-settings.odataReceiverOf reads it as the spec holds it
+        const s = adapter.settings
+        const step = { ...base, type: 'requestReplyOData', system: adapter.system, url: s.address, operation: s.operation, resourcePath: s.resourcePath }
+        Object.defineProperty(step, 'adapter', { value: adapter, enumerable: false })
+        return step
+      }
       if (adapter?.type === 'SOAP' && adapter.settings.MessageProtocol === 'SOAP 1.x') {
         const step = { ...base, type: 'requestReplySoap', ...soapCall(adapter) }
         Object.defineProperty(step, 'settings', { value: adapter.settings, enumerable: false })

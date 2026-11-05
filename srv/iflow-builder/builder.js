@@ -461,6 +461,28 @@ async function build(spec, { now = new Date(), attachments = {} } = {}) {
       messageFlows.push(mf)
       return { p, mf }
     }
+    // an OData V2 receiver of a Request Reply: address, authentication, proxy, operation, entity set and query options
+    if (call.type === 'requestReplyOData') {
+      const onPremise = call.proxyType === 'On-Premise'
+      const mf = { id: nextId('MessageFlow'), sourceShape: sourceNode.id, targetShape: p.id, template: 'iflw/messageflow-odata-receiver.xml' }
+      mf.vars = {
+        SOURCE: sourceNode.id,
+        TARGET: p.id,
+        SYSTEM_VALUE: val(system),
+        ADDRESS_VALUE: val(call.url),
+        AUTH_METHOD_VALUE: val(senderSettings.ODATA_AUTHENTICATION[call.authType]),
+        CREDENTIAL_NAME_VALUE: val(call.credentialName),
+        PROXY_TYPE_VALUE: val(senderSettings.ODATA_PROXY[call.proxyType]),
+        LOCATION_ID_VALUE: val(onPremise ? call.locationId : ''),
+        OPERATION_VALUE: val(senderSettings.ODATA_OPERATION[call.operation]),
+        RESOURCE_PATH_VALUE: val(call.resourcePath),
+        QUERY_OPTIONS_VALUE: val(call.operation === 'query' ? call.queryOptions : '')
+      }
+      addParamRefs(system, [['odataAddress', call.url], ['odataCredential', call.credentialName], ['odataLocation', onPremise ? call.locationId ?? '' : '']])
+      adapters.push({ type: 'OData', direction: 'Receiver', system, address: call.url, authType: call.authType })
+      messageFlows.push(mf)
+      return { p, mf }
+    }
     // an SFTP receiver of a Send step: host, directory, file name and the fields of its authentication
     if (call.type === 'sendSftp') {
       const publicKey = call.authentication === 'publicKey'
@@ -787,6 +809,7 @@ function nodeToXml(n) {
     case 'requestReplyHttp':
     case 'requestReplySoap':
     case 'requestReplyProcessDirect':
+    case 'requestReplyOData':
       return fill('iflw/step-request-reply.xml', io)
     case 'sendMail':
     case 'sendSftp':

@@ -1159,6 +1159,88 @@ describe('Ref_Receiver_SFTP: the SFTP receiver of a Send step (phase 6)', () => 
   })
 })
 
+describe('Ref_Receiver_OData: the OData V2 receiver of a Request Reply (phase 6)', () => {
+  // test/reference-prompts/Ref_Receiver_OData.txt (Run Once: Simple Schedule, Repeat None)
+  const spec = {
+    id: 'Ref_Receiver_OData',
+    name: 'Ref_Receiver_OData',
+    packageId: 'iglowpackage',
+    trigger: { type: 'timer', mode: 'once' },
+    steps: [
+      { type: 'contentModifier', name: 'CM_Prepare', body: '<Products><Product><ProductID>1</ProductID><Name>Dummy</Name></Product></Products>' },
+      { type: 'requestReplyOData', name: 'RR_ODataCreate', system: 'RCV_OData_Create', url: '{{OData_Address}}', operation: 'create', resourcePath: 'Products', authType: 'Basic', credentialName: '{{OData_Credential}}', proxyType: 'On-Premise', locationId: '{{OData_Location}}' },
+      { type: 'requestReplyOData', name: 'RR_ODataQuery', system: 'RCV_OData_Query', url: 'https://odata.example.com/sap/opu/odata/sap/ZDUMMY_SRV', operation: 'query', resourcePath: 'Products', queryOptions: "$select=ProductID,Name&$filter=ProductID eq '${property.ProductID}'&$top=10", authType: 'OAuth2 Client Credentials', credentialName: 'DUMMY_ODATA_OAUTH', proxyType: 'Internet' }
+    ],
+    end: { type: 'none' },
+    parameters: { OData_Address: 'http://s4dummy:443/sap/opu/odata/sap/ZDUMMY_SRV', OData_Credential: 'DUMMY_ODATA_CRED', OData_Location: 'DUMMY_LOC' }
+  }
+  const zipOf = async (s) => Buffer.from((await build(s)).zipBase64, 'base64')
+  const flows = async (buf) => {
+    const zip = await JSZip.loadAsync(buf)
+    const iflw = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('.iflw'))).async('string')
+    return iflw.match(/<bpmn2:messageFlow[\s\S]*?<\/bpmn2:messageFlow>/g).map((m) => m.replace(/ (id|sourceRef|targetRef)="[^"]*"/g, '')).sort()
+  }
+  const refs = async (buf) => {
+    const zip = await JSZip.loadAsync(buf)
+    const propdef = await zip.file(Object.keys(zip.files).find((f) => f.endsWith('parameters.propdef'))).async('string')
+    return [...propdef.matchAll(/<reference [^>]*\/>/g)].map((m) => m[0]).sort()
+  }
+  /** the export with one text of its iFlow replaced */
+  const changedExport = async (from, to) => {
+    const zip = await JSZip.loadAsync(readRef('Ref_Receiver_OData.zip'))
+    const file = Object.keys(zip.files).find((f) => f.endsWith('.iflw'))
+    const before = await zip.file(file).async('string')
+    const after = before.replace(from, to)
+    expect(after).not.toBe(before)
+    zip.file(file, after)
+    return zip.generateAsync({ type: 'nodebuffer' })
+  }
+
+  test('the spec is valid without warnings', () => {
+    expect(require('../srv/iflow-builder/validator').validate(spec)).toMatchObject({ valid: true, errors: [], warnings: [] })
+  })
+
+  test('both receivers (Create On-Premise with three parameters, Query over the Internet with OAuth2) and the parameter references are as in the export', async () => {
+    const built = await zipOf(spec)
+    expect(await flows(built)).toEqual(await flows(readRef('Ref_Receiver_OData.zip')))
+    expect(await refs(built)).toEqual(await refs(readRef('Ref_Receiver_OData.zip')))
+  })
+
+  test('the address may be a parameter over the Internet too, with the reference the editor writes', async () => {
+    const internet = { ...spec, steps: [spec.steps[0], { ...spec.steps[2], url: '{{Query_Address}}' }], parameters: { Query_Address: 'https://odata.example.com/sap/opu/odata/sap/ZDUMMY_SRV' } }
+    expect(require('../srv/iflow-builder/validator').validate(internet)).toMatchObject({ valid: true, warnings: [] })
+    expect(await refs(await zipOf(internet))).toEqual([expect.stringContaining('attribute_category="RCV_OData_Query.Receiver.System" attribute_id="ctype::AdapterVariant/cname::HCIOData/tp::HTTP/mp::OData V2/direction::Receiver/version::1.32.1/attrId::address" attribute_uilabel="Address" param_key="Query_Address"')])
+  })
+
+  test('update and Import keep both calls and the parameters', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    const update = specFromParsed(await parse(readRef('Ref_Receiver_OData.zip')), { packageId: 'iglowpackage' })
+    expect(update.blockers).toEqual([])
+    expect(update.spec).toEqual(spec)
+    const imported = await importIflow(readRef('Ref_Receiver_OData.zip'), { fileName: 'Ref_Receiver_OData.zip', packageId: 'iglowpackage' })
+    expect(imported).toMatchObject({ valid: true, errors: [], placeholders: 0 })
+    expect({ steps: imported.spec.steps, end: imported.spec.end, parameters: imported.spec.parameters }).toEqual({ steps: spec.steps, end: spec.end, parameters: spec.parameters })
+  })
+
+  test('a setting the builder does not write: the update is blocked, Import puts a placeholder where the call was', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const { importIflow } = require('../srv/iflow-builder/import')
+    // an operation the spec does not hold, on the Query receiver
+    const changed = await changedExport('<value>Query(GET)</value>', '<value>Read(GET)</value>')
+    expect(specFromParsed(await parse(changed), { packageId: 'iglowpackage' }).blockers.join()).toMatch(/receiver RCV_OData_Query: the operation is 'Read\(GET\)' \(the builder writes Query\(GET\) or Create\(POST\)\)/)
+    const imported = await importIflow(changed, { fileName: 'x.zip', packageId: 'iglowpackage' })
+    expect(imported.placeholders).toBe(1)
+    expect(imported.spec.steps[2]).toMatchObject({ name: 'RR_ODataQuery', description: expect.stringMatching(/^REPLACE WITH OData V2 request-reply/) })
+  })
+
+  test('a fixed setting as a parameter (the timeout): blocked, and a placeholder on Import', async () => {
+    const { specFromParsed } = require('../srv/iflow-builder/to-spec')
+    const changed = await changedExport(/(<key>receiveTimeOut<\/key>\s*)<value>1<\/value>/, '$1<value>{{OData_Timeout}}</value>')
+    expect(specFromParsed(await parse(changed), { packageId: 'iglowpackage' }).blockers.join()).toMatch(/receiver RCV_OData_(Create|Query): receiveTimeOut is '\{\{OData_Timeout\}\}' \(the builder writes '1'\)/)
+  })
+})
+
 describe('placeholders survive the iFlow: Import and update recognise a REPLACE_WITH step (phase 6)', () => {
   const spec = {
     id: 'Placeholder_Again',

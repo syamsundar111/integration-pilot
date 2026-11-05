@@ -140,6 +140,20 @@
       "Override": "Handling for Existing Files Override, selected in Ref_Receiver_SFTP (both receivers, built from scratch), 2026-11-04"
     }
   },
+  "OData Receiver": {
+    "authenticationMethod": {
+      "Basic": "Basic, selected in Ref_Receiver_OData (RCV_OData_Create, built from scratch in the CPI editor), 2026-11-04",
+      "OAuth2ClientCredentials": "OAuth2 Client Credentials, selected in Ref_Receiver_OData (RCV_OData_Query, built from scratch), 2026-11-04"
+    },
+    "proxyType": {
+      "sapcc": "On-Premise, selected in Ref_Receiver_OData (RCV_OData_Create, built from scratch), 2026-11-04",
+      "default": "Internet, selected in Ref_Receiver_OData (RCV_OData_Query, built from scratch), 2026-11-04"
+    },
+    "operation": {
+      "Create(POST)": "Create(POST), selected in Ref_Receiver_OData (RCV_OData_Create, built from scratch), 2026-11-04",
+      "Query(GET)": "Query(GET), selected in Ref_Receiver_OData (RCV_OData_Query, built from scratch), 2026-11-04"
+    }
+  },
   "SOAP Receiver": {
     "authentication": {
       "Basic": "re-selected in Ref_Receivers (RR_Soap), confirmed 2026-10-30"
