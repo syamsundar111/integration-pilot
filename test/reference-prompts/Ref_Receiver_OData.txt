@@ -1,0 +1,23 @@
+Create iFlow Ref_Receiver_OData in package iglowpackage (built from scratch in the CPI editor).
+
+Main integration process:
+1. Timer - Timer start event: Simple Schedule, Repeat None, Schedule On Deployment.
+2. CM_Prepare - Content Modifier. Message Body, Type Constant,
+   Body <Products><Product><ProductID>1</ProductID><Name>Dummy</Name></Product></Products>.
+3. RR_ODataCreate - Request Reply to receiver RCV_OData_Create, OData adapter, OData V2:
+   Connection: Proxy Type On-Premise, Authentication Basic. Externalized, with dummy defaults:
+   - Address {{OData_Address}} = http://s4dummy:443/sap/opu/odata/sap/ZDUMMY_SRV
+   - Location ID {{OData_Location}} = DUMMY_LOC
+   - Credential Name {{OData_Credential}} = DUMMY_ODATA_CRED
+   Processing: Operation Details Create(POST), Resource Path Products.
+4. RR_ODataQuery - Request Reply to receiver RCV_OData_Query, OData adapter, OData V2:
+   Connection: Address https://odata.example.com/sap/opu/odata/sap/ZDUMMY_SRV, Proxy Type Internet,
+   Authentication OAuth2 Client Credentials, Credential Name DUMMY_ODATA_OAUTH.
+   Processing: Operation Details Query(GET), Resource Path Products,
+   Query Options $select=ProductID,Name&$filter=ProductID eq '${property.ProductID}'&$top=10.
+5. End - Message End.
+
+Left at their defaults on both receivers: Timeout, CSRF Protected, Reuse Connection (checked), Delete Idle
+Connection (unchecked), Fields, Attach Error Details on Failure (checked), Content Type Atom, Content Type
+Encoding None, Page Size, Process in Pages, Custom Query Options, Request/Response Headers, Enable Batch
+Processing, and the Retry tab.
